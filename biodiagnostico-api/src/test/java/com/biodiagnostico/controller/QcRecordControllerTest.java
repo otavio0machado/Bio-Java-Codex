@@ -1,0 +1,231 @@
+package com.biodiagnostico.controller;
+
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.biodiagnostico.config.SecurityConfig;
+import com.biodiagnostico.dto.request.PostCalibrationRequest;
+import com.biodiagnostico.dto.response.QcRecordResponse;
+import com.biodiagnostico.entity.PostCalibrationRecord;
+import com.biodiagnostico.exception.BusinessException;
+import com.biodiagnostico.exception.GlobalExceptionHandler;
+import com.biodiagnostico.exception.ResourceNotFoundException;
+import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.security.JwtAuthFilter;
+import com.biodiagnostico.service.PostCalibrationService;
+import com.biodiagnostico.service.QcService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.web.servlet.MockMvc;
+
+@WebMvcTest(QcRecordController.class)
+@Import({SecurityConfig.class, GlobalExceptionHandler.class, QcRecordControllerTest.NoOpJwtFilterConfig.class})
+class QcRecordControllerTest {
+
+    private static final String TEST_JWT_SECRET = "testsecretkeythatisfarlongerthanthirtytwobytesforjwt";
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private StubQcService qcService;
+
+    @Autowired
+    private StubPostCalibrationService postCalibrationService;
+
+    @Test
+    @DisplayName("deve retornar 200 ao listar registros")
+    void shouldReturn200WhenGettingRecords() throws Exception {
+        qcService.records = List.of(response());
+
+        mockMvc.perform(get("/api/qc/records").with(user("ana").roles("ANALYST")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].examName").value("Glicose"));
+    }
+
+    @Test
+    @DisplayName("deve retornar 201 ao criar registro")
+    void shouldReturn201WhenCreatingRecord() throws Exception {
+        qcService.createResponse = response();
+
+        mockMvc.perform(post("/api/qc/records")
+                .with(user("ana").roles("ANALYST"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(validRequest())))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.status").value("APROVADO"));
+    }
+
+    @Test
+    @DisplayName("deve retornar 400 quando request é inválido")
+    void shouldReturn400WhenRequestIsInvalid() throws Exception {
+        mockMvc.perform(post("/api/qc/records")
+                .with(user("ana").roles("ANALYST"))
+                .contentType("application/json")
+                .content("{}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("deve retornar 404 quando registro não existe")
+    void shouldReturn404WhenRecordNotFound() throws Exception {
+        qcService.recordException = new ResourceNotFoundException("Registro não encontrado");
+
+        mockMvc.perform(get("/api/qc/records/" + UUID.randomUUID()).with(user("ana").roles("ANALYST")))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("deve retornar 401 quando não autenticado")
+    void shouldReturn401WhenNotAuthenticated() throws Exception {
+        mockMvc.perform(get("/api/qc/records"))
+            .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("deve retornar 201 ao registrar pós-calibração")
+    void shouldReturn201WhenCreatingPostCalibration() throws Exception {
+        postCalibrationService.createResponse = PostCalibrationRecord.builder()
+            .id(UUID.randomUUID())
+            .qcRecord(QcRecord.builder().id(UUID.randomUUID()).build())
+            .date(LocalDate.now())
+            .examName("Glicose")
+            .originalValue(112D)
+            .originalCv(12D)
+            .postCalibrationValue(101D)
+            .postCalibrationCv(1D)
+            .targetValue(100D)
+            .analyst("Ana")
+            .notes("Recalibração ok")
+            .build();
+
+        mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
+                .with(user("ana").roles("ANALYST"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.examName").value("Glicose"))
+            .andExpect(jsonPath("$.postCalibrationValue").value(101D));
+    }
+
+    @Test
+    @DisplayName("deve retornar 400 quando pós-calibração viola regra de negócio")
+    void shouldReturn400WhenPostCalibrationViolatesBusinessRule() throws Exception {
+        postCalibrationService.createException = new BusinessException("A pós-calibração só pode ser registrada quando existe pendência corretiva ativa no registro de CQ.");
+
+        mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
+                .with(user("ana").roles("ANALYST"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("A pós-calibração só pode ser registrada quando existe pendência corretiva ativa no registro de CQ."));
+    }
+
+    @TestConfiguration
+    static class NoOpJwtFilterConfig {
+        @Bean
+        StubQcService stubQcService() {
+            return new StubQcService();
+        }
+
+        @Bean
+        StubPostCalibrationService postCalibrationService() {
+            return new StubPostCalibrationService();
+        }
+
+        @Bean
+        com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
+            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, 900_000, 604_800_000);
+        }
+
+        @Bean
+        JwtAuthFilter jwtAuthFilter(com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider) {
+            return new JwtAuthFilter(jwtTokenProvider);
+        }
+    }
+
+    static class StubPostCalibrationService extends PostCalibrationService {
+        private PostCalibrationRecord createResponse;
+        private RuntimeException createException;
+
+        StubPostCalibrationService() {
+            super(null, null);
+        }
+
+        @Override
+        public PostCalibrationRecord createPostCalibration(UUID qcRecordId, PostCalibrationRequest request) {
+            if (createException != null) {
+                throw createException;
+            }
+            return createResponse;
+        }
+    }
+
+    static class StubQcService extends QcService {
+        private List<QcRecordResponse> records = List.of();
+        private QcRecordResponse createResponse;
+        private RuntimeException recordException;
+
+        StubQcService() {
+            super(null, null, new com.biodiagnostico.service.WestgardEngine(), null);
+        }
+
+        @Override
+        public List<QcRecordResponse> getRecords(String area, String examName, LocalDate startDate, LocalDate endDate) {
+            return records;
+        }
+
+        @Override
+        public QcRecordResponse createRecord(com.biodiagnostico.dto.request.QcRecordRequest request) {
+            return createResponse;
+        }
+
+        @Override
+        public QcRecordResponse getRecord(UUID id) {
+            if (recordException != null) {
+                throw recordException;
+            }
+            return createResponse;
+        }
+    }
+
+    private QcRecordResponse response() {
+        return new QcRecordResponse(
+            UUID.randomUUID(), null, "Glicose", "bioquimica", LocalDate.now(), "Normal", "L1",
+            100D, 100D, 5D, 5D, 10D, 1D, "AU680", "Ana", "APROVADO", false, List.of(),
+            Instant.now(), Instant.now()
+        );
+    }
+
+    private Object validRequest() {
+        return new Object() {
+            public final String examName = "Glicose";
+            public final String area = "bioquimica";
+            public final String date = LocalDate.now().toString();
+            public final String level = "Normal";
+            public final String lotNumber = "L1";
+            public final double value = 100D;
+            public final double targetValue = 100D;
+            public final double targetSd = 5D;
+            public final double cvLimit = 10D;
+            public final String equipment = "AU680";
+            public final String analyst = "Ana";
+        };
+    }
+}

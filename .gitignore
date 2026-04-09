@@ -1,0 +1,59 @@
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and local-only files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+
+# Java / Maven / Spring
+**/target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+**/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+*.class
+
+# Node / Vite
+**/node_modules/
+**/dist/
+**/dist-ssr/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.venv/
+**/venv/
+**/env/
+
+# Temporary uploads and generated files
+uploaded_files/
+htmlcov/
+.coverage
+.coverage.*
+
+# Local app secrets
+**/.streamlit/secrets.toml

@@ -1,0 +1,94 @@
+version = 1
+
+[project]
+name = "biodiagnostico-lab-migration"
+root = "."
+workspace_mode = "multi-project"
+project_root_markers = ["AGENTS.md", "PLANS.md", ".codex"]
+system_files = [
+  "AGENTS.md",
+  "PLANS.md",
+  ".codex/config.toml",
+  ".codex/skills/lab_migration/SKILL.md"
+]
+
+[workspace]
+backend_root = "biodiagnostico-api"
+frontend_root = "biodiagnostico-web"
+migration_docs_root = "transicao-java"
+legacy_reference_roots = ["tudo para a transicao", "cursor-bio-compulabxsimus"]
+notes = "A raiz atual funciona como workspace de projeto, não como um único git root."
+
+model = "gpt-5.4"
+reasoning_effort = "high"
+
+[safety]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+network_access = "restricted"
+protect_paths = [
+  "biodiagnostico-web/node_modules",
+  "biodiagnostico-web/dist",
+  "biodiagnostico-api/target",
+  "cursor-bio-compulabxsimus/.git"
+]
+require_explicit_review_for = [
+  "mudancas de schema ou SQL",
+  "autenticacao e seguranca",
+  "regras de Westgard",
+  "calculo ou interpretacao de media",
+  "calculo ou interpretacao de desvio padrao",
+  "calculo ou interpretacao de CV",
+  "logica de aprovacao ou reprovacao",
+  "decisao de calibracao ou pos-calibracao",
+  "operacoes em lote destrutivas",
+  "scripts de migracao de dados"
+]
+
+[agents]
+# Agent role tables go under [agents.<role>]
+max_threads = 3
+max_depth = 6
+
+[agents.default]
+name = "orchestrator"
+display_name = "Orchestrator"
+model = "gpt-5.4"
+reasoning_effort = "high"
+allow_code_changes = false
+allow_shell = false
+write_scope = "none"
+recommended_skill = ".codex/skills/lab_migration/SKILL.md"
+handoff_to = [
+  "context_engineer",
+  "architect",
+  "backend_engineer",
+  "frontend_engineer",
+  "qa_engineer",
+  "domain_auditor",
+  "refactor_engineer",
+  "release_engineer"
+]
+[workflow]
+require_context_packet = true
+allow_architect_bypass_for_small_local_tasks = true
+architecture_note_required_for = ["medium", "large", "critical", "contractual", "cross-layer"]
+domain_audit_required_for = [
+  "westgard",
+  "referencia",
+  "registro de medicao",
+  "lote",
+  "historico",
+  "media",
+  "desvio padrao",
+  "CV",
+  "calibracao",
+  "pos-calibracao"
+]
+release_engineer_required_to_close = true
+
+[validation]
+backend_required_command = "cd biodiagnostico-api && ./mvnw test"
+frontend_required_command = "cd biodiagnostico-web && npm run build"
+frontend_optional_test_command = "cd biodiagnostico-web && npm run test"
+prefer_small_verified_slices = true
