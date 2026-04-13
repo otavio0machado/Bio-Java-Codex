@@ -17,6 +17,7 @@ spring:
 
 jwt:
   secret: localdevsecretthatislongenoughforjwtandtestingpurposes
+  issuer: biodiagnostico-api-local
 
 cors:
   allowed-origins: http://localhost:5173
@@ -29,5 +30,12 @@ management:
 
 app:
   frontend-url: http://localhost:5173
+  auth:
+    refresh-cookie:
+      secure: false
+      same-site: Lax
+    login-rate-limit:
+      max-attempts: 20
+      window-seconds: 60
   password-reset:
     expose-link-in-response: true

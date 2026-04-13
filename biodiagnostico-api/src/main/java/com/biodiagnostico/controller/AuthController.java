@@ -8,12 +8,16 @@ import com.biodiagnostico.dto.request.ResetPasswordRequest;
 import com.biodiagnostico.dto.response.AuthResponse;
 import com.biodiagnostico.dto.response.PasswordResetResponse;
 import com.biodiagnostico.dto.response.UserResponse;
+import com.biodiagnostico.security.TokenCookieService;
 import com.biodiagnostico.service.AuthService;
 import com.biodiagnostico.service.PasswordResetService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,20 +29,50 @@ public class AuthController {
 
     private final AuthService authService;
     private final PasswordResetService passwordResetService;
+    private final TokenCookieService tokenCookieService;
 
-    public AuthController(AuthService authService, PasswordResetService passwordResetService) {
+    public AuthController(
+        AuthService authService,
+        PasswordResetService passwordResetService,
+        TokenCookieService tokenCookieService
+    ) {
         this.authService = authService;
         this.passwordResetService = passwordResetService;
+        this.tokenCookieService = tokenCookieService;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(
+        @Valid @RequestBody LoginRequest request,
+        HttpServletResponse response
+    ) {
+        AuthService.IssuedAuthSession authSession = authService.login(request);
+        response.addHeader(
+            "Set-Cookie",
+            tokenCookieService.createRefreshCookieValue(
+                authSession.refreshToken(),
+                authService.getRefreshTokenCookieMaxAgeSeconds()
+            )
+        );
+        return ResponseEntity.ok(authSession.response());
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
-        return ResponseEntity.ok(authService.refreshToken(request));
+    public ResponseEntity<AuthResponse> refresh(
+        @RequestBody(required = false) RefreshTokenRequest request,
+        HttpServletRequest httpRequest,
+        HttpServletResponse response
+    ) {
+        String refreshToken = resolveRefreshToken(httpRequest, request);
+        AuthService.IssuedAuthSession authSession = authService.refreshToken(refreshToken);
+        response.addHeader(
+            "Set-Cookie",
+            tokenCookieService.createRefreshCookieValue(
+                authSession.refreshToken(),
+                authService.getRefreshTokenCookieMaxAgeSeconds()
+            )
+        );
+        return ResponseEntity.ok(authSession.response());
     }
 
     @PostMapping("/register")
@@ -55,5 +89,31 @@ public class AuthController {
     @PostMapping("/reset-password")
     public ResponseEntity<PasswordResetResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         return ResponseEntity.ok(passwordResetService.resetPassword(request));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(
+        HttpServletRequest request,
+        HttpServletResponse response
+    ) {
+        authService.logout(resolveAccessToken(request), tokenCookieService.resolveRefreshToken(request));
+        response.addHeader("Set-Cookie", tokenCookieService.clearRefreshCookieValue());
+        return ResponseEntity.noContent().build();
+    }
+
+    private String resolveRefreshToken(HttpServletRequest request, RefreshTokenRequest body) {
+        String cookieRefreshToken = tokenCookieService.resolveRefreshToken(request);
+        if (StringUtils.hasText(cookieRefreshToken)) {
+            return cookieRefreshToken;
+        }
+        return body == null ? null : body.refreshToken();
+    }
+
+    private String resolveAccessToken(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization != null && authorization.startsWith("Bearer ")) {
+            return authorization.substring(7);
+        }
+        return null;
     }
 }

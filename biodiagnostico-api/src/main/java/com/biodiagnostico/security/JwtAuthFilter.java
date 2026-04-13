@@ -17,15 +17,24 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final AccessTokenBlacklistService accessTokenBlacklistService;
 
-    public JwtAuthFilter(JwtTokenProvider jwtTokenProvider) {
+    public JwtAuthFilter(
+        JwtTokenProvider jwtTokenProvider,
+        AccessTokenBlacklistService accessTokenBlacklistService
+    ) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.accessTokenBlacklistService = accessTokenBlacklistService;
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getServletPath();
-        return path.startsWith("/api/auth/") || "/actuator/health".equals(path);
+        return "/actuator/health".equals(path)
+            || "/api/auth/login".equals(path)
+            || "/api/auth/refresh".equals(path)
+            || "/api/auth/forgot-password".equals(path)
+            || "/api/auth/reset-password".equals(path);
     }
 
     @Override
@@ -37,19 +46,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header != null && header.startsWith("Bearer ")) {
             String token = header.substring(7);
-            if (jwtTokenProvider.isTokenValid(token)) {
-                String email = jwtTokenProvider.getEmail(token);
-                String role = jwtTokenProvider.getRole(token);
-                UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(
-                        email,
-                        null,
-                        role == null
-                            ? List.of()
-                            : List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                    );
-                authentication.setDetails(jwtTokenProvider.getUserId(token));
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+            if (jwtTokenProvider.isAccessTokenValid(token)) {
+                JwtTokenProvider.TokenDetails details = jwtTokenProvider.validateAccessToken(token);
+                if (!accessTokenBlacklistService.isBlacklisted(details.tokenId())) {
+                    UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(
+                            details.email(),
+                            null,
+                            List.of(new SimpleGrantedAuthority("ROLE_" + details.role()))
+                        );
+                    authentication.setDetails(details.userId());
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             }
         }
         filterChain.doFilter(request, response);

@@ -2,6 +2,7 @@ package com.biodiagnostico.security;
 
 import com.biodiagnostico.entity.User;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.io.Decoders;
@@ -17,69 +18,135 @@ import org.springframework.stereotype.Component;
 @Component
 public class JwtTokenProvider {
 
+    public enum TokenType {
+        ACCESS,
+        REFRESH
+    }
+
+    public record TokenDetails(
+        UUID userId,
+        UUID tokenId,
+        UUID familyId,
+        String email,
+        String role,
+        TokenType tokenType,
+        Instant expiration
+    ) {
+    }
+
     private final SecretKey secretKey;
+    private final String issuer;
     private final long accessTokenExpiry;
     private final long refreshTokenExpiry;
+    private final JwtParser jwtParser;
 
     public JwtTokenProvider(
         @Value("${jwt.secret}") String secret,
+        @Value("${jwt.issuer:biodiagnostico-api}") String issuer,
         @Value("${jwt.access-token-expiry}") long accessTokenExpiry,
         @Value("${jwt.refresh-token-expiry}") long refreshTokenExpiry
     ) {
         this.secretKey = buildKey(secret);
+        this.issuer = issuer;
         this.accessTokenExpiry = accessTokenExpiry;
         this.refreshTokenExpiry = refreshTokenExpiry;
+        this.jwtParser = Jwts.parser()
+            .verifyWith(secretKey)
+            .requireIssuer(issuer)
+            .build();
     }
 
     public String generateAccessToken(User user) {
         Instant now = Instant.now();
+        UUID tokenId = UUID.randomUUID();
         return Jwts.builder()
             .subject(user.getId().toString())
+            .issuer(issuer)
             .claim("email", user.getEmail())
             .claim("role", user.getRole())
+            .claim("token_type", TokenType.ACCESS.name())
+            .id(tokenId.toString())
             .issuedAt(Date.from(now))
             .expiration(Date.from(now.plusMillis(accessTokenExpiry)))
             .signWith(secretKey)
             .compact();
     }
 
-    public String generateRefreshToken(User user) {
+    public String generateRefreshToken(User user, UUID tokenId, UUID familyId) {
         Instant now = Instant.now();
         return Jwts.builder()
             .subject(user.getId().toString())
+            .issuer(issuer)
+            .claim("token_type", TokenType.REFRESH.name())
+            .claim("family_id", familyId.toString())
+            .id(tokenId.toString())
             .issuedAt(Date.from(now))
             .expiration(Date.from(now.plusMillis(refreshTokenExpiry)))
             .signWith(secretKey)
             .compact();
     }
 
-    public boolean isTokenValid(String token) {
+    public TokenDetails validateAccessToken(String token) {
+        TokenDetails details = parseToken(token);
+        if (details.tokenType() != TokenType.ACCESS) {
+            throw new JwtException("Token não é do tipo ACCESS");
+        }
+        if (details.email() == null || details.role() == null) {
+            throw new JwtException("Claims obrigatórias ausentes no access token");
+        }
+        return details;
+    }
+
+    public TokenDetails validateRefreshToken(String token) {
+        TokenDetails details = parseToken(token);
+        if (details.tokenType() != TokenType.REFRESH) {
+            throw new JwtException("Token não é do tipo REFRESH");
+        }
+        if (details.familyId() == null) {
+            throw new JwtException("Family id ausente no refresh token");
+        }
+        return details;
+    }
+
+    public boolean isAccessTokenValid(String token) {
         try {
-            parseClaims(token);
+            validateAccessToken(token);
             return true;
         } catch (JwtException | IllegalArgumentException exception) {
             return false;
         }
     }
 
-    public UUID getUserId(String token) {
-        return UUID.fromString(parseClaims(token).getSubject());
+    public boolean isRefreshTokenValid(String token) {
+        try {
+            validateRefreshToken(token);
+            return true;
+        } catch (JwtException | IllegalArgumentException exception) {
+            return false;
+        }
     }
 
-    public String getEmail(String token) {
-        return parseClaims(token).get("email", String.class);
+    public long getRefreshTokenMaxAgeSeconds() {
+        return refreshTokenExpiry / 1000;
     }
 
-    public String getRole(String token) {
-        return parseClaims(token).get("role", String.class);
+    private TokenDetails parseToken(String token) {
+        Claims claims = parseClaims(token);
+        String tokenType = claims.get("token_type", String.class);
+        String familyId = claims.get("family_id", String.class);
+        return new TokenDetails(
+            UUID.fromString(claims.getSubject()),
+            UUID.fromString(claims.getId()),
+            familyId == null ? null : UUID.fromString(familyId),
+            claims.get("email", String.class),
+            claims.get("role", String.class),
+            TokenType.valueOf(tokenType),
+            claims.getExpiration().toInstant()
+        );
     }
 
     private Claims parseClaims(String token) {
-        return Jwts.parser()
-            .verifyWith(secretKey)
-            .build()
-            .parseSignedClaims(token)
-            .getPayload();
+        return jwtParser.parseSignedClaims(token).getPayload();
     }
 
     private SecretKey buildKey(String secret) {

@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.biodiagnostico.config.SecurityConfig;
 import com.biodiagnostico.exception.GlobalExceptionHandler;
+import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtAuthFilter;
 import com.biodiagnostico.service.PdfReportService;
 import org.junit.jupiter.api.DisplayName;
@@ -72,12 +73,20 @@ class ReportControllerTest {
 
         @Bean
         com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
-            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, 900_000, 604_800_000);
+            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, "test-issuer", 900_000, 604_800_000);
         }
 
         @Bean
-        JwtAuthFilter jwtAuthFilter(com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider) {
-            return new JwtAuthFilter(jwtTokenProvider);
+        AccessTokenBlacklistService accessTokenBlacklistService() {
+            return new AccessTokenBlacklistService();
+        }
+
+        @Bean
+        JwtAuthFilter jwtAuthFilter(
+            com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider,
+            AccessTokenBlacklistService accessTokenBlacklistService
+        ) {
+            return new JwtAuthFilter(jwtTokenProvider, accessTokenBlacklistService);
         }
     }
 

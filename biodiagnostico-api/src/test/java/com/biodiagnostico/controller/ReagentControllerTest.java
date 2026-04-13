@@ -13,6 +13,7 @@ import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.StockMovement;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.GlobalExceptionHandler;
+import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtAuthFilter;
 import com.biodiagnostico.service.ReagentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -140,12 +141,20 @@ class ReagentControllerTest {
 
         @Bean
         com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
-            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, 900_000, 604_800_000);
+            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, "test-issuer", 900_000, 604_800_000);
         }
 
         @Bean
-        JwtAuthFilter jwtAuthFilter(com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider) {
-            return new JwtAuthFilter(jwtTokenProvider);
+        AccessTokenBlacklistService accessTokenBlacklistService() {
+            return new AccessTokenBlacklistService();
+        }
+
+        @Bean
+        JwtAuthFilter jwtAuthFilter(
+            com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider,
+            AccessTokenBlacklistService accessTokenBlacklistService
+        ) {
+            return new JwtAuthFilter(jwtTokenProvider, accessTokenBlacklistService);
         }
     }
 

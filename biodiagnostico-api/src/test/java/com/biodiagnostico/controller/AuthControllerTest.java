@@ -2,6 +2,7 @@ package com.biodiagnostico.controller;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -10,11 +11,16 @@ import com.biodiagnostico.dto.response.AuthResponse;
 import com.biodiagnostico.dto.response.PasswordResetResponse;
 import com.biodiagnostico.dto.response.UserResponse;
 import com.biodiagnostico.exception.GlobalExceptionHandler;
+import com.biodiagnostico.filter.RateLimitFilter;
+import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtAuthFilter;
+import com.biodiagnostico.security.TokenCookieService;
 import com.biodiagnostico.service.AuthService;
 import com.biodiagnostico.service.PasswordResetService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.Cookie;
 import java.util.UUID;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +28,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(AuthController.class)
@@ -29,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class AuthControllerTest {
 
     private static final String TEST_JWT_SECRET = "testsecretkeythatisfarlongerthanthirtytwobytesforjwt";
+    private static final String TEST_JWT_ISSUER = "test-issuer";
 
     @Autowired
     private MockMvc mockMvc;
@@ -45,13 +53,14 @@ class AuthControllerTest {
     @Test
     @DisplayName("deve retornar 200 em login bem-sucedido")
     void shouldReturn200OnSuccessfulLogin() throws Exception {
-        authService.authResponse = authResponse();
+        authService.authSession = authSession();
 
         mockMvc.perform(post("/api/auth/login")
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new LoginBody())))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.accessToken").value("access"));
+            .andExpect(jsonPath("$.accessToken").value("access"))
+            .andExpect(header().string("Set-Cookie", Matchers.containsString("refresh_token=refresh")));
     }
 
     @Test
@@ -66,13 +75,15 @@ class AuthControllerTest {
     @Test
     @DisplayName("deve retornar 200 em refresh")
     void shouldReturn200OnTokenRefresh() throws Exception {
-        authService.authResponse = authResponse();
+        authService.authSession = authSession();
 
         mockMvc.perform(post("/api/auth/refresh")
+                .cookie(new Cookie("refresh_token", "refresh"))
                 .contentType("application/json")
                 .content("{\"refreshToken\":\"refresh\"}"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.refreshToken").value("refresh"));
+            .andExpect(jsonPath("$.accessToken").value("access"))
+            .andExpect(header().string("Set-Cookie", Matchers.containsString("refresh_token=refresh")));
     }
 
     @Test
@@ -89,6 +100,20 @@ class AuthControllerTest {
     }
 
     @Test
+    @DisplayName("deve retornar 201 em register com bearer token de admin")
+    void shouldReturn201OnRegisterWithAdminBearerToken() throws Exception {
+        authService.userResponse = userResponse();
+        String adminAccessToken = tokenProvider().generateAccessToken(adminUser());
+
+        mockMvc.perform(post("/api/auth/register")
+                .header("Authorization", "Bearer " + adminAccessToken)
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new RegisterBody())))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.email").value("novo@bio.com"));
+    }
+
+    @Test
     @DisplayName("deve retornar 403 em register sem admin")
     void shouldReturn403OnRegisterWithoutAdminRole() throws Exception {
         mockMvc.perform(post("/api/auth/register")
@@ -96,6 +121,18 @@ class AuthControllerTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new RegisterBody())))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("deve retornar 401 em register com refresh token")
+    void shouldReturn401OnRegisterWithRefreshToken() throws Exception {
+        String refreshToken = tokenProvider().generateRefreshToken(adminUser(), UUID.randomUUID(), UUID.randomUUID());
+
+        mockMvc.perform(post("/api/auth/register")
+                .header("Authorization", "Bearer " + refreshToken)
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new RegisterBody())))
+            .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -119,9 +156,20 @@ class AuthControllerTest {
 
         mockMvc.perform(post("/api/auth/reset-password")
                 .contentType("application/json")
-                .content("{\"token\":\"abc\",\"newPassword\":\"123456\"}"))
+                .content("{\"token\":\"abc\",\"newPassword\":\"Senha123\"}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.message").value("Senha redefinida com sucesso."));
+    }
+
+    @Test
+    @DisplayName("deve retornar 204 em logout e limpar cookie")
+    void shouldReturn204OnLogout() throws Exception {
+        mockMvc.perform(post("/api/auth/logout")
+                .with(user("admin").roles("ADMIN"))
+                .cookie(new Cookie("refresh_token", "refresh"))
+                .header("Authorization", "Bearer access"))
+            .andExpect(status().isNoContent())
+            .andExpect(header().string("Set-Cookie", Matchers.containsString("Max-Age=0")));
     }
 
     @TestConfiguration
@@ -137,40 +185,60 @@ class AuthControllerTest {
         }
 
         @Bean
-        com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
-            return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, 900_000, 604_800_000);
+        RateLimitFilter rateLimitFilter() {
+            return new RateLimitFilter(
+                Jackson2ObjectMapperBuilder.json().build(),
+                10,
+                60
+            );
         }
 
         @Bean
-        JwtAuthFilter jwtAuthFilter(com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider) {
-            return new JwtAuthFilter(jwtTokenProvider);
+        AccessTokenBlacklistService accessTokenBlacklistService() {
+            return new AccessTokenBlacklistService();
+        }
+
+        @Bean
+        com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
+            return tokenProvider();
+        }
+
+        @Bean
+        TokenCookieService tokenCookieService() {
+            return new TokenCookieService("refresh_token", "/api/auth", "", false, "Lax");
+        }
+
+        @Bean
+        JwtAuthFilter jwtAuthFilter(
+            com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider,
+            AccessTokenBlacklistService accessTokenBlacklistService
+        ) {
+            return new JwtAuthFilter(jwtTokenProvider, accessTokenBlacklistService);
         }
     }
 
     static class StubAuthService extends AuthService {
-        private AuthResponse authResponse;
+        private IssuedAuthSession authSession;
         private UserResponse userResponse;
 
         StubAuthService() {
             super(
                 null,
                 null,
-                new com.biodiagnostico.security.JwtTokenProvider(
-                    TEST_JWT_SECRET,
-                    900_000,
-                    604_800_000
-                )
+                tokenProvider(),
+                null,
+                new AccessTokenBlacklistService()
             );
         }
 
         @Override
-        public AuthResponse login(com.biodiagnostico.dto.request.LoginRequest request) {
-            return authResponse;
+        public IssuedAuthSession login(com.biodiagnostico.dto.request.LoginRequest request) {
+            return authSession;
         }
 
         @Override
-        public AuthResponse refreshToken(com.biodiagnostico.dto.request.RefreshTokenRequest request) {
-            return authResponse;
+        public IssuedAuthSession refreshToken(String refreshToken) {
+            return authSession;
         }
 
         @Override
@@ -197,12 +265,35 @@ class AuthControllerTest {
         }
     }
 
-    private AuthResponse authResponse() {
-        return new AuthResponse("access", "refresh", userResponse());
+    private AuthService.IssuedAuthSession authSession() {
+        return new AuthService.IssuedAuthSession(new AuthResponse("access", null, userResponse()), "refresh");
     }
 
     private UserResponse userResponse() {
         return new UserResponse(UUID.randomUUID(), "novo@bio.com", "Novo", "ADMIN", true);
+    }
+
+    private static com.biodiagnostico.security.JwtTokenProvider tokenProvider() {
+        return new com.biodiagnostico.security.JwtTokenProvider(
+            TEST_JWT_SECRET,
+            TEST_JWT_ISSUER,
+            900_000,
+            604_800_000
+        );
+    }
+
+    private UserResponse adminUserResponse() {
+        return new UserResponse(UUID.fromString("00000000-0000-0000-0000-000000000001"), "admin@bio.com", "Admin", "ADMIN", true);
+    }
+
+    private com.biodiagnostico.entity.User adminUser() {
+        return com.biodiagnostico.entity.User.builder()
+            .id(adminUserResponse().id())
+            .email(adminUserResponse().email())
+            .name(adminUserResponse().name())
+            .role(adminUserResponse().role())
+            .isActive(adminUserResponse().isActive())
+            .build();
     }
 
     private static final class LoginBody {
@@ -212,7 +303,7 @@ class AuthControllerTest {
 
     private static final class RegisterBody {
         public final String email = "novo@bio.com";
-        public final String password = "123456";
+        public final String password = "Senha123";
         public final String name = "Novo";
         public final String role = "ADMIN";
     }
