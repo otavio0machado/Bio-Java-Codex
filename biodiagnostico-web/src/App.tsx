@@ -2,10 +2,12 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AppLayout } from './components/layout/AppLayout'
 import { PrivateRoute } from './components/layout/PrivateRoute'
+import { RoleRoute } from './components/layout/RoleRoute'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
 const ProinPage = lazy(() => import('./pages/ProinPage').then((module) => ({ default: module.ProinPage })))
+const AdminPage = lazy(() => import('./pages/AdminPage').then((module) => ({ default: module.AdminPage })))
 const ResetPasswordPage = lazy(() =>
   import('./pages/ResetPasswordPage').then((module) => ({ default: module.ResetPasswordPage })),
 )
@@ -60,6 +62,16 @@ export default function App() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <ProinPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <RoleRoute roles={['ADMIN']}>
+                  <AdminPage />
+                </RoleRoute>
               </Suspense>
             }
           />

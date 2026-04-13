@@ -29,10 +29,14 @@ public final class ResponseMapper {
     public static UserResponse toUserResponse(User user) {
         return new UserResponse(
             user.getId(),
+            user.getUsername(),
             user.getEmail(),
             user.getName(),
-            user.getRole(),
-            user.getIsActive()
+            user.getRole().name(),
+            user.getIsActive(),
+            user.getPermissions() == null
+                ? java.util.List.of()
+                : user.getPermissions().stream().map(Enum::name).sorted().toList()
         );
     }
 

@@ -47,7 +47,8 @@ class QcServiceTest {
     @BeforeEach
     void setUp() {
         QcReferenceService referenceService = new QcReferenceService(referenceRepository, examRepository);
-        qcService = new QcService(recordRepository, referenceService, new WestgardEngine(), examRepository);
+        qcService = new QcService(recordRepository, referenceService, new WestgardEngine(), examRepository,
+            new AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()));
     }
 
     @Test

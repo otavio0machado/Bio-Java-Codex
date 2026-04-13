@@ -65,7 +65,7 @@ class ReagentControllerTest {
                 LocalDate.now(), 7, "ativo"));
 
         mockMvc.perform(post("/api/reagents")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isCreated())
@@ -90,7 +90,7 @@ class ReagentControllerTest {
             new StockMovementRequest("ENTRADA", 20D, "Ana", ""));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isCreated())
@@ -109,7 +109,7 @@ class ReagentControllerTest {
             new StockMovementRequest("SAIDA", 50D, "Ana", ""));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest())
@@ -126,7 +126,7 @@ class ReagentControllerTest {
 
         mockMvc.perform(get("/api/reagents/by-lot-number")
                 .param("lotNumber", "L123")
-                .with(user("ana").roles("ANALYST")))
+                .with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(2))
             .andExpect(jsonPath("$[0].lotNumber").value("L123"));

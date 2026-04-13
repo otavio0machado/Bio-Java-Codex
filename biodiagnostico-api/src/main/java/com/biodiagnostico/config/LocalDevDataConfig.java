@@ -52,15 +52,16 @@ public class LocalDevDataConfig {
     }
 
     private void seedAdminUser(UserRepository userRepository, PasswordEncoder passwordEncoder) {
-        if (userRepository.existsByEmail("admin@bio.com")) {
+        if (userRepository.existsByUsername("evandro")) {
             return;
         }
 
         userRepository.save(User.builder()
-            .email("admin@bio.com")
-            .passwordHash(passwordEncoder.encode("123456"))
-            .name("Administrador Local")
-            .role("ADMIN")
+            .username("evandro")
+            .name("Evandro Torres Machado")
+            .passwordHash(passwordEncoder.encode("eva123"))
+            .role(com.biodiagnostico.entity.Role.ADMIN)
+            .permissions(java.util.Set.of())
             .isActive(Boolean.TRUE)
             .build());
     }

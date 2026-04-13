@@ -9,12 +9,13 @@ import {
   useUpdateQcReference,
 } from '../../hooks/useQcRecords'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
-import { Button, Card, EmptyState, Input, Modal, Select, StatusBadge, TextArea, useToast } from '../ui'
-import { VoiceRecorderModal } from './VoiceRecorderModal'
+import { Button, Card, EmptyState, Input, Modal, Select, TextArea, useToast } from '../ui'
 
 interface ReferenciasTabProps {
   area: string
 }
+
+const todayStr = () => new Date().toISOString().slice(0, 10)
 
 const emptyReferenceForm: QcReferenceRequest = {
   examId: '',
@@ -25,7 +26,7 @@ const emptyReferenceForm: QcReferenceRequest = {
   targetValue: 0,
   targetSd: 0,
   cvMaxThreshold: 10,
-  validFrom: '',
+  validFrom: todayStr(),
   validUntil: '',
   notes: '',
 }
@@ -49,7 +50,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
 
   const openCreate = () => {
     setEditing(null)
-    setForm(emptyReferenceForm)
+    setForm({ ...emptyReferenceForm, validFrom: todayStr() })
     setIsModalOpen(true)
   }
 
@@ -73,7 +74,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
 
   const handleSave = async () => {
     if (!form.examId || !form.name) {
-      toast.warning('Preencha exame e nome da referência.')
+      toast.warning('Preencha o nome do registro e selecione o exame.')
       return
     }
     const payload: QcReferenceRequest = {
@@ -120,6 +121,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           area={area}
           exams={exams}
           form={form}
+          editing={editing}
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
           onSave={handleSave}
@@ -142,39 +144,69 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {filteredReferences.map((reference) => (
-          <Card key={reference.id} className="space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h4 className="font-semibold text-neutral-900">{reference.name}</h4>
-                <div className="text-sm text-neutral-500">
-                  {reference.exam.name} · {reference.level}
-                </div>
-              </div>
-              <StatusBadge status={reference.isActive ? 'ativo' : 'inativo'} />
-            </div>
-            <div className="space-y-2 text-sm text-neutral-600">
-              <div>Alvo: {reference.targetValue.toFixed(2)} ± {reference.targetSd.toFixed(2)}</div>
-              <div>CV máx: {reference.cvMaxThreshold.toFixed(2)}%</div>
-              <div>Validade: {reference.validUntil ? new Date(reference.validUntil).toLocaleDateString('pt-BR') : 'Sem data final'}</div>
-            </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" className="flex-1" onClick={() => openEdit(reference)} icon={<Pencil className="h-4 w-4" />}>
-                Editar
-              </Button>
-              <Button variant="danger" className="flex-1" onClick={() => void handleDelete(reference.id)} icon={<Trash2 className="h-4 w-4" />}>
-                Excluir
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
+                <th className="px-3 py-2.5">Nome</th>
+                <th className="px-3 py-2.5">Exame</th>
+                <th className="px-3 py-2.5">Alvo</th>
+                <th className="px-3 py-2.5">DP</th>
+                <th className="px-3 py-2.5">CV Máx</th>
+                <th className="px-3 py-2.5">Validade</th>
+                <th className="px-3 py-2.5">Lote</th>
+                <th className="px-3 py-2.5">Fabricante</th>
+                <th className="px-3 py-2.5 text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReferences.map((reference) => (
+                <tr key={reference.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
+                  <td className="px-3 py-2.5 font-medium text-neutral-900">{reference.name}</td>
+                  <td className="px-3 py-2.5 text-neutral-700">{reference.exam.name}</td>
+                  <td className="px-3 py-2.5 font-mono text-neutral-700">{reference.targetValue.toFixed(2)}</td>
+                  <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.targetSd.toFixed(2)}</td>
+                  <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.cvMaxThreshold.toFixed(2)}%</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-neutral-600">
+                    {reference.validFrom ? formatDate(reference.validFrom) : '—'}
+                    {' → '}
+                    {reference.validUntil ? formatDate(reference.validUntil) : 'sem fim'}
+                  </td>
+                  <td className="px-3 py-2.5 text-neutral-600">{reference.lotNumber ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-neutral-600">{reference.manufacturer ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    <div className="flex justify-center gap-1">
+                      <button
+                        type="button"
+                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                        onClick={() => openEdit(reference)}
+                        title="Editar"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
+                        onClick={() => void handleDelete(reference.id)}
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       <ReferenceModal
         area={area}
         exams={exams}
         form={form}
+        editing={editing}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSave={handleSave}
@@ -185,10 +217,19 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   )
 }
 
+function formatDate(value: string) {
+  try {
+    return new Date(value + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  } catch {
+    return value
+  }
+}
+
 interface ReferenceModalProps {
   area: string
   exams: QcExam[]
   form: QcReferenceRequest
+  editing: QcReferenceValue | null
   isOpen: boolean
   onClose: () => void
   onSave: () => void
@@ -196,11 +237,13 @@ interface ReferenceModalProps {
   isSaving: boolean
 }
 
-function ReferenceModal({ area, exams, form, isOpen, onClose, onSave, setForm, isSaving }: ReferenceModalProps) {
+function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, setForm, isSaving }: ReferenceModalProps) {
   const { toast } = useToast()
   const createExam = useCreateQcExam()
   const [showNewExam, setShowNewExam] = useState(false)
   const [newExamName, setNewExamName] = useState('')
+  const [showNewName, setShowNewName] = useState(false)
+  const [newRegName, setNewRegName] = useState('')
 
   const handleCreateExam = async () => {
     if (!newExamName.trim()) {
@@ -218,11 +261,21 @@ function ReferenceModal({ area, exams, form, isOpen, onClose, onSave, setForm, i
     }
   }
 
+  const handleAddName = () => {
+    if (!newRegName.trim()) {
+      toast.warning('Informe o nome do registro.')
+      return
+    }
+    setForm((current) => ({ ...current, name: newRegName.trim() }))
+    setNewRegName('')
+    setShowNewName(false)
+  }
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Referência de CQ"
+      title={editing ? 'Editar Referência' : 'Nova Referência de CQ'}
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>
@@ -234,34 +287,45 @@ function ReferenceModal({ area, exams, form, isOpen, onClose, onSave, setForm, i
         </div>
       }
     >
-      <div className="mb-4 flex justify-end">
-        <VoiceRecorderModal
-          formType="referencia"
-          title="Preencher referência por voz"
-          onApply={(data) => {
-            const examId = typeof data.exam_name === 'string'
-              ? exams.find((exam) => exam.name.toUpperCase() === data.exam_name?.toString().toUpperCase())?.id ?? form.examId
-              : form.examId
-            setForm((current) => ({
-              ...current,
-              examId,
-              name: typeof data.name === 'string' ? data.name : current.name,
-              level: typeof data.level === 'string' ? data.level : current.level,
-              validFrom: typeof data.valid_from === 'string' ? data.valid_from : current.validFrom,
-              validUntil: typeof data.valid_until === 'string' ? data.valid_until : current.validUntil,
-              targetValue: typeof data.target_value === 'number' ? data.target_value : current.targetValue,
-              cvMaxThreshold: typeof data.cv_max === 'number' ? data.cv_max : current.cvMaxThreshold,
-              lotNumber: typeof data.lot_number === 'string' ? data.lot_number : current.lotNumber,
-              manufacturer: typeof data.manufacturer === 'string' ? data.manufacturer : current.manufacturer,
-              notes: typeof data.notes === 'string' ? data.notes : current.notes,
-            }))
-          }}
-        />
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="space-y-4">
+        {/* Nome do Registro */}
         <div className="space-y-2">
-          <Select label="Exame" value={form.examId} onChange={(event) => setForm((current) => ({ ...current, examId: event.target.value }))}>
-            <option value="">Selecione</option>
+          <Input
+            label="Nome do Registro"
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Ex: Controle Normal Glicose"
+          />
+          {!showNewName ? (
+            <button
+              type="button"
+              onClick={() => setShowNewName(true)}
+              className="text-sm font-medium text-green-700 hover:text-green-800"
+            >
+              + Adicionar nome rápido
+            </button>
+          ) : (
+            <div className="flex items-end gap-2 rounded-xl bg-neutral-50 p-3">
+              <Input
+                label="Novo nome"
+                value={newRegName}
+                onChange={(event) => setNewRegName(event.target.value)}
+                placeholder="Ex: CQ Colesterol Normal"
+              />
+              <Button size="sm" onClick={handleAddName}>
+                Usar
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowNewName(false); setNewRegName('') }}>
+                Cancelar
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* Nome do Exame */}
+        <div className="space-y-2">
+          <Select label="Nome do Exame" value={form.examId} onChange={(event) => setForm((current) => ({ ...current, examId: event.target.value }))}>
+            <option value="">Selecione o exame</option>
             {exams.map((exam) => (
               <option key={exam.id} value={exam.id}>
                 {exam.name}
@@ -274,7 +338,7 @@ function ReferenceModal({ area, exams, form, isOpen, onClose, onSave, setForm, i
               onClick={() => setShowNewExam(true)}
               className="text-sm font-medium text-green-700 hover:text-green-800"
             >
-              + Criar novo exame
+              + Adicionar exame
             </button>
           ) : (
             <div className="flex items-end gap-2 rounded-xl bg-neutral-50 p-3">
@@ -293,24 +357,69 @@ function ReferenceModal({ area, exams, form, isOpen, onClose, onSave, setForm, i
             </div>
           )}
         </div>
-        <Input label="Nome" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-        <Select label="Nível" value={form.level} onChange={(event) => setForm((current) => ({ ...current, level: event.target.value }))}>
-          {['Normal', 'N1', 'N2', 'N3', 'Patológico', 'Alto', 'Baixo'].map((level) => (
-            <option key={level} value={level}>
-              {level}
-            </option>
-          ))}
-        </Select>
-        <Input label="Lote" value={form.lotNumber} onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))} />
-        <Input label="Fabricante" value={form.manufacturer} onChange={(event) => setForm((current) => ({ ...current, manufacturer: event.target.value }))} />
-        <Input label="Valor alvo" type="number" step="0.01" value={String(form.targetValue)} onChange={(event) => setForm((current) => ({ ...current, targetValue: Number(event.target.value) }))} />
-        <Input label="Desvio padrão" type="number" step="0.01" value={String(form.targetSd)} onChange={(event) => setForm((current) => ({ ...current, targetSd: Number(event.target.value) }))} />
-        <Input label="CV máximo" type="number" step="0.01" value={String(form.cvMaxThreshold)} onChange={(event) => setForm((current) => ({ ...current, cvMaxThreshold: Number(event.target.value) }))} />
-        <Input label="Válido de" type="date" value={form.validFrom} onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))} />
-        <Input label="Válido até" type="date" value={form.validUntil} onChange={(event) => setForm((current) => ({ ...current, validUntil: event.target.value }))} />
-      </div>
-      <div className="mt-4">
-        <TextArea label="Observações" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+
+        {/* Validades + Valores */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Input
+            label="Válido a partir de"
+            type="date"
+            value={form.validFrom}
+            onChange={(event) => setForm((current) => ({ ...current, validFrom: event.target.value }))}
+          />
+          <Input
+            label="Válido até (opcional)"
+            type="date"
+            value={form.validUntil}
+            onChange={(event) => setForm((current) => ({ ...current, validUntil: event.target.value }))}
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <Input
+            label="Valor Alvo (Média de Controle)"
+            type="number"
+            step="0.01"
+            value={String(form.targetValue)}
+            onChange={(event) => setForm((current) => ({ ...current, targetValue: Number(event.target.value) }))}
+          />
+          <Input
+            label="Desvio Padrão"
+            type="number"
+            step="0.01"
+            value={String(form.targetSd)}
+            onChange={(event) => setForm((current) => ({ ...current, targetSd: Number(event.target.value) }))}
+          />
+          <Input
+            label="CV Máximo (%)"
+            type="number"
+            step="0.01"
+            value={String(form.cvMaxThreshold)}
+            onChange={(event) => setForm((current) => ({ ...current, cvMaxThreshold: Number(event.target.value) }))}
+          />
+        </div>
+
+        {/* Opcionais */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <Input
+            label="Lote (opcional)"
+            value={form.lotNumber}
+            onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))}
+            placeholder="Ex: LOT-2024-001"
+          />
+          <Input
+            label="Fabricante (opcional)"
+            value={form.manufacturer}
+            onChange={(event) => setForm((current) => ({ ...current, manufacturer: event.target.value }))}
+            placeholder="Ex: Roche, Abbott..."
+          />
+        </div>
+
+        <TextArea
+          label="Observações (opcional)"
+          value={form.notes}
+          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          placeholder="Notas adicionais sobre esta referência..."
+        />
       </div>
     </Modal>
   )

@@ -10,6 +10,7 @@ import com.biodiagnostico.config.SecurityConfig;
 import com.biodiagnostico.dto.response.AuthResponse;
 import com.biodiagnostico.dto.response.PasswordResetResponse;
 import com.biodiagnostico.dto.response.UserResponse;
+import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.exception.GlobalExceptionHandler;
 import com.biodiagnostico.filter.RateLimitFilter;
 import com.biodiagnostico.security.AccessTokenBlacklistService;
@@ -19,6 +20,8 @@ import com.biodiagnostico.service.AuthService;
 import com.biodiagnostico.service.PasswordResetService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.Cookie;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
@@ -68,7 +71,7 @@ class AuthControllerTest {
     void shouldReturn400OnInvalidLoginRequest() throws Exception {
         mockMvc.perform(post("/api/auth/login")
                 .contentType("application/json")
-                .content("{\"email\":\"invalido\"}"))
+                .content("{\"username\":\"\"}"))
             .andExpect(status().isBadRequest());
     }
 
@@ -96,7 +99,7 @@ class AuthControllerTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new RegisterBody())))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.email").value("novo@bio.com"));
+            .andExpect(jsonPath("$.username").value("novo"));
     }
 
     @Test
@@ -110,14 +113,14 @@ class AuthControllerTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new RegisterBody())))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.email").value("novo@bio.com"));
+            .andExpect(jsonPath("$.username").value("novo"));
     }
 
     @Test
     @DisplayName("deve retornar 403 em register sem admin")
     void shouldReturn403OnRegisterWithoutAdminRole() throws Exception {
         mockMvc.perform(post("/api/auth/register")
-                .with(user("viewer").roles("VIEWER"))
+                .with(user("viewer").roles("VISUALIZADOR"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new RegisterBody())))
             .andExpect(status().isForbidden());
@@ -227,7 +230,8 @@ class AuthControllerTest {
                 null,
                 tokenProvider(),
                 null,
-                new AccessTokenBlacklistService()
+                new AccessTokenBlacklistService(),
+                new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper())
             );
         }
 
@@ -270,7 +274,7 @@ class AuthControllerTest {
     }
 
     private UserResponse userResponse() {
-        return new UserResponse(UUID.randomUUID(), "novo@bio.com", "Novo", "ADMIN", true);
+        return new UserResponse(UUID.randomUUID(), "novo", "novo@bio.com", "Novo", "ADMIN", true, List.of());
     }
 
     private static com.biodiagnostico.security.JwtTokenProvider tokenProvider() {
@@ -282,28 +286,26 @@ class AuthControllerTest {
         );
     }
 
-    private UserResponse adminUserResponse() {
-        return new UserResponse(UUID.fromString("00000000-0000-0000-0000-000000000001"), "admin@bio.com", "Admin", "ADMIN", true);
-    }
-
     private com.biodiagnostico.entity.User adminUser() {
         return com.biodiagnostico.entity.User.builder()
-            .id(adminUserResponse().id())
-            .email(adminUserResponse().email())
-            .name(adminUserResponse().name())
-            .role(adminUserResponse().role())
-            .isActive(adminUserResponse().isActive())
+            .id(UUID.fromString("00000000-0000-0000-0000-000000000001"))
+            .username("admin")
+            .email("admin@bio.com")
+            .name("Admin")
+            .role(Role.ADMIN)
+            .permissions(Set.of())
+            .isActive(true)
             .build();
     }
 
     private static final class LoginBody {
-        public final String email = "ana@bio.com";
-        public final String password = "123456";
+        public final String username = "evandro";
+        public final String password = "eva123";
     }
 
     private static final class RegisterBody {
-        public final String email = "novo@bio.com";
-        public final String password = "Senha123";
+        public final String username = "novo";
+        public final String password = "nova1234";
         public final String name = "Novo";
         public final String role = "ADMIN";
     }

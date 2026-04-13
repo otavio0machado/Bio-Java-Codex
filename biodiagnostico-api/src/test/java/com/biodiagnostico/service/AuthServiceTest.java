@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import com.biodiagnostico.service.AuditService;
 import com.biodiagnostico.dto.request.LoginRequest;
 import com.biodiagnostico.dto.request.RegisterRequest;
 import com.biodiagnostico.entity.RefreshTokenSession;
+import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.entity.User;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.repository.RefreshTokenSessionRepository;
@@ -16,6 +18,7 @@ import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtTokenProvider;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -56,7 +59,8 @@ class AuthServiceTest {
             passwordEncoder,
             jwtTokenProvider,
             refreshTokenSessionRepository,
-            accessTokenBlacklistService
+            accessTokenBlacklistService,
+            new AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper())
         );
     }
 
@@ -64,10 +68,10 @@ class AuthServiceTest {
     @DisplayName("deve fazer login com credenciais válidas")
     void shouldLoginWithValidCredentials() {
         User user = activeUser();
-        when(userRepository.findByEmail("ana@bio.com")).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches("123456", user.getPasswordHash())).thenReturn(true);
+        when(userRepository.findByUsername("ana")).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("eva123", user.getPasswordHash())).thenReturn(true);
 
-        var response = authService.login(new LoginRequest("ana@bio.com", "123456"));
+        var response = authService.login(new LoginRequest("ana", "eva123"));
 
         assertThat(response.response().accessToken()).isNotBlank();
         assertThat(response.refreshToken()).isNotBlank();
@@ -77,19 +81,19 @@ class AuthServiceTest {
     @DisplayName("deve lançar erro para senha inválida")
     void shouldThrowOnInvalidPassword() {
         User user = activeUser();
-        when(userRepository.findByEmail(any())).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername(any())).thenReturn(Optional.of(user));
         when(passwordEncoder.matches(any(), any())).thenReturn(false);
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest("ana@bio.com", "123456")))
+        assertThatThrownBy(() -> authService.login(new LoginRequest("ana", "wrong")))
             .isInstanceOf(BusinessException.class);
     }
 
     @Test
-    @DisplayName("deve lançar erro para email inexistente")
-    void shouldThrowOnNonExistentEmail() {
-        when(userRepository.findByEmail(any())).thenReturn(Optional.empty());
+    @DisplayName("deve lançar erro para username inexistente")
+    void shouldThrowOnNonExistentUsername() {
+        when(userRepository.findByUsername(any())).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest("ana@bio.com", "123456")))
+        assertThatThrownBy(() -> authService.login(new LoginRequest("unknown", "eva123")))
             .isInstanceOf(BusinessException.class);
     }
 
@@ -98,9 +102,9 @@ class AuthServiceTest {
     void shouldThrowOnInactiveUser() {
         User user = activeUser();
         user.setIsActive(false);
-        when(userRepository.findByEmail(any())).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername(any())).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> authService.login(new LoginRequest("ana@bio.com", "123456")))
+        assertThatThrownBy(() -> authService.login(new LoginRequest("ana", "eva123")))
             .isInstanceOf(BusinessException.class);
     }
 
@@ -147,21 +151,21 @@ class AuthServiceTest {
     @Test
     @DisplayName("deve registrar novo usuário")
     void shouldRegisterNewUser() {
-        when(userRepository.existsByEmail("novo@bio.com")).thenReturn(false);
-        when(passwordEncoder.encode("Senha123")).thenReturn("hash");
+        when(userRepository.existsByUsername("novo")).thenReturn(false);
+        when(passwordEncoder.encode("teste123")).thenReturn("hash");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        var response = authService.register(new RegisterRequest("novo@bio.com", "Senha123", "Novo", "ADMIN"));
+        var response = authService.register(new RegisterRequest("novo", "teste123", "Novo Usuario", "ADMIN", null));
 
-        assertThat(response.email()).isEqualTo("novo@bio.com");
+        assertThat(response.username()).isEqualTo("novo");
     }
 
     @Test
-    @DisplayName("deve lançar erro para email duplicado")
-    void shouldThrowOnDuplicateEmail() {
-        when(userRepository.existsByEmail("novo@bio.com")).thenReturn(true);
+    @DisplayName("deve lançar erro para username duplicado")
+    void shouldThrowOnDuplicateUsername() {
+        when(userRepository.existsByUsername("novo")).thenReturn(true);
 
-        assertThatThrownBy(() -> authService.register(new RegisterRequest("novo@bio.com", "Senha123", "Novo", "ADMIN")))
+        assertThatThrownBy(() -> authService.register(new RegisterRequest("novo", "teste123", "Novo", "ADMIN", null)))
             .isInstanceOf(BusinessException.class);
     }
 
@@ -179,10 +183,12 @@ class AuthServiceTest {
     private User activeUser() {
         return User.builder()
             .id(UUID.randomUUID())
+            .username("ana")
             .email("ana@bio.com")
             .passwordHash("hash")
             .name("Ana")
-            .role("ADMIN")
+            .role(Role.ADMIN)
+            .permissions(Set.of())
             .isActive(true)
             .build();
     }

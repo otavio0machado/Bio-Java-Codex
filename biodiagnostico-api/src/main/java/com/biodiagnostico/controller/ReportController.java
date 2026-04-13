@@ -2,6 +2,7 @@ package com.biodiagnostico.controller;
 
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.service.PdfReportService;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -22,6 +23,7 @@ public class ReportController {
     }
 
     @GetMapping("/qc-pdf")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
     public ResponseEntity<byte[]> generateQcPdf(
         @RequestParam(required = false) String area,
         @RequestParam(required = false) String periodType,
@@ -40,6 +42,7 @@ public class ReportController {
     }
 
     @GetMapping("/reagents-pdf")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
     public ResponseEntity<byte[]> generateReagentsPdf() {
         return pdfResponse(pdfReportService.generateReagentsPdf(), "reagents-report.pdf");
     }

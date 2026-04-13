@@ -37,11 +37,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     void restoreSession()
   }, [])
 
-  const login = async (email: string, password: string) => {
+  const login = async (username: string, password: string) => {
     setIsLoading(true)
 
     try {
-      const auth = await authService.login({ email, password } satisfies LoginRequest)
+      const auth = await authService.login({ username, password } satisfies LoginRequest)
       startTransition(() => {
         setUser(auth.user)
       })

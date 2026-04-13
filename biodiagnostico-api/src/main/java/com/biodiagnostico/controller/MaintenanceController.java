@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,12 +40,14 @@ public class MaintenanceController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<MaintenanceResponse> createRecord(@Valid @RequestBody MaintenanceRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ResponseMapper.toMaintenanceResponse(maintenanceService.createRecord(request)));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<MaintenanceResponse> updateRecord(
         @PathVariable UUID id,
         @Valid @RequestBody MaintenanceRequest request
@@ -53,6 +56,7 @@ public class MaintenanceController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<Void> deleteRecord(@PathVariable UUID id) {
         maintenanceService.deleteRecord(id);
         return ResponseEntity.noContent().build();

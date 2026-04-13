@@ -1,38 +1,21 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Eye, EyeOff, Lock, Mail, Shield } from 'lucide-react'
+import { Eye, EyeOff, Lock, Shield, UserIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate } from 'react-router-dom'
-import { Button, Card, Input, Modal, useToast } from '../components/ui'
+import { Button, Card, Input, useToast } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
-import {
-  type LoginFormValues,
-  type RecoveryFormValues,
-  loginSchema,
-  recoverySchema,
-} from '../lib/authSchemas'
-import { authService } from '../services/authService'
+import { type LoginFormValues, loginSchema } from '../lib/authSchemas'
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth()
   const { toast } = useToast()
   const [showPassword, setShowPassword] = useState(false)
-  const [isRecoveryOpen, setIsRecoveryOpen] = useState(false)
-  const [recoverySent, setRecoverySent] = useState(false)
-  const [recoveryRecipient, setRecoveryRecipient] = useState('')
-  const [recoveryLink, setRecoveryLink] = useState('')
   const loginForm = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: '',
+      username: '',
       password: '',
-    },
-    mode: 'onChange',
-  })
-  const recoveryForm = useForm<RecoveryFormValues>({
-    resolver: zodResolver(recoverySchema),
-    defaultValues: {
-      email: '',
     },
     mode: 'onChange',
   })
@@ -43,22 +26,9 @@ export function LoginPage() {
 
   const handleLogin = loginForm.handleSubmit(async (data) => {
     try {
-      await login(data.email, data.password)
+      await login(data.username, data.password)
     } catch {
-      toast.error('Credenciais inválidas. Confira seu email e senha.')
-    }
-  })
-
-  const handleRecovery = recoveryForm.handleSubmit(async (data) => {
-    try {
-      const response = await authService.requestPasswordReset({ email: data.email })
-      setRecoveryLink(response.resetUrl ?? '')
-      setRecoveryRecipient(data.email)
-      setRecoverySent(true)
-      toast.success(response.message)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Não foi possível iniciar a recuperação.'
-      toast.error(message)
+      toast.error('Credenciais inválidas. Confira seu nome de usuário e senha.')
     }
   })
 
@@ -100,13 +70,13 @@ export function LoginPage() {
 
             <form className="space-y-5" onSubmit={handleLogin}>
               <Input
-                label="Email corporativo"
-                type="email"
-                placeholder="voce@empresa.com"
-                icon={<Mail className="h-4 w-4" />}
-                error={loginForm.formState.errors.email?.message}
-                autoComplete="email"
-                {...loginForm.register('email')}
+                label="Nome de usuário"
+                type="text"
+                placeholder="seu.usuario"
+                icon={<UserIcon className="h-4 w-4" />}
+                error={loginForm.formState.errors.username?.message}
+                autoComplete="username"
+                {...loginForm.register('username')}
               />
 
               <div className="relative">
@@ -129,22 +99,6 @@ export function LoginPage() {
                 </button>
               </div>
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="text-sm font-medium text-green-800 transition hover:text-green-900"
-                  onClick={() => {
-                    recoveryForm.reset({ email: loginForm.getValues('email') })
-                    setRecoverySent(false)
-                    setRecoveryRecipient('')
-                    setRecoveryLink('')
-                    setIsRecoveryOpen(true)
-                  }}
-                >
-                  Esqueceu a senha?
-                </button>
-              </div>
-
               <Button type="submit" size="xl" className="w-full" loading={loginForm.formState.isSubmitting}>
                 Entrar
               </Button>
@@ -157,51 +111,6 @@ export function LoginPage() {
           </div>
         </section>
       </div>
-
-      <Modal
-        isOpen={isRecoveryOpen}
-        onClose={() => setIsRecoveryOpen(false)}
-        title="Recuperar acesso"
-        footer={
-          <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setIsRecoveryOpen(false)}>
-              Fechar
-            </Button>
-            {!recoverySent ? (
-              <Button onClick={() => void handleRecovery()} loading={recoveryForm.formState.isSubmitting}>
-                Enviar link de recuperação
-              </Button>
-            ) : null}
-          </div>
-        }
-      >
-        {!recoverySent ? (
-          <Input
-            label="Email"
-            type="email"
-            placeholder="voce@empresa.com"
-            error={recoveryForm.formState.errors.email?.message}
-            autoComplete="email"
-            {...recoveryForm.register('email')}
-          />
-        ) : (
-          <div className="space-y-3">
-            <Card className="border border-green-100 bg-green-50 text-green-900">
-              Um link de recuperação foi enviado para <strong>{recoveryRecipient}</strong>.
-            </Card>
-            {recoveryLink ? (
-              <Card className="border border-amber-100 bg-amber-50 text-amber-900">
-                <div className="space-y-2 text-sm">
-                  <p>Modo local detectado: o link direto também foi liberado para teste.</p>
-                  <a className="font-semibold underline" href={recoveryLink}>
-                    Abrir recuperação agora
-                  </a>
-                </div>
-              </Card>
-            ) : null}
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

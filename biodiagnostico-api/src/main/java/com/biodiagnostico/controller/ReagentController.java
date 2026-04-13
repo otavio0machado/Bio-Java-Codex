@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,17 +42,20 @@ public class ReagentController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<ReagentLotResponse> createLot(@Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ResponseMapper.toReagentLotResponse(reagentService.createLot(request)));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<ReagentLotResponse> updateLot(@PathVariable UUID id, @Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.ok(ResponseMapper.toReagentLotResponse(reagentService.updateLot(id, request)));
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<Void> deleteLot(@PathVariable UUID id) {
         reagentService.deleteLot(id);
         return ResponseEntity.noContent().build();
@@ -67,6 +71,7 @@ public class ReagentController {
     }
 
     @PostMapping("/{id}/movements")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<StockMovementResponse> createMovement(
         @PathVariable UUID id,
         @Valid @RequestBody StockMovementRequest request
@@ -76,6 +81,7 @@ public class ReagentController {
     }
 
     @DeleteMapping("/movements/{movId}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<Void> deleteMovement(@PathVariable UUID movId) {
         reagentService.deleteMovement(movId);
         return ResponseEntity.noContent().build();

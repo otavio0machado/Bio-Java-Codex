@@ -1,6 +1,8 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Card, Skeleton } from '../components/ui'
+import { useAuth } from '../hooks/useAuth'
+import { canDownload, canImport, canWriteMaintenance, canWriteQc, canWriteReagent } from '../lib/permissions'
 import { cn } from '../utils/cn'
 
 const DashboardTab = lazy(() => import('../components/proin/DashboardTab').then((module) => ({ default: module.DashboardTab })))
@@ -41,7 +43,7 @@ const areas = [
   { value: 'uroanalise', label: 'Uroanálise' },
 ]
 
-const tabs = [
+const allTabs = [
   { value: 'dashboard', label: 'Dashboard CQ' },
   { value: 'registro', label: 'Registro CQ' },
   { value: 'referencias', label: 'Referências' },
@@ -52,6 +54,17 @@ const tabs = [
 ]
 
 export function ProinPage() {
+  const { user } = useAuth()
+  const tabs = useMemo(() => {
+    return allTabs.filter((tab) => {
+      if (tab.value === 'registro') return canWriteQc(user)
+      if (tab.value === 'reagentes') return canWriteReagent(user) || user?.role === 'ADMIN'
+      if (tab.value === 'manutencao') return canWriteMaintenance(user) || user?.role === 'ADMIN'
+      if (tab.value === 'relatorios') return canDownload(user) || true
+      if (tab.value === 'importar') return canImport(user)
+      return true
+    })
+  }, [user])
   const [searchParams, setSearchParams] = useSearchParams()
   const [currentArea, setCurrentArea] = useState('bioquimica')
   const currentTab = currentArea === 'bioquimica' ? (searchParams.get('tab') ?? 'dashboard') : 'registro'

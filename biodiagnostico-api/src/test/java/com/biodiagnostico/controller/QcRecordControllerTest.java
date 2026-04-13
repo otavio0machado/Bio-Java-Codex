@@ -55,7 +55,7 @@ class QcRecordControllerTest {
     void shouldReturn200WhenGettingRecords() throws Exception {
         qcService.records = List.of(response());
 
-        mockMvc.perform(get("/api/qc/records").with(user("ana").roles("ANALYST")))
+        mockMvc.perform(get("/api/qc/records").with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].examName").value("Glicose"));
     }
@@ -66,7 +66,7 @@ class QcRecordControllerTest {
         qcService.createResponse = response();
 
         mockMvc.perform(post("/api/qc/records")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validRequest())))
             .andExpect(status().isCreated())
@@ -77,7 +77,7 @@ class QcRecordControllerTest {
     @DisplayName("deve retornar 400 quando request é inválido")
     void shouldReturn400WhenRequestIsInvalid() throws Exception {
         mockMvc.perform(post("/api/qc/records")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content("{}"))
             .andExpect(status().isBadRequest());
@@ -88,7 +88,7 @@ class QcRecordControllerTest {
     void shouldReturn404WhenRecordNotFound() throws Exception {
         qcService.recordException = new ResourceNotFoundException("Registro não encontrado");
 
-        mockMvc.perform(get("/api/qc/records/" + UUID.randomUUID()).with(user("ana").roles("ANALYST")))
+        mockMvc.perform(get("/api/qc/records/" + UUID.randomUUID()).with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isNotFound());
     }
 
@@ -117,7 +117,7 @@ class QcRecordControllerTest {
             .build();
 
         mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
             .andExpect(status().isCreated())
@@ -131,7 +131,7 @@ class QcRecordControllerTest {
         postCalibrationService.createException = new BusinessException("A pós-calibração só pode ser registrada quando existe pendência corretiva ativa no registro de CQ.");
 
         mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
             .andExpect(status().isBadRequest())
@@ -192,7 +192,8 @@ class QcRecordControllerTest {
         private RuntimeException recordException;
 
         StubQcService() {
-            super(null, null, new com.biodiagnostico.service.WestgardEngine(), null);
+            super(null, null, new com.biodiagnostico.service.WestgardEngine(), null,
+                new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()));
         }
 
         @Override

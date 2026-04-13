@@ -51,7 +51,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 if (!accessTokenBlacklistService.isBlacklisted(details.tokenId())) {
                     UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
-                            details.email(),
+                            details.username(),
                             null,
                             List.of(new SimpleGrantedAuthority("ROLE_" + details.role()))
                         );

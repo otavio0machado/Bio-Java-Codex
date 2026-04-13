@@ -52,7 +52,7 @@ class HematologyControllerTest {
         hematologyQcService.createMeasurementResponse = measurementResponse("APROVADO");
 
         mockMvc.perform(post("/api/hematology/measurements")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validMeasurementRequest())))
             .andExpect(status().isCreated())
@@ -70,7 +70,7 @@ class HematologyControllerTest {
         hematologyQcService.createParameterResponse = parameterResponse();
 
         mockMvc.perform(post("/api/hematology/parameters")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validParameterRequest())))
             .andExpect(status().isCreated())
@@ -85,7 +85,7 @@ class HematologyControllerTest {
         hematologyQcService.parameterList = List.of(parameterResponse());
 
         mockMvc.perform(get("/api/hematology/parameters")
-                .with(user("ana").roles("ANALYST")))
+                .with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].analito").value("RBC"))
             .andExpect(jsonPath("$[0].equipamento").value("Sysmex XN-1000"));
@@ -97,7 +97,7 @@ class HematologyControllerTest {
         hematologyQcService.measurementList = List.of(measurementResponse("APROVADO"));
 
         mockMvc.perform(get("/api/hematology/measurements")
-                .with(user("ana").roles("ANALYST")))
+                .with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].parameterId").exists())
             .andExpect(jsonPath("$[0].parameterEquipamento").value("Sysmex XN-1000"));

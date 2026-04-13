@@ -27,7 +27,7 @@ public class JwtTokenProvider {
         UUID userId,
         UUID tokenId,
         UUID familyId,
-        String email,
+        String username,
         String role,
         TokenType tokenType,
         Instant expiration
@@ -62,8 +62,8 @@ public class JwtTokenProvider {
         return Jwts.builder()
             .subject(user.getId().toString())
             .issuer(issuer)
-            .claim("email", user.getEmail())
-            .claim("role", user.getRole())
+            .claim("username", user.getUsername())
+            .claim("role", user.getRole().name())
             .claim("token_type", TokenType.ACCESS.name())
             .id(tokenId.toString())
             .issuedAt(Date.from(now))
@@ -91,7 +91,7 @@ public class JwtTokenProvider {
         if (details.tokenType() != TokenType.ACCESS) {
             throw new JwtException("Token não é do tipo ACCESS");
         }
-        if (details.email() == null || details.role() == null) {
+        if (details.username() == null || details.role() == null) {
             throw new JwtException("Claims obrigatórias ausentes no access token");
         }
         return details;
@@ -138,7 +138,7 @@ public class JwtTokenProvider {
             UUID.fromString(claims.getSubject()),
             UUID.fromString(claims.getId()),
             familyId == null ? null : UUID.fromString(familyId),
-            claims.get("email", String.class),
+            claims.get("username", String.class),
             claims.get("role", String.class),
             TokenType.valueOf(tokenType),
             claims.getExpiration().toInstant()

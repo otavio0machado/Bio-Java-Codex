@@ -58,6 +58,7 @@ public class SecurityConfig {
                     "/api/auth/forgot-password",
                     "/api/auth/reset-password"
                 ).permitAll()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)

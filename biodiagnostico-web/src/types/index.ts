@@ -1,4 +1,4 @@
-export type Role = 'ADMIN' | 'ANALYST' | 'VIEWER'
+export type Role = 'ADMIN' | 'FUNCIONARIO' | 'VIGILANCIA_SANITARIA' | 'VISUALIZADOR'
 export type QcStatus = 'APROVADO' | 'REPROVADO' | 'ALERTA'
 export type ViolationSeverity = 'WARNING' | 'REJECTION'
 export type LabArea =
@@ -11,10 +11,12 @@ export type LabArea =
 
 export interface User {
   id: string
-  email: string
+  username: string
+  email?: string | null
   name: string
   role: Role
   isActive: boolean
+  permissions: string[]
 }
 
 export interface AuthResponse {
@@ -24,7 +26,7 @@ export interface AuthResponse {
 }
 
 export interface LoginRequest {
-  email: string
+  username: string
   password: string
 }
 
@@ -47,10 +49,32 @@ export interface ResetPasswordRequest {
 }
 
 export interface RegisterRequest {
-  email: string
+  username: string
   password: string
   name: string
   role: Role
+  email?: string
+}
+
+export interface AdminUserRequest {
+  username: string
+  password: string
+  name: string
+  role: string
+  email?: string
+  permissions?: string[]
+}
+
+export interface AdminUpdateUserRequest {
+  name?: string
+  role?: string
+  isActive?: boolean
+  email?: string
+  permissions?: string[]
+}
+
+export interface AdminResetPasswordRequest {
+  newPassword: string
 }
 
 export interface WestgardViolation {

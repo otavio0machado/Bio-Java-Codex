@@ -3,8 +3,9 @@ package com.biodiagnostico.dto.request;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.util.Set;
 
-public record RegisterRequest(
+public record AdminUserRequest(
     @NotBlank @Size(min = 3, max = 120) String username,
     @NotBlank
     @Size(min = 4, max = 120)
@@ -13,6 +14,7 @@ public record RegisterRequest(
     @NotBlank
     @Pattern(regexp = "^(ADMIN|FUNCIONARIO|VIGILANCIA_SANITARIA|VISUALIZADOR)$", message = "Role inválida")
     String role,
-    @Size(max = 120) String email
+    @Size(max = 120) String email,
+    Set<String> permissions
 ) {
 }

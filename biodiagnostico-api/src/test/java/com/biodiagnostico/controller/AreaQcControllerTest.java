@@ -48,7 +48,7 @@ class AreaQcControllerTest {
         areaQcService.createMeasurementResponse = measurementResponse();
 
         mockMvc.perform(post("/api/qc/areas/imunologia/measurements")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validRequest())))
             .andExpect(status().isCreated())
@@ -65,7 +65,7 @@ class AreaQcControllerTest {
         );
 
         mockMvc.perform(post("/api/qc/areas/imunologia/measurements")
-                .with(user("ana").roles("ANALYST"))
+                .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validRequest())))
             .andExpect(status().isBadRequest())

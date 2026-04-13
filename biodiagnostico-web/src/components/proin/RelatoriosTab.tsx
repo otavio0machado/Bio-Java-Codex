@@ -1,6 +1,8 @@
 import { Download, LineChart } from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
+import { useAuth } from '../../hooks/useAuth'
 import { useQcExams } from '../../hooks/useQcRecords'
+import { canDownload } from '../../lib/permissions'
 import { reportService } from '../../services/reportService'
 import { Button, Card, Select, useToast } from '../ui'
 
@@ -13,6 +15,7 @@ interface RelatoriosTabProps {
 }
 
 export function RelatoriosTab({ area }: RelatoriosTabProps) {
+  const { user } = useAuth()
   const { toast } = useToast()
   const { data: exams = [] } = useQcExams(area)
   const [periodType, setPeriodType] = useState('current-month')
@@ -69,14 +72,16 @@ export function RelatoriosTab({ area }: RelatoriosTabProps) {
           </Select>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button
-            onClick={() => void handleDownload()}
-            icon={<Download className="h-4 w-4" />}
-            loading={isGenerating}
-            disabled={isGenerating}
-          >
-            Gerar PDF
-          </Button>
+          {canDownload(user) ? (
+            <Button
+              onClick={() => void handleDownload()}
+              icon={<Download className="h-4 w-4" />}
+              loading={isGenerating}
+              disabled={isGenerating}
+            >
+              Gerar PDF
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={() => setIsChartOpen(true)} icon={<LineChart className="h-4 w-4" />}>
             Gerar Gráfico Levey-Jennings
           </Button>

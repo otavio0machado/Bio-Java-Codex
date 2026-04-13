@@ -40,7 +40,7 @@ class ReportControllerTest {
         mockMvc.perform(get("/api/reports/qc-pdf")
                 .param("area", "bioquimica")
                 .param("periodType", "current-month")
-                .with(user("ana").roles("ANALYST")))
+                .with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "application/pdf"))
             .andExpect(content().bytes("qc".getBytes()));
@@ -51,7 +51,7 @@ class ReportControllerTest {
     void shouldReturnReagentsPdf() throws Exception {
         pdfReportService.reagentsPdf = "reag".getBytes();
 
-        mockMvc.perform(get("/api/reports/reagents-pdf").with(user("ana").roles("ANALYST")))
+        mockMvc.perform(get("/api/reports/reagents-pdf").with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "application/pdf"))
             .andExpect(content().bytes("reag".getBytes()));

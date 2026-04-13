@@ -4,7 +4,9 @@ import com.biodiagnostico.dto.request.LoginRequest;
 import com.biodiagnostico.dto.request.RegisterRequest;
 import com.biodiagnostico.dto.response.AuthResponse;
 import com.biodiagnostico.dto.response.UserResponse;
+import com.biodiagnostico.entity.Permission;
 import com.biodiagnostico.entity.RefreshTokenSession;
+import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.entity.User;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
@@ -13,11 +15,13 @@ import com.biodiagnostico.repository.UserRepository;
 import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtTokenProvider;
 import com.biodiagnostico.util.ResponseMapper;
+import java.util.Map;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -35,24 +39,28 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenSessionRepository refreshTokenSessionRepository;
     private final AccessTokenBlacklistService accessTokenBlacklistService;
+    private final AuditService auditService;
 
     public AuthService(
         UserRepository userRepository,
         PasswordEncoder passwordEncoder,
         JwtTokenProvider jwtTokenProvider,
         RefreshTokenSessionRepository refreshTokenSessionRepository,
-        AccessTokenBlacklistService accessTokenBlacklistService
+        AccessTokenBlacklistService accessTokenBlacklistService,
+        AuditService auditService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.refreshTokenSessionRepository = refreshTokenSessionRepository;
         this.accessTokenBlacklistService = accessTokenBlacklistService;
+        this.auditService = auditService;
     }
 
     @Transactional
     public IssuedAuthSession login(LoginRequest request) {
-        User user = userRepository.findByEmail(normalizeEmail(request.email()))
+        String normalizedUsername = normalizeUsername(request.username());
+        User user = userRepository.findByUsername(normalizedUsername)
             .orElseThrow(() -> new BusinessException("Credenciais inválidas"));
 
         if (!Boolean.TRUE.equals(user.getIsActive())) {
@@ -62,6 +70,7 @@ public class AuthService {
             throw new BusinessException("Credenciais inválidas");
         }
 
+        auditService.log("LOGIN", "User", user.getId(), Map.of("username", user.getUsername()));
         return issueSession(user, null, null);
     }
 
@@ -126,16 +135,20 @@ public class AuthService {
 
     @Transactional
     public UserResponse register(RegisterRequest request) {
-        String normalizedEmail = normalizeEmail(request.email());
-        if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new BusinessException("Já existe um usuário com este email");
+        String normalizedUsername = normalizeUsername(request.username());
+        if (userRepository.existsByUsername(normalizedUsername)) {
+            throw new BusinessException("Já existe um usuário com este nome de usuário");
         }
 
+        Role role = parseRole(request.role());
+
         User user = User.builder()
-            .email(normalizedEmail)
+            .username(normalizedUsername)
+            .email(request.email() != null ? request.email().trim() : null)
             .passwordHash(passwordEncoder.encode(request.password()))
             .name(request.name().trim())
-            .role(normalizeRole(request.role()))
+            .role(role)
+            .permissions(Set.of())
             .isActive(Boolean.TRUE)
             .build();
 
@@ -167,16 +180,17 @@ public class AuthService {
         );
     }
 
-    private String normalizeRole(String role) {
-        String normalized = role == null ? "ANALYST" : role.trim().toUpperCase();
-        return switch (normalized) {
-            case "ADMIN", "ANALYST", "VIEWER" -> normalized;
-            default -> throw new BusinessException("Role inválida");
-        };
+    static Role parseRole(String role) {
+        String normalized = role == null ? "FUNCIONARIO" : role.trim().toUpperCase();
+        try {
+            return Role.valueOf(normalized);
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException("Role inválida: " + normalized);
+        }
     }
 
-    private String normalizeEmail(String email) {
-        return email == null ? "" : email.trim().toLowerCase();
+    private String normalizeUsername(String username) {
+        return username == null ? "" : username.trim().toLowerCase();
     }
 
     private String hashToken(String token) {

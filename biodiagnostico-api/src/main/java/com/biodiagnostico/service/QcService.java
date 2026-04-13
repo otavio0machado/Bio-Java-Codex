@@ -38,17 +38,20 @@ public class QcService {
     private final QcReferenceService qcReferenceService;
     private final WestgardEngine westgardEngine;
     private final QcExamRepository qcExamRepository;
+    private final AuditService auditService;
 
     public QcService(
         QcRecordRepository qcRecordRepository,
         QcReferenceService qcReferenceService,
         WestgardEngine westgardEngine,
-        QcExamRepository qcExamRepository
+        QcExamRepository qcExamRepository,
+        AuditService auditService
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.qcReferenceService = qcReferenceService;
         this.westgardEngine = westgardEngine;
         this.qcExamRepository = qcExamRepository;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -59,7 +62,10 @@ public class QcService {
         QcRecord record = buildRecord(request, reference, null);
         List<QcRecord> history = loadWestgardHistory(record, null);
         applyCanonicalDecision(record, history);
-        return ResponseMapper.toQcRecordResponse(qcRecordRepository.save(record));
+        QcRecord saved = qcRecordRepository.save(record);
+        auditService.log("CRIAR_REGISTRO_CQ", "QcRecord", saved.getId(),
+            Map.of("exame", saved.getExamName(), "area", saved.getArea(), "valor", saved.getValue(), "status", saved.getStatus()));
+        return ResponseMapper.toQcRecordResponse(saved);
     }
 
     @Transactional

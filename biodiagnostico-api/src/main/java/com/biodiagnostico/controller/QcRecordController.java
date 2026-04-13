@@ -15,6 +15,7 @@ import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,11 +49,13 @@ public class QcRecordController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<QcRecordResponse> createRecord(@Valid @RequestBody QcRecordRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(qcService.createRecord(request));
     }
 
     @PostMapping("/batch")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<List<QcRecordResponse>> createRecordsBatch(
         @Valid @RequestBody List<QcRecordRequest> requests
     ) {
@@ -65,6 +68,7 @@ public class QcRecordController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<QcRecordResponse> updateRecord(
         @PathVariable UUID id,
         @Valid @RequestBody QcRecordRequest request
@@ -73,6 +77,7 @@ public class QcRecordController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<Void> deleteRecord(@PathVariable UUID id) {
         qcService.deleteRecord(id);
         return ResponseEntity.noContent().build();
@@ -100,6 +105,7 @@ public class QcRecordController {
     }
 
     @PostMapping("/{id}/post-calibration")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
     public ResponseEntity<PostCalibrationRecord> createPostCalibration(
         @PathVariable UUID id,
         @Valid @RequestBody PostCalibrationRequest request

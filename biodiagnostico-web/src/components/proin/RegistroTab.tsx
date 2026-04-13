@@ -1,14 +1,19 @@
 import axios from 'axios'
-import { Bot, Sparkles } from 'lucide-react'
+import { Activity, Bot, ChevronDown, ChevronUp, Send, X } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
+import { useUsers } from '../../hooks/useAdmin'
 import { useAiAnalysis } from '../../hooks/useAiAnalysis'
-import { useCreateQcRecord, useQcExams, useQcReferences } from '../../hooks/useQcRecords'
+import { useMaintenanceRecords } from '../../hooks/useMaintenance'
+import { useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
 import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
-import { Button, Card, Input, Select, StatusBadge, TextArea, useToast } from '../ui'
+import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
 import { PostCalibrationModal } from './PostCalibrationModal'
 import { VoiceRecorderModal } from './VoiceRecorderModal'
 
 const MarkdownRenderer = lazy(() => import('react-markdown').then((module) => ({ default: module.default })))
+const LeveyJenningsChart = lazy(() =>
+  import('../charts/LeveyJenningsChart').then((module) => ({ default: module.LeveyJenningsChart })),
+)
 
 interface RegistroTabProps {
   area: string
@@ -35,7 +40,7 @@ interface ReferenceResolution {
   selectionReferences: QcReferenceValue[]
 }
 
-const levels = ['Normal', 'Patológico', 'Alto', 'Baixo']
+// Nível não é mais selecionável pelo usuário — usa 'Normal' como padrão interno
 
 export function RegistroTab({ area }: RegistroTabProps) {
   const { toast } = useToast()
@@ -43,6 +48,17 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const aiMutation = useAiAnalysis()
   const { data: exams = [] } = useQcExams(area)
   const { data: references = [] } = useQcReferences(undefined, true)
+  const { data: maintenanceRecords = [] } = useMaintenanceRecords()
+  const { data: allUsers = [] } = useUsers()
+
+  const equipmentOptions = useMemo(() => {
+    const set = new Set(maintenanceRecords.map((r) => r.equipment).filter(Boolean))
+    return Array.from(set).sort()
+  }, [maintenanceRecords])
+
+  const analystOptions = useMemo(() => {
+    return allUsers.filter((u) => u.isActive).map((u) => u.name).sort()
+  }, [allUsers])
 
   const [createdRecord, setCreatedRecord] = useState<QcRecord | null>(null)
   const [isPostCalibrationOpen, setIsPostCalibrationOpen] = useState(false)
@@ -50,6 +66,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [aiHistory, setAiHistory] = useState<AiHistoryItem[]>([])
   const [aiPrompt, setAiPrompt] = useState('')
+  const [isChatOpen, setIsChatOpen] = useState(false)
   const [form, setForm] = useState<QcRecordRequest>({
     examName: '',
     area,
@@ -71,10 +88,9 @@ export function RegistroTab({ area }: RegistroTabProps) {
           reference.isActive &&
           reference.exam?.area === area &&
           (!form.examName || reference.exam.name === form.examName) &&
-          (!form.level || reference.level === form.level) &&
           isReferenceValidOnDate(reference, form.date),
       ),
-    [area, form.date, form.examName, form.level, references],
+    [area, form.date, form.examName, references],
   )
   const currentLotNumber = normalizeNullable(form.lotNumber)
   const compatibleReferences = useMemo(
@@ -238,8 +254,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
         )
       }
       if (response.needsCalibration) {
-        toast.warning('Existe uma pendência corretiva ativa. Registre a pós-calibração para encerrar essa pendência.')
-        setIsPostCalibrationOpen(true)
+        toast.warning('Registro com pendência corretiva. Clique em "REPROVADO" no histórico para registrar a pós-calibração.')
       }
     } catch (error) {
       const message = getApiErrorMessage(error, 'Não foi possível salvar o registro de CQ.')
@@ -270,8 +285,14 @@ export function RegistroTab({ area }: RegistroTabProps) {
     }
   }
 
+  const { data: allRecords = [], isLoading: isLoadingRecords } = useQcRecords({ area })
+  const [chartRecord, setChartRecord] = useState<{ examName: string; level: string } | null>(null)
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(true)
+  const [postCalibrationRecord, setPostCalibrationRecord] = useState<QcRecord | null>(null)
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+    <div className="space-y-6">
+    <div className="grid gap-6">
       <Card>
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -296,45 +317,25 @@ export function RegistroTab({ area }: RegistroTabProps) {
 
         <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>
           <Select
-            label="Exame"
+            label="Selecionar Exame"
             value={form.examName}
-            onChange={(event) =>
+            onChange={(event) => {
+              const selectedName = event.target.value
               setForm((current) => ({
                 ...current,
-                examName: event.target.value,
+                examName: selectedName,
                 referenceId: undefined,
                 lotNumber: '',
                 targetValue: 0,
                 targetSd: 0,
                 cvLimit: 10,
               }))
-            }
+            }}
           >
-            <option value="">Selecione</option>
+            <option value="">Selecione o exame</option>
             {exams.map((exam) => (
               <option key={exam.id} value={exam.name}>
                 {exam.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            label="Nível"
-            value={form.level}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                level: event.target.value,
-                referenceId: undefined,
-                lotNumber: '',
-                targetValue: 0,
-                targetSd: 0,
-                cvLimit: 10,
-              }))
-            }
-          >
-            {levels.map((level) => (
-              <option key={level} value={level}>
-                {level}
               </option>
             ))}
           </Select>
@@ -345,14 +346,15 @@ export function RegistroTab({ area }: RegistroTabProps) {
             onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
           />
           <Input
-            label="Valor medido"
+            label="Medição"
             type="number"
             step="0.01"
             value={String(form.value)}
             onChange={(event) => setForm((current) => ({ ...current, value: Number(event.target.value) }))}
+            placeholder="Valor medido"
           />
           <Input
-            label="Valor alvo"
+            label="Valor Alvo"
             type="number"
             step="0.01"
             value={String(resolvedTargetValue)}
@@ -360,7 +362,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
             disabled={Boolean(resolvedReference)}
           />
           <Input
-            label="Desvio padrão alvo"
+            label="Desvio Padrão"
             type="number"
             step="0.01"
             value={String(resolvedTargetSd)}
@@ -368,27 +370,36 @@ export function RegistroTab({ area }: RegistroTabProps) {
             disabled={Boolean(resolvedReference)}
           />
           <Input
-            label="CV Limite %"
+            label="Variação (CV Limite %)"
             type="number"
             step="0.01"
             value={String(resolvedCvLimit)}
             onChange={(event) => setForm((current) => ({ ...current, cvLimit: Number(event.target.value) }))}
           />
-          <Input
+          <Select
             label="Equipamento"
             value={form.equipment}
             onChange={(event) => setForm((current) => ({ ...current, equipment: event.target.value }))}
-          />
-          <Input
+          >
+            <option value="">Selecione o equipamento</option>
+            {equipmentOptions.map((eq) => (
+              <option key={eq} value={eq}>
+                {eq}
+              </option>
+            ))}
+          </Select>
+          <Select
             label="Analista"
             value={form.analyst}
             onChange={(event) => setForm((current) => ({ ...current, analyst: event.target.value }))}
-          />
-          <Input
-            label="Lote"
-            value={resolvedLotNumber}
-            onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))}
-          />
+          >
+            <option value="">Selecione o analista</option>
+            {analystOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </Select>
 
           {(referenceResolution.status !== 'idle' || form.examName) ? (
             <div className="md:col-span-2 space-y-3">
@@ -514,54 +525,243 @@ export function RegistroTab({ area }: RegistroTabProps) {
         ) : null}
       </Card>
 
-      <div className="space-y-6">
-        <Card>
-          <div className="mb-4 flex items-center gap-3">
-            <div className="rounded-full bg-green-100 p-3 text-green-800">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-neutral-900">Assistente IA</h3>
-              <p className="text-sm text-neutral-500">Pergunte sobre tendências, alertas e recomendações.</p>
-            </div>
-          </div>
-
-          <TextArea
-            label="Pergunta"
-            value={aiPrompt}
-            onChange={(event) => setAiPrompt(event.target.value)}
-            placeholder="Ex.: Há tendência de desvio sistemático para este exame?"
-          />
-          <Button className="mt-4 w-full" onClick={handleAiAnalysis} loading={aiMutation.isPending} icon={<Bot className="h-4 w-4" />}>
-            Analisar com IA
-          </Button>
-        </Card>
-
-        <div className="space-y-4">
-          {aiHistory.map((item) => (
-            <Card key={item.id}>
-              <div className="mb-3 text-sm font-medium text-neutral-500">{item.prompt}</div>
-              <div className="prose prose-sm max-w-none text-neutral-700">
-                <Suspense fallback={<div className="whitespace-pre-wrap text-sm text-neutral-700">{item.response}</div>}>
-                  <MarkdownRenderer>{item.response}</MarkdownRenderer>
-                </Suspense>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-
       <PostCalibrationModal
-        key={createdRecord ? `${createdRecord.id}-${isPostCalibrationOpen ? 'open' : 'closed'}` : 'no-record'}
-        record={createdRecord}
-        isOpen={isPostCalibrationOpen}
-        onClose={() => setIsPostCalibrationOpen(false)}
-        onSaved={() => {
-          setPostCalibrationRegistered(true)
-          setCreatedRecord((current) => (current ? { ...current, needsCalibration: false } : current))
+        key={postCalibrationRecord ? `hist-${postCalibrationRecord.id}` : createdRecord ? `created-${createdRecord.id}-${isPostCalibrationOpen ? 'o' : 'c'}` : 'none'}
+        record={postCalibrationRecord ?? createdRecord}
+        isOpen={postCalibrationRecord !== null || isPostCalibrationOpen}
+        onClose={() => {
+          setPostCalibrationRecord(null)
           setIsPostCalibrationOpen(false)
         }}
+        onSaved={() => {
+          if (postCalibrationRecord) {
+            setPostCalibrationRecord(null)
+            toast.success('Pós-calibração registrada com sucesso.')
+          } else {
+            setPostCalibrationRegistered(true)
+            setCreatedRecord((current) => (current ? { ...current, needsCalibration: false } : current))
+            setIsPostCalibrationOpen(false)
+          }
+        }}
       />
+    </div>
+
+      <Card>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between"
+          onClick={() => setIsHistoryExpanded((v) => !v)}
+        >
+          <div>
+            <h3 className="text-lg font-semibold text-neutral-900">Histórico de Registros CQ</h3>
+            <p className="text-sm text-neutral-500">
+              {allRecords.length} registro{allRecords.length !== 1 ? 's' : ''} encontrado{allRecords.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {isHistoryExpanded
+            ? <ChevronUp className="h-5 w-5 text-neutral-400" />
+            : <ChevronDown className="h-5 w-5 text-neutral-400" />}
+        </button>
+
+        {isHistoryExpanded ? (
+          isLoadingRecords ? (
+            <div className="mt-4 space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded-xl bg-neutral-100" />
+              ))}
+            </div>
+          ) : allRecords.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-8 text-center text-sm text-neutral-500">
+              Nenhum registro CQ encontrado para esta área.
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
+                    <th className="px-3 py-2.5">Data</th>
+                    <th className="px-3 py-2.5">Exame</th>
+                    <th className="px-3 py-2.5">Nível</th>
+                    <th className="px-3 py-2.5">Valor</th>
+                    <th className="px-3 py-2.5">Alvo</th>
+                    <th className="px-3 py-2.5">CV%</th>
+                    <th className="px-3 py-2.5">Z-Score</th>
+                    <th className="px-3 py-2.5">Lote</th>
+                    <th className="px-3 py-2.5">Analista</th>
+                    <th className="px-3 py-2.5">Status</th>
+                    <th className="px-3 py-2.5">Violações</th>
+                    <th className="px-3 py-2.5 text-center">Gráfico</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allRecords.map((record) => (
+                    <tr key={record.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-neutral-700">
+                        {formatRecordDate(record.date)}
+                      </td>
+                      <td className="px-3 py-2.5 font-medium text-neutral-900">{record.examName}</td>
+                      <td className="px-3 py-2.5 text-neutral-600">{record.level}</td>
+                      <td className="px-3 py-2.5 font-mono text-neutral-900">{record.value.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 font-mono text-neutral-600">{record.targetValue.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 font-mono text-neutral-600">{record.cv.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 font-mono text-neutral-600">{record.zScore.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-neutral-600">{record.lotNumber ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-neutral-600">{record.analyst ?? '—'}</td>
+                      <td className="px-3 py-2.5">
+                        {record.needsCalibration ? (
+                          <button
+                            type="button"
+                            className="group flex items-center gap-1"
+                            title="Clique para registrar pós-calibração"
+                            onClick={() => setPostCalibrationRecord(record)}
+                          >
+                            <StatusBadge status={record.status} />
+                            <span className="text-[10px] text-amber-600 opacity-0 transition group-hover:opacity-100">
+                              calibrar
+                            </span>
+                          </button>
+                        ) : (
+                          <StatusBadge status={record.status} />
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {record.violations.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {record.violations.map((v) => (
+                              <span
+                                key={`${record.id}-${v.rule}`}
+                                className={v.severity === 'REJECTION'
+                                  ? 'inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-800'
+                                  : 'inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800'}
+                              >
+                                {v.rule}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-neutral-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          className="rounded-lg p-1.5 text-green-700 transition hover:bg-green-50"
+                          title={`Gráfico Levey-Jennings: ${record.examName} · ${record.level}`}
+                          onClick={() => setChartRecord({ examName: record.examName, level: record.level })}
+                        >
+                          <Activity className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : null}
+      </Card>
+
+      <Modal
+        isOpen={chartRecord !== null}
+        onClose={() => setChartRecord(null)}
+        title={chartRecord ? `Levey-Jennings — ${chartRecord.examName} · ${chartRecord.level}` : ''}
+        size="lg"
+      >
+        {chartRecord ? (
+          <>
+            <div className="mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              Últimos 30 registros canônicos de CQ para <strong>{chartRecord.examName}</strong> · nível <strong>{chartRecord.level}</strong>.
+              Eventos de pós-calibração não entram nesta curva.
+            </div>
+            <Suspense fallback={<Skeleton height="24rem" />}>
+              <LeveyJenningsChart examName={chartRecord.examName} level={chartRecord.level} area={area} />
+            </Suspense>
+          </>
+        ) : null}
+      </Modal>
+
+      {/* Floating AI Chat */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+        {isChatOpen ? (
+          <div className="mb-3 flex w-[22rem] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-green-700" />
+                <span className="text-sm font-semibold text-neutral-900">Assistente IA</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsChatOpen(false)}
+                className="rounded-lg p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex max-h-80 flex-1 flex-col-reverse gap-3 overflow-y-auto p-4">
+              {aiHistory.length === 0 ? (
+                <p className="text-center text-sm text-neutral-400">
+                  Pergunte sobre tendências, alertas e recomendações de CQ.
+                </p>
+              ) : (
+                aiHistory.map((item) => (
+                  <div key={item.id} className="space-y-1.5">
+                    <div className="ml-auto max-w-[85%] rounded-xl bg-green-50 px-3 py-2 text-sm text-green-900">
+                      {item.prompt}
+                    </div>
+                    <div className="max-w-[85%] rounded-xl bg-neutral-50 px-3 py-2">
+                      <div className="prose prose-sm max-w-none text-neutral-700">
+                        <Suspense fallback={<div className="whitespace-pre-wrap text-sm">{item.response}</div>}>
+                          <MarkdownRenderer>{item.response}</MarkdownRenderer>
+                        </Suspense>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="border-t border-neutral-100 p-3">
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleAiAnalysis()
+                    }
+                  }}
+                  placeholder="Ex.: Há tendência de desvio?"
+                  rows={1}
+                  className="max-h-24 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none transition focus:border-green-400 focus:ring-1 focus:ring-green-400"
+                />
+                <button
+                  type="button"
+                  onClick={handleAiAnalysis}
+                  disabled={aiMutation.isPending}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-green-700 text-white transition hover:bg-green-800 disabled:opacity-50"
+                >
+                  {aiMutation.isPending ? (
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setIsChatOpen((v) => !v)}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-green-700 text-white shadow-lg transition hover:bg-green-800 hover:shadow-xl"
+          title="Assistente IA"
+        >
+          {isChatOpen ? <X className="h-6 w-6" /> : <Bot className="h-6 w-6" />}
+        </button>
+      </div>
     </div>
   )
 }
@@ -665,6 +865,18 @@ function getViolationSeverityClasses(severity: string) {
     return 'inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800'
   }
   return 'inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800'
+}
+
+function formatRecordDate(date: string) {
+  try {
+    return new Date(date + 'T00:00:00').toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+  } catch {
+    return date
+  }
 }
 
 function DecisionMetric({ label, value }: { label: string; value: string }) {

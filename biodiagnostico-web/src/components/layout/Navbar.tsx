@@ -1,11 +1,12 @@
-import { Beaker, LayoutDashboard, LogOut, Menu, User, X } from 'lucide-react'
+import { Beaker, LayoutDashboard, LogOut, Menu, Users, User, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../ui'
 import { cn } from '../../utils/cn'
+import { ROLE_LABELS } from '../../lib/permissions'
 
-const navItems = [
+const baseNavItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Controle de Qualidade', href: '/qc', icon: Beaker },
 ]
@@ -19,6 +20,9 @@ export function Navbar() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const isDropdownOpen = dropdownPath === location.pathname
   const isMobileOpen = mobilePath === location.pathname
+  const navItems = user?.role === 'ADMIN'
+    ? [...baseNavItems, { label: 'Usuários', href: '/admin', icon: Users }]
+    : baseNavItems
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -101,7 +105,7 @@ export function Navbar() {
               <div className="absolute right-8 top-14 w-64 rounded-2xl border border-neutral-200 bg-white p-3 shadow-elevated">
                 <div className="px-3 py-2">
                   <div className="font-semibold text-neutral-900">{user?.name}</div>
-                  <div className="text-sm text-neutral-500">{user?.email}</div>
+                  <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
                 </div>
                 <div className="my-2 border-t border-neutral-100" />
                 <button
@@ -167,7 +171,7 @@ export function Navbar() {
 
             <div className="mt-auto rounded-2xl bg-neutral-50 p-4">
               <div className="font-semibold text-neutral-900">{user?.name}</div>
-              <div className="text-sm text-neutral-500">{user?.email}</div>
+              <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
               <Button variant="danger" className="mt-4 w-full" onClick={handleLogout}>
                 Sair
               </Button>
