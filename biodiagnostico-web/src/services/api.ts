@@ -1,39 +1,85 @@
-import axios, { type InternalAxiosRequestConfig } from 'axios'
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
+import { emitApiError } from '../lib/apiEvents'
 import type { AuthResponse } from '../types'
 
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
 const API_URL = import.meta.env.DEV ? '/api' : configuredApiUrl || 'http://localhost:8080/api'
 
+type RetriableRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean
+  _retryCount?: number
+}
+
+let accessToken: string | null = null
+let authUser: AuthResponse['user'] | null = null
 let refreshPromise: Promise<AuthResponse> | null = null
+let redirectScheduled = false
 
 export const api = axios.create({
   baseURL: API_URL,
+  withCredentials: true,
 })
 
-function getStoredTokens() {
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function isAuthRoute(url?: string) {
+  return Boolean(
+    url &&
+      ['/auth/login', '/auth/refresh', '/auth/logout', '/auth/forgot-password', '/auth/reset-password'].some((path) =>
+        url.includes(path),
+      ),
+  )
+}
+
+function redirectToLogin() {
+  if (redirectScheduled) {
+    return
+  }
+  redirectScheduled = true
+  clearAuth()
+  window.location.href = '/login'
+  window.setTimeout(() => {
+    redirectScheduled = false
+  }, 500)
+}
+
+function extractErrorMessage(error: AxiosError) {
+  const responseMessage = (error.response?.data as { message?: string } | undefined)?.message
+  if (responseMessage) {
+    return responseMessage
+  }
+  if (!error.response) {
+    return 'Falha de rede ao comunicar com o servidor.'
+  }
+  if (error.response.status >= 500) {
+    return 'O servidor falhou ao processar a solicitacao. Tente novamente em instantes.'
+  }
+  return 'Nao foi possivel concluir a solicitacao.'
+}
+
+export function getAuthSnapshot() {
   return {
-    accessToken: sessionStorage.getItem('accessToken'),
-    refreshToken: sessionStorage.getItem('refreshToken'),
+    accessToken,
+    user: authUser,
   }
 }
 
 function persistAuth(auth: AuthResponse) {
-  sessionStorage.setItem('accessToken', auth.accessToken)
-  sessionStorage.setItem('refreshToken', auth.refreshToken)
-  sessionStorage.setItem('authUser', JSON.stringify(auth.user))
+  accessToken = auth.accessToken
+  authUser = auth.user
 }
 
 function clearAuth() {
-  sessionStorage.removeItem('accessToken')
-  sessionStorage.removeItem('refreshToken')
-  sessionStorage.removeItem('authUser')
+  accessToken = null
+  authUser = null
 }
 
 async function refreshAccessToken() {
   if (!refreshPromise) {
-    const { refreshToken } = getStoredTokens()
     refreshPromise = axios
-      .post<AuthResponse>(`${API_URL}/auth/refresh`, { refreshToken })
+      .post<AuthResponse>(`${API_URL}/auth/refresh`, undefined, { withCredentials: true })
       .then((response) => {
         persistAuth(response.data)
         return response.data
@@ -46,7 +92,6 @@ async function refreshAccessToken() {
 }
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const { accessToken } = getStoredTokens()
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
   }
@@ -56,18 +101,38 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
-    if (error.response?.status === 401 && !originalRequest?._retry) {
+    const axiosError = error as AxiosError
+    const originalRequest = axiosError.config as RetriableRequestConfig | undefined
+
+    if (!originalRequest) {
+      return Promise.reject(error)
+    }
+
+    const status = axiosError.response?.status
+    const isNetworkError = !axiosError.response
+    const retryCount = originalRequest._retryCount ?? 0
+
+    if ((isNetworkError || (status !== undefined && status >= 500)) && retryCount < 3 && !isAuthRoute(originalRequest.url)) {
+      originalRequest._retryCount = retryCount + 1
+      await wait(250 * 2 ** retryCount)
+      return api(originalRequest)
+    }
+
+    if (status === 401 && !originalRequest._retry && !isAuthRoute(originalRequest.url)) {
       originalRequest._retry = true
       try {
         const auth = await refreshAccessToken()
         originalRequest.headers.Authorization = `Bearer ${auth.accessToken}`
         return api(originalRequest)
       } catch {
-        clearAuth()
-        window.location.href = '/login'
+        redirectToLogin()
       }
     }
+
+    if (isNetworkError || (status !== undefined && status >= 500)) {
+      emitApiError(extractErrorMessage(axiosError))
+    }
+
     return Promise.reject(error)
   },
 )

@@ -1,77 +1,66 @@
+import { zodResolver } from '@hookform/resolvers/zod'
 import { Eye, EyeOff, Lock, Mail, Shield } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { Navigate } from 'react-router-dom'
-import { useAuth } from '../hooks/useAuth'
 import { Button, Card, Input, Modal, useToast } from '../components/ui'
+import { useAuth } from '../hooks/useAuth'
+import {
+  type LoginFormValues,
+  type RecoveryFormValues,
+  loginSchema,
+  recoverySchema,
+} from '../lib/authSchemas'
 import { authService } from '../services/authService'
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth()
   const { toast } = useToast()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false)
-  const [recoveryEmail, setRecoveryEmail] = useState('')
   const [recoverySent, setRecoverySent] = useState(false)
+  const [recoveryRecipient, setRecoveryRecipient] = useState('')
   const [recoveryLink, setRecoveryLink] = useState('')
-  const [isRecoverySubmitting, setIsRecoverySubmitting] = useState(false)
-
-  const errors = useMemo(() => {
-    return {
-      email:
-        email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-          ? 'Informe um email válido.'
-          : '',
-      password: password && password.length < 6 ? 'A senha deve ter pelo menos 6 caracteres.' : '',
-    }
-  }, [email, password])
+  const loginForm = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: '',
+      password: '',
+    },
+    mode: 'onChange',
+  })
+  const recoveryForm = useForm<RecoveryFormValues>({
+    resolver: zodResolver(recoverySchema),
+    defaultValues: {
+      email: '',
+    },
+    mode: 'onChange',
+  })
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />
   }
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!email || !password) {
-      toast.error('Preencha email e senha para continuar.')
-      return
-    }
-    if (errors.email || errors.password) {
-      toast.error('Corrija os campos destacados antes de continuar.')
-      return
-    }
-
+  const handleLogin = loginForm.handleSubmit(async (data) => {
     try {
-      setIsSubmitting(true)
-      await login(email, password)
+      await login(data.email, data.password)
     } catch {
       toast.error('Credenciais inválidas. Confira seu email e senha.')
-    } finally {
-      setIsSubmitting(false)
     }
-  }
+  })
 
-  const handleRecovery = async () => {
-    if (!recoveryEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recoveryEmail)) {
-      toast.warning('Informe um email válido para recuperação.')
-      return
-    }
-
+  const handleRecovery = recoveryForm.handleSubmit(async (data) => {
     try {
-      setIsRecoverySubmitting(true)
-      const response = await authService.requestPasswordReset({ email: recoveryEmail })
+      const response = await authService.requestPasswordReset({ email: data.email })
       setRecoveryLink(response.resetUrl ?? '')
+      setRecoveryRecipient(data.email)
       setRecoverySent(true)
       toast.success(response.message)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível iniciar a recuperação.'
       toast.error(message)
-    } finally {
-      setIsRecoverySubmitting(false)
     }
-  }
+  })
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -109,26 +98,26 @@ export function LoginPage() {
               <p className="text-neutral-500">Sistema de Controle de Qualidade</p>
             </div>
 
-            <form className="space-y-5" onSubmit={handleSubmit}>
+            <form className="space-y-5" onSubmit={handleLogin}>
               <Input
                 label="Email corporativo"
                 type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
                 placeholder="voce@empresa.com"
                 icon={<Mail className="h-4 w-4" />}
-                error={errors.email}
+                error={loginForm.formState.errors.email?.message}
+                autoComplete="email"
+                {...loginForm.register('email')}
               />
 
               <div className="relative">
                 <Input
                   label="Senha"
                   type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
                   placeholder="Digite sua senha"
                   icon={<Lock className="h-4 w-4" />}
-                  error={errors.password}
+                  error={loginForm.formState.errors.password?.message}
+                  autoComplete="current-password"
+                  {...loginForm.register('password')}
                 />
                 <button
                   type="button"
@@ -145,8 +134,9 @@ export function LoginPage() {
                   type="button"
                   className="text-sm font-medium text-green-800 transition hover:text-green-900"
                   onClick={() => {
-                    setRecoveryEmail(email)
+                    recoveryForm.reset({ email: loginForm.getValues('email') })
                     setRecoverySent(false)
+                    setRecoveryRecipient('')
                     setRecoveryLink('')
                     setIsRecoveryOpen(true)
                   }}
@@ -155,7 +145,7 @@ export function LoginPage() {
                 </button>
               </div>
 
-              <Button type="submit" size="xl" className="w-full" loading={isSubmitting}>
+              <Button type="submit" size="xl" className="w-full" loading={loginForm.formState.isSubmitting}>
                 Entrar
               </Button>
             </form>
@@ -178,7 +168,7 @@ export function LoginPage() {
               Fechar
             </Button>
             {!recoverySent ? (
-              <Button onClick={() => void handleRecovery()} loading={isRecoverySubmitting}>
+              <Button onClick={() => void handleRecovery()} loading={recoveryForm.formState.isSubmitting}>
                 Enviar link de recuperação
               </Button>
             ) : null}
@@ -189,14 +179,15 @@ export function LoginPage() {
           <Input
             label="Email"
             type="email"
-            value={recoveryEmail}
-            onChange={(event) => setRecoveryEmail(event.target.value)}
             placeholder="voce@empresa.com"
+            error={recoveryForm.formState.errors.email?.message}
+            autoComplete="email"
+            {...recoveryForm.register('email')}
           />
         ) : (
           <div className="space-y-3">
             <Card className="border border-green-100 bg-green-50 text-green-900">
-              Um link de recuperação foi enviado para <strong>{recoveryEmail}</strong>.
+              Um link de recuperação foi enviado para <strong>{recoveryRecipient}</strong>.
             </Card>
             {recoveryLink ? (
               <Card className="border border-amber-100 bg-amber-50 text-amber-900">

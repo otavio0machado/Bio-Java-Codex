@@ -1,8 +1,11 @@
+import { zodResolver } from '@hookform/resolvers/zod'
 import { Eye, EyeOff, KeyRound, Lock } from 'lucide-react'
-import { useMemo, useState, type FormEvent } from 'react'
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { Button, Card, Input, useToast } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
+import { type ResetPasswordFormValues, resetPasswordSchema } from '../lib/authSchemas'
 import { authService } from '../services/authService'
 
 export function ResetPasswordPage() {
@@ -10,56 +13,40 @@ export function ResetPasswordPage() {
   const { toast } = useToast()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') ?? ''
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [isSubmitting, setIsSubmitting] = useState(false)
   const [wasReset, setWasReset] = useState(false)
-
-  const errors = useMemo(() => {
-    return {
-      password: password && password.length < 6 ? 'A senha deve ter pelo menos 6 caracteres.' : '',
-      confirmPassword:
-        confirmPassword && password !== confirmPassword ? 'As senhas precisam ser iguais.' : '',
-    }
-  }, [confirmPassword, password])
+  const form = useForm<ResetPasswordFormValues>({
+    resolver: zodResolver(resetPasswordSchema),
+    defaultValues: {
+      password: '',
+      confirmPassword: '',
+    },
+    mode: 'onChange',
+  })
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />
   }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
+  const handleSubmit = form.handleSubmit(async (data) => {
     if (!token) {
       toast.error('O link de recuperação está incompleto ou inválido.')
       return
     }
-    if (!password || !confirmPassword) {
-      toast.warning('Preencha os dois campos de senha.')
-      return
-    }
-    if (errors.password || errors.confirmPassword) {
-      toast.error('Corrija os campos antes de continuar.')
-      return
-    }
 
     try {
-      setIsSubmitting(true)
       const response = await authService.resetPassword({
         token,
-        newPassword: password,
+        newPassword: data.password,
       })
       toast.success(response.message)
       setWasReset(true)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.'
       toast.error(message)
-    } finally {
-      setIsSubmitting(false)
     }
-  }
+  })
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -121,11 +108,11 @@ export function ResetPasswordPage() {
                   <Input
                     label="Nova senha"
                     type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
                     placeholder="Digite sua nova senha"
                     icon={<Lock className="h-4 w-4" />}
-                    error={errors.password}
+                    error={form.formState.errors.password?.message}
+                    autoComplete="new-password"
+                    {...form.register('password')}
                   />
                   <button
                     type="button"
@@ -141,11 +128,11 @@ export function ResetPasswordPage() {
                   <Input
                     label="Confirmar nova senha"
                     type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
                     placeholder="Repita a nova senha"
                     icon={<KeyRound className="h-4 w-4" />}
-                    error={errors.confirmPassword}
+                    error={form.formState.errors.confirmPassword?.message}
+                    autoComplete="new-password"
+                    {...form.register('confirmPassword')}
                   />
                   <button
                     type="button"
@@ -157,7 +144,7 @@ export function ResetPasswordPage() {
                   </button>
                 </div>
 
-                <Button type="submit" size="xl" className="w-full" loading={isSubmitting} disabled={!token}>
+                <Button type="submit" size="xl" className="w-full" loading={form.formState.isSubmitting} disabled={!token}>
                   Salvar nova senha
                 </Button>
               </form>

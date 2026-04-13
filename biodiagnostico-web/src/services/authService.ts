@@ -17,9 +17,13 @@ export const authService = {
     return response.data
   },
   async refreshToken(request: RefreshTokenRequest) {
-    const response = await api.post<AuthResponse>('/auth/refresh', request)
+    const payload = request.refreshToken ? request : undefined
+    const response = await api.post<AuthResponse>('/auth/refresh', payload)
     persistAuth(response.data)
     return response.data
+  },
+  async logout() {
+    await api.post('/auth/logout')
   },
   async register(request: RegisterRequest) {
     const response = await api.post<User>('/auth/register', request)

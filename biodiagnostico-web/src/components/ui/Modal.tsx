@@ -28,7 +28,10 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
   const containerRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(onClose)
   const wasOpenRef = useRef(false)
-  onCloseRef.current = onClose
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   const stableOnClose = useCallback(() => onCloseRef.current(), [])
 
