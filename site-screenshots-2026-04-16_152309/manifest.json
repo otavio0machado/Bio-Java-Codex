@@ -1,0 +1,92 @@
+[
+  {
+    "file": "01-dashboard.png",
+    "label": "Dashboard",
+    "url": "http://localhost:5173/dashboard",
+    "h1": ""
+  },
+  {
+    "file": "02-bioquimica-dashboard-cq.png",
+    "label": "Bioquímica > Dashboard CQ",
+    "url": "http://localhost:5173/qc?area=bioquimica",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "03-bioquimica-registro-cq.png",
+    "label": "Bioquímica > Registro CQ",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=registro",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "04-bioquimica-referencias.png",
+    "label": "Bioquímica > Referências",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=referencias",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "05-bioquimica-reagentes.png",
+    "label": "Bioquímica > Reagentes",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=reagentes",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "06-bioquimica-manutencao.png",
+    "label": "Bioquímica > Manutenção",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=manutencao",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "07-bioquimica-relatorios.png",
+    "label": "Bioquímica > Relatórios",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=relatorios",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "08-bioquimica-importar.png",
+    "label": "Bioquímica > Importar",
+    "url": "http://localhost:5173/qc?area=bioquimica&tab=importar",
+    "h1": "Bioquímica"
+  },
+  {
+    "file": "09-hematologia.png",
+    "label": "Hematologia",
+    "url": "http://localhost:5173/qc?area=hematologia",
+    "h1": "Hematologia"
+  },
+  {
+    "file": "10-imunologia.png",
+    "label": "Imunologia",
+    "url": "http://localhost:5173/qc?area=imunologia",
+    "h1": "Imunologia"
+  },
+  {
+    "file": "11-parasitologia.png",
+    "label": "Parasitologia",
+    "url": "http://localhost:5173/qc?area=parasitologia",
+    "h1": "Parasitologia"
+  },
+  {
+    "file": "12-microbiologia.png",
+    "label": "Microbiologia",
+    "url": "http://localhost:5173/qc?area=microbiologia",
+    "h1": "Microbiologia"
+  },
+  {
+    "file": "13-uroanalise.png",
+    "label": "Uroanálise",
+    "url": "http://localhost:5173/qc?area=uroanalise",
+    "h1": "Uroanálise"
+  },
+  {
+    "file": "14-usuarios-admin.png",
+    "label": "Usuários",
+    "url": "http://localhost:5173/admin",
+    "h1": "Gestão de Usuários"
+  },
+  {
+    "file": "15-configuracao.png",
+    "label": "Configuração",
+    "url": "http://localhost:5173/config",
+    "h1": "Configuração"
+  }
+]
