@@ -1,9 +1,8 @@
 import {
+  Area,
   CartesianGrid,
   ComposedChart,
   Line,
-  ReferenceArea,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -32,24 +31,30 @@ function CustomTooltip({
   payload,
 }: {
   active?: boolean
-  payload?: Array<{ payload: LeveyJenningsPoint }>
+  payload?: Array<{ payload: ChartPoint }>
 }) {
   if (!active || !payload?.length) {
     return null
   }
 
-  const data = payload[0]?.payload as LeveyJenningsPoint
+  const data = payload[0]?.payload as ChartPoint
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg">
       <div className="text-sm font-semibold text-neutral-900">{formatDate(data.date)}</div>
       <div className="mt-3 space-y-1 text-sm text-neutral-600">
         <div>Valor: <strong>{data.value.toFixed(2)}</strong></div>
         <div>Alvo: {data.target.toFixed(2)}</div>
+        <div>DP: ±{data.sd.toFixed(2)}</div>
         <div>Z-Score: {data.zScore.toFixed(2)}</div>
         <div className="pt-1"><StatusBadge status={data.status} /></div>
       </div>
     </div>
   )
+}
+
+interface ChartPoint extends LeveyJenningsPoint {
+  upper1sd: number
+  lower1sd: number
 }
 
 export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChartProps) {
@@ -69,14 +74,11 @@ export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChart
     )
   }
 
-  const first = data[0]
-  const target = first.target
-  const upper1 = target + first.sd
-  const lower1 = target - first.sd
-  const upper2 = first.upper2sd
-  const lower2 = first.lower2sd
-  const upper3 = first.upper3sd
-  const lower3 = first.lower3sd
+  const chartData: ChartPoint[] = data.map((point) => ({
+    ...point,
+    upper1sd: point.target + point.sd,
+    lower1sd: point.target - point.sd,
+  }))
 
   return (
     <Card className="space-y-4">
@@ -87,33 +89,47 @@ export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChart
             {examName} · {level} · {area}
           </p>
           <p className="mt-1 text-xs text-neutral-500">
-            Curva baseada nos ultimos 30 registros canonicos de CQ. Pos-calibracoes nao sao adicionadas como novos pontos.
+            Curva baseada nos últimos 30 registros canônicos de CQ. Faixas de referência acompanham cada registro individualmente.
           </p>
         </div>
       </div>
       <div className="h-[26rem] w-full overflow-x-auto">
         <div className="min-w-[720px] h-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data}>
+            <ComposedChart data={chartData}>
               <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" />
-              <ReferenceArea y1={lower3} y2={upper3} fill="#fee2e2" fillOpacity={0.25} />
-              <ReferenceArea y1={lower2} y2={upper2} fill="#fef3c7" fillOpacity={0.35} />
-              <ReferenceArea y1={lower1} y2={upper1} fill="#dcfce7" fillOpacity={0.45} />
-              <ReferenceLine y={target} stroke="#16a34a" strokeDasharray="5 5" />
-              <ReferenceLine y={upper2} stroke="#eab308" strokeDasharray="5 5" />
-              <ReferenceLine y={lower2} stroke="#eab308" strokeDasharray="5 5" />
-              <ReferenceLine y={upper3} stroke="#dc2626" strokeDasharray="5 5" />
-              <ReferenceLine y={lower3} stroke="#dc2626" strokeDasharray="5 5" />
+
+              {/* Faixa ±3SD (vermelha) */}
+              <Area type="monotone" dataKey="upper3sd" stroke="none" fill="#fee2e2" fillOpacity={0.25} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+              <Area type="monotone" dataKey="lower3sd" stroke="none" fill="#ffffff" fillOpacity={1} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+
+              {/* Faixa ±2SD (amarela) */}
+              <Area type="monotone" dataKey="upper2sd" stroke="none" fill="#fef3c7" fillOpacity={0.35} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+              <Area type="monotone" dataKey="lower2sd" stroke="none" fill="#ffffff" fillOpacity={1} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+
+              {/* Faixa ±1SD (verde) */}
+              <Area type="monotone" dataKey="upper1sd" stroke="none" fill="#dcfce7" fillOpacity={0.45} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+              <Area type="monotone" dataKey="lower1sd" stroke="none" fill="#ffffff" fillOpacity={1} isAnimationActive={false} dot={false} activeDot={false} legendType="none" />
+
+              {/* Linhas de referência dinâmicas por ponto */}
+              <Line type="monotone" dataKey="target" stroke="#16a34a" strokeDasharray="5 5" strokeWidth={1} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="upper2sd" stroke="#eab308" strokeDasharray="5 5" strokeWidth={1} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="lower2sd" stroke="#eab308" strokeDasharray="5 5" strokeWidth={1} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="upper3sd" stroke="#dc2626" strokeDasharray="5 5" strokeWidth={1} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="lower3sd" stroke="#dc2626" strokeDasharray="5 5" strokeWidth={1} dot={false} isAnimationActive={false} />
+
               <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 12 }} />
               <YAxis domain={['auto', 'auto']} tick={{ fontSize: 12 }} />
               <Tooltip content={<CustomTooltip />} />
+
+              {/* Linha de valores medidos */}
               <Line
                 type="monotone"
                 dataKey="value"
                 stroke="#2563eb"
                 strokeWidth={2}
                 dot={(props) => {
-                  const payload = props.payload as LeveyJenningsPoint
+                  const payload = props.payload as ChartPoint
                   const fill =
                     payload.status === 'REPROVADO'
                       ? '#dc2626'

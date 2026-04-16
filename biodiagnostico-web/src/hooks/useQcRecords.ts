@@ -30,6 +30,18 @@ export function useCreateQcRecord() {
   })
 }
 
+export function useUpdateQcRecord() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, request }: { id: string; request: QcRecordRequest }) =>
+      qcService.updateRecord(id, request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['qc-records'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
 export function useCreateQcBatch() {
   const queryClient = useQueryClient()
   return useMutation({

@@ -20,4 +20,11 @@ public interface WestgardViolationRepository extends JpaRepository<WestgardViola
         ORDER BY w.createdAt DESC
         """)
     List<WestgardViolation> findRecentRejections(@Param("start") Instant start);
+
+    @Query("""
+        SELECT COUNT(DISTINCT w.qcRecord.id) FROM WestgardViolation w
+        WHERE w.severity = 'REJECTION'
+          AND w.createdAt >= :start
+        """)
+    long countDistinctRejectedRecords(@Param("start") Instant start);
 }

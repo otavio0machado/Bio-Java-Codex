@@ -123,11 +123,7 @@ public class QcService {
         LocalDate startDate,
         LocalDate endDate
     ) {
-        return qcRecordRepository.findAllByOrderByDateDesc().stream()
-            .filter(record -> area == null || area.isBlank() || area.equalsIgnoreCase(record.getArea()))
-            .filter(record -> examName == null || examName.isBlank() || examName.equalsIgnoreCase(record.getExamName()))
-            .filter(record -> startDate == null || !record.getDate().isBefore(startDate))
-            .filter(record -> endDate == null || !record.getDate().isAfter(endDate))
+        return qcRecordRepository.findByFilters(area, examName, startDate, endDate).stream()
             .map(ResponseMapper::toQcRecordResponse)
             .toList();
     }

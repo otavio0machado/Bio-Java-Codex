@@ -54,9 +54,9 @@ class DashboardServiceTest {
         when(qcRecordRepository.countByDate(any(LocalDate.class))).thenReturn(5L);
         when(qcRecordRepository.countByDateBetween(any(LocalDate.class), any(LocalDate.class))).thenReturn(42L);
         when(qcRecordRepository.calculateApprovalRate(any(LocalDate.class), any(LocalDate.class))).thenReturn(85.7);
-        when(reagentLotRepository.findExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(reagentLot()));
-        when(maintenanceRecordRepository.findPendingMaintenances()).thenReturn(List.of(maintenanceRecord()));
-        when(westgardViolationRepository.findRecentRejections(any(Instant.class))).thenReturn(List.of());
+        when(reagentLotRepository.countExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(1L);
+        when(maintenanceRecordRepository.countPendingMaintenances()).thenReturn(1L);
+        when(westgardViolationRepository.countDistinctRejectedRecords(any(Instant.class))).thenReturn(0L);
 
         DashboardKpiResponse kpis = dashboardService.getKpis(null);
 
@@ -73,9 +73,9 @@ class DashboardServiceTest {
         when(qcRecordRepository.countByDate(any(LocalDate.class))).thenReturn(0L);
         when(qcRecordRepository.countByDateBetween(any(LocalDate.class), any(LocalDate.class))).thenReturn(0L);
         when(qcRecordRepository.calculateApprovalRate(any(LocalDate.class), any(LocalDate.class))).thenReturn(null);
-        when(reagentLotRepository.findExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of());
-        when(maintenanceRecordRepository.findPendingMaintenances()).thenReturn(List.of());
-        when(westgardViolationRepository.findRecentRejections(any(Instant.class))).thenReturn(List.of());
+        when(reagentLotRepository.countExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(0L);
+        when(maintenanceRecordRepository.countPendingMaintenances()).thenReturn(0L);
+        when(westgardViolationRepository.countDistinctRejectedRecords(any(Instant.class))).thenReturn(0L);
 
         DashboardKpiResponse kpis = dashboardService.getKpis(null);
 

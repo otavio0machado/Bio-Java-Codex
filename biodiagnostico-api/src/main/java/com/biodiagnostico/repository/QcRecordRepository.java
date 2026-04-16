@@ -93,6 +93,21 @@ public interface QcRecordRepository extends JpaRepository<QcRecord, UUID> {
 
     @Query("""
         SELECT q FROM QcRecord q
+        WHERE (:area IS NULL OR :area = '' OR LOWER(q.area) = LOWER(:area))
+          AND (:examName IS NULL OR :examName = '' OR LOWER(q.examName) = LOWER(:examName))
+          AND (CAST(:startDate AS localdate) IS NULL OR q.date >= :startDate)
+          AND (CAST(:endDate AS localdate) IS NULL OR q.date <= :endDate)
+        ORDER BY q.date DESC
+        """)
+    List<QcRecord> findByFilters(
+        @Param("area") String area,
+        @Param("examName") String examName,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+        SELECT q FROM QcRecord q
         WHERE LOWER(q.area) = LOWER(:area)
           AND q.date BETWEEN :startDate AND :endDate
         ORDER BY q.date DESC

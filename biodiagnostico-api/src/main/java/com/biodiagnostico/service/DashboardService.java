@@ -108,9 +108,10 @@ public class DashboardService {
     }
 
     private long getAlertsCount() {
-        long expiring = reagentLotRepository.findExpiringLots(LocalDate.now(), LocalDate.now().plusDays(30)).size();
-        long pendingMaintenances = maintenanceRecordRepository.findPendingMaintenances().size();
-        long rejected = mapRejectedRecordsOfCurrentMonth().size();
+        Instant startOfMonth = YearMonth.now().atDay(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+        long expiring = reagentLotRepository.countExpiringLots(LocalDate.now(), LocalDate.now().plusDays(30));
+        long pendingMaintenances = maintenanceRecordRepository.countPendingMaintenances();
+        long rejected = westgardViolationRepository.countDistinctRejectedRecords(startOfMonth);
         return expiring + pendingMaintenances + rejected;
     }
 

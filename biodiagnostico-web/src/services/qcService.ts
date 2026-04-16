@@ -63,6 +63,10 @@ export const qcService = {
   async deleteReference(id: string) {
     await api.delete(`/qc/references/${id}`)
   },
+  async updateRecord(id: string, request: QcRecordRequest) {
+    const response = await api.put<QcRecord>(`/qc/records/${id}`, request)
+    return response.data
+  },
   async deleteRecord(id: string) {
     await api.delete(`/qc/records/${id}`)
   },

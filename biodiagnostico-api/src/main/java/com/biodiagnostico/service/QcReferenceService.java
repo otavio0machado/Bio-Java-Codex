@@ -131,6 +131,7 @@ public class QcReferenceService {
     @Transactional
     public QcReferenceValue createReference(QcReferenceRequest request) {
         validateReferenceRequest(request);
+        closePreviousReference(request.examId(), request.level(), request.validFrom());
         checkOverlap(request.examId(), request.level(), request.validFrom(), request.validUntil(), null);
         QcExam exam = qcExamRepository.findById(request.examId())
             .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
@@ -149,6 +150,21 @@ public class QcReferenceService {
             .isActive(Boolean.TRUE)
             .build();
         return qcReferenceValueRepository.save(reference);
+    }
+
+    private void closePreviousReference(UUID examId, String level, LocalDate newValidFrom) {
+        if (newValidFrom == null) {
+            return;
+        }
+        LocalDate closingDate = newValidFrom.minusDays(1);
+        qcReferenceValueRepository.findByExamIdAndIsActiveTrue(examId).stream()
+            .filter(ref -> ref.getLevel() != null && ref.getLevel().equalsIgnoreCase(level))
+            .filter(ref -> ref.getValidUntil() == null)
+            .filter(ref -> ref.getValidFrom() == null || !ref.getValidFrom().isAfter(closingDate))
+            .forEach(ref -> {
+                ref.setValidUntil(closingDate);
+                qcReferenceValueRepository.save(ref);
+            });
     }
 
     @Transactional

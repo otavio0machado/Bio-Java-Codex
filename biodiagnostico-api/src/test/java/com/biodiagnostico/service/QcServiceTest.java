@@ -345,9 +345,8 @@ class QcServiceTest {
     @Test
     @DisplayName("deve retornar registros filtrando por área")
     void shouldReturnRecordsFilteredByArea() {
-        when(recordRepository.findAllByOrderByDateDesc()).thenReturn(List.of(
-            QcRecord.builder().id(UUID.randomUUID()).examName("Glicose").area("bioquimica").date(LocalDate.now()).build(),
-            QcRecord.builder().id(UUID.randomUUID()).examName("HB").area("hematologia").date(LocalDate.now()).build()
+        when(recordRepository.findByFilters(eq("bioquimica"), eq(null), eq(null), eq(null))).thenReturn(List.of(
+            QcRecord.builder().id(UUID.randomUUID()).examName("Glicose").area("bioquimica").date(LocalDate.now()).build()
         ));
 
         var response = qcService.getRecords("bioquimica", null, null, null);

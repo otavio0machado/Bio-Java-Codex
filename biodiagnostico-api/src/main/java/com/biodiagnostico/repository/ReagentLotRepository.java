@@ -42,6 +42,13 @@ public interface ReagentLotRepository extends JpaRepository<ReagentLot, UUID> {
     List<ReagentLot> findExpiringLots(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 
     @Query("""
+        SELECT COUNT(r) FROM ReagentLot r
+        WHERE r.expiryDate BETWEEN :startDate AND :endDate
+          AND r.status <> 'vencido'
+        """)
+    long countExpiringLots(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    @Query("""
         SELECT
           r.name AS name,
           COUNT(r) AS total,

@@ -19,4 +19,11 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
         ORDER BY m.nextDate ASC
         """)
     List<MaintenanceRecord> findPendingMaintenances();
+
+    @Query("""
+        SELECT COUNT(m) FROM MaintenanceRecord m
+        WHERE m.nextDate IS NOT NULL
+          AND m.nextDate <= CURRENT_DATE
+        """)
+    long countPendingMaintenances();
 }

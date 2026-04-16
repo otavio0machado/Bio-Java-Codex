@@ -155,7 +155,6 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                 <th className="px-3 py-2.5">Exame</th>
                 <th className="px-3 py-2.5">Alvo</th>
                 <th className="px-3 py-2.5">DP</th>
-                <th className="px-3 py-2.5">CV Máx</th>
                 <th className="px-3 py-2.5">Validade</th>
                 <th className="px-3 py-2.5">Lote</th>
                 <th className="px-3 py-2.5">Fabricante</th>
@@ -170,7 +169,6 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                   <td className="px-3 py-2.5 text-neutral-700">{reference.exam.name}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-700">{reference.targetValue.toFixed(2)}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.targetSd.toFixed(2)}</td>
-                  <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.cvMaxThreshold.toFixed(2)}%</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-neutral-600">
                     {reference.validFrom ? formatDate(reference.validFrom) : '—'}
                     {' → '}
@@ -382,7 +380,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
                   ...c,
                   targetValue: last.targetValue ?? c.targetValue,
                   targetSd: last.targetSd ?? c.targetSd,
-                  cvMaxThreshold: last.cvMaxThreshold ?? c.cvMaxThreshold,
                   manufacturer: last.manufacturer ?? c.manufacturer,
                 }))
               } catch { /* nenhuma referencia anterior */ }
@@ -408,7 +405,7 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <Input
             label="Valor Alvo (Média de Controle)"
             type="number"
@@ -422,13 +419,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
             step="0.01"
             value={String(form.targetSd)}
             onChange={(event) => setForm((current) => ({ ...current, targetSd: Number(event.target.value) }))}
-          />
-          <Input
-            label="CV Máximo (%)"
-            type="number"
-            step="0.01"
-            value={String(form.cvMaxThreshold)}
-            onChange={(event) => setForm((current) => ({ ...current, cvMaxThreshold: Number(event.target.value) }))}
           />
         </div>
 
