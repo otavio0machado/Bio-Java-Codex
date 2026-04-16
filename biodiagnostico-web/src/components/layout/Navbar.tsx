@@ -1,4 +1,4 @@
-import { Beaker, LayoutDashboard, LogOut, Menu, Users, User, X } from 'lucide-react'
+import { Beaker, LayoutDashboard, LogOut, Menu, Settings, Users, User, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -31,7 +31,11 @@ export function Navbar() {
   const isDropdownOpen = dropdownPath === location.pathname
   const isMobileOpen = mobilePath === location.pathname
   const navItems = user?.role === 'ADMIN'
-    ? [...baseNavItems, { label: 'Usuários', href: '/admin', area: null, icon: Users }]
+    ? [
+        ...baseNavItems,
+        { label: 'Usuários', href: '/admin', area: null, icon: Users },
+        { label: 'Configuração', href: '/config', area: null, icon: Settings },
+      ]
     : baseNavItems
   const currentArea = new URLSearchParams(location.search).get('area') ?? 'bioquimica'
 
