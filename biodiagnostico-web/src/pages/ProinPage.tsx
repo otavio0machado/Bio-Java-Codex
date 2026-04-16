@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Card, Skeleton } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
@@ -66,7 +66,7 @@ export function ProinPage() {
     })
   }, [user])
   const [searchParams, setSearchParams] = useSearchParams()
-  const [currentArea, setCurrentArea] = useState('bioquimica')
+  const currentArea = searchParams.get('area') ?? 'bioquimica'
   const currentTab = currentArea === 'bioquimica' ? (searchParams.get('tab') ?? 'dashboard') : 'registro'
 
   const handleTabChange = (tab: string) => {
@@ -115,30 +115,14 @@ export function ProinPage() {
     }
   }
 
+  const currentAreaLabel = areas.find((item) => item.value === currentArea)?.label ?? currentArea
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <header className="space-y-4">
         <div>
-          <h1 className="text-3xl font-bold text-neutral-900">Controle de Qualidade</h1>
-          <p className="text-base text-neutral-500">Operação central do ProIn para lançamento, rastreabilidade e análise.</p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {areas.map((area) => (
-            <button
-              key={area.value}
-              type="button"
-              className={cn(
-                'rounded-full px-5 py-3 text-base font-medium transition',
-                currentArea === area.value
-                  ? 'bg-green-800 text-white'
-                  : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200',
-              )}
-              onClick={() => setCurrentArea(area.value)}
-            >
-              {area.label}
-            </button>
-          ))}
+          <h1 className="text-3xl font-bold text-neutral-900">{currentAreaLabel}</h1>
+          <p className="text-base text-neutral-500">Operação de CQ da área selecionada — lançamento, rastreabilidade e análise.</p>
         </div>
 
         {currentArea === 'bioquimica' ? (

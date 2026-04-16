@@ -6,9 +6,18 @@ import { Button } from '../ui'
 import { cn } from '../../utils/cn'
 import { ROLE_LABELS } from '../../lib/permissions'
 
+const areaNavItems = [
+  { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker },
+  { label: 'Hematologia', href: '/qc?area=hematologia', area: 'hematologia', icon: Beaker },
+  { label: 'Imunologia', href: '/qc?area=imunologia', area: 'imunologia', icon: Beaker },
+  { label: 'Parasitologia', href: '/qc?area=parasitologia', area: 'parasitologia', icon: Beaker },
+  { label: 'Microbiologia', href: '/qc?area=microbiologia', area: 'microbiologia', icon: Beaker },
+  { label: 'Uroanálise', href: '/qc?area=uroanalise', area: 'uroanalise', icon: Beaker },
+]
+
 const baseNavItems = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Controle de Qualidade', href: '/qc', icon: Beaker },
+  { label: 'Dashboard', href: '/dashboard', area: null, icon: LayoutDashboard },
+  ...areaNavItems,
 ]
 
 export function Navbar() {
@@ -21,8 +30,9 @@ export function Navbar() {
   const isDropdownOpen = dropdownPath === location.pathname
   const isMobileOpen = mobilePath === location.pathname
   const navItems = user?.role === 'ADMIN'
-    ? [...baseNavItems, { label: 'Usuários', href: '/admin', icon: Users }]
+    ? [...baseNavItems, { label: 'Usuários', href: '/admin', area: null, icon: Users }]
     : baseNavItems
+  const currentArea = new URLSearchParams(location.search).get('area') ?? 'bioquimica'
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -68,24 +78,28 @@ export function Navbar() {
             <div className="text-xs text-neutral-500">Controle de Qualidade</div>
           </button>
 
-          <nav className="hidden items-center gap-8 md:flex">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.href}
-                to={item.href}
-                onClick={closeMenus}
-                className={({ isActive }) =>
-                  cn(
+          <nav className="hidden items-center gap-6 md:flex">
+            {navItems.map((item) => {
+              const isOnQc = location.pathname.startsWith('/qc')
+              const isActive = item.area
+                ? isOnQc && currentArea === item.area
+                : location.pathname.startsWith(item.href) && !isOnQc
+              return (
+                <NavLink
+                  key={item.href}
+                  to={item.href}
+                  onClick={closeMenus}
+                  className={cn(
                     'border-b-2 py-5 text-sm font-medium transition',
                     isActive
                       ? 'border-green-800 text-green-800'
                       : 'border-transparent text-neutral-500 hover:text-neutral-700',
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
+                  )}
+                >
+                  {item.label}
+                </NavLink>
+              )
+            })}
           </nav>
 
           <div className="hidden items-center gap-3 md:flex" ref={dropdownRef}>
@@ -151,7 +165,10 @@ export function Navbar() {
             <nav className="mt-8 space-y-2">
               {navItems.map((item) => {
                 const Icon = item.icon
-                const active = location.pathname.startsWith(item.href)
+                const isOnQc = location.pathname.startsWith('/qc')
+                const active = item.area
+                  ? isOnQc && currentArea === item.area
+                  : location.pathname.startsWith(item.href) && !isOnQc
                 return (
                   <NavLink
                     key={item.href}
