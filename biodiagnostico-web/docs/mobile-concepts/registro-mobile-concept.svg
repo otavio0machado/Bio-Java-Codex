@@ -63,7 +63,7 @@
   <rect x="210" y="880" width="480" height="190" rx="34" fill="#FFF7ED"/>
   <text x="240" y="928" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">ANALISE IMEDIATA</text>
   <text x="240" y="974" fill="#7C2D12" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700">Regra 1-2s acionada</text>
-  <text x="240" y="1010" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="20">Alerta preventivo. Pode registrar, mas o app ja orienta a proxima acao.</text>
+  <text x="240" y="1010" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="20">Alerta preventivo. Registrar e repetir controle.</text>
   <rect x="240" y="1032" width="182" height="40" rx="20" fill="#FDBA74"/>
   <text x="331" y="1058" text-anchor="middle" fill="#7C2D12" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">Repetir controle</text>
   <rect x="438" y="1032" width="196" height="40" rx="20" fill="#FFEDD5"/>

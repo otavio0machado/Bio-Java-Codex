@@ -29,7 +29,7 @@
   <rect x="175" y="175" width="550" height="250" rx="44" fill="url(#bannerHist)"/>
   <text x="220" y="244" fill="#BBF7D0" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="600">HISTORICO ANALITICO</text>
   <text x="220" y="300" fill="white" font-family="Inter, Arial, sans-serif" font-size="40" font-weight="700">Levey-Jennings</text>
-  <text x="220" y="338" fill="#CBD5E1" font-family="Inter, Arial, sans-serif" font-size="21">Glicose · Lote 042 · leitura do comportamento ao longo do periodo</text>
+  <text x="220" y="338" fill="#CBD5E1" font-family="Inter, Arial, sans-serif" font-size="21">Glicose · Lote 042 · tendencia por periodo</text>
 
   <rect x="220" y="364" width="76" height="40" rx="20" fill="#DCFCE7"/>
   <text x="258" y="390" text-anchor="middle" fill="#166534" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">7d</text>
@@ -73,8 +73,8 @@
 
   <rect x="210" y="880" width="480" height="118" rx="30" fill="#FFF7ED"/>
   <text x="240" y="924" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="700">INSIGHT DO APP</text>
-  <text x="240" y="964" fill="#7C2D12" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Tendencia de alta antes do pico critico</text>
-  <text x="240" y="993" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="18">A tela sugere investigar calibracao e repetir o controle do lote.</text>
+  <text x="240" y="964" fill="#7C2D12" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="700">Tendencia de alta antes do pico</text>
+  <text x="240" y="993" fill="#9A3412" font-family="Inter, Arial, sans-serif" font-size="18">Sugestao: revisar calibracao e repetir o controle.</text>
 
   <rect x="210" y="1022" width="480" height="336" rx="34" fill="white"/>
   <text x="240" y="1070" fill="#111827" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">Lancamentos recentes</text>

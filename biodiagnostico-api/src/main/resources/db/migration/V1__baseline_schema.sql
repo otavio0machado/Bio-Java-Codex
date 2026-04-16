@@ -2,12 +2,14 @@
 -- V1__baseline_schema.sql
 -- Baseline schema for Biodiagnostico API
 -- Generated from JPA entities - all PKs are UUID, no sequences used
+-- Keep baseline DDL idempotent so Flyway can adopt pre-provisioned schemas
+-- without requiring manual edits to flyway_schema_history.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
 -- users (entity: User)
 -- ---------------------------------------------------------------------------
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id              UUID            NOT NULL,
     username        VARCHAR(255)    NOT NULL,
     email           VARCHAR(255),
@@ -24,7 +26,7 @@ CREATE TABLE users (
 -- ---------------------------------------------------------------------------
 -- user_permissions (ElementCollection for User.permissions)
 -- ---------------------------------------------------------------------------
-CREATE TABLE user_permissions (
+CREATE TABLE IF NOT EXISTS user_permissions (
     user_id     UUID            NOT NULL,
     permission  VARCHAR(255)    NOT NULL,
     CONSTRAINT fk_user_permissions_user FOREIGN KEY (user_id)
@@ -35,7 +37,7 @@ CREATE TABLE user_permissions (
 -- audit_log (entity: AuditLog)
 -- details column uses json type (NOT jsonb) per entity annotation
 -- ---------------------------------------------------------------------------
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
     id          UUID            NOT NULL,
     user_id     UUID,
     action      VARCHAR(255)    NOT NULL,
@@ -53,7 +55,7 @@ CREATE TABLE audit_log (
 -- refresh_token_sessions (entity: RefreshTokenSession)
 -- 4 named indexes per @Index annotations
 -- ---------------------------------------------------------------------------
-CREATE TABLE refresh_token_sessions (
+CREATE TABLE IF NOT EXISTS refresh_token_sessions (
     id                      UUID            NOT NULL,
     user_id                 UUID            NOT NULL,
     token_id                UUID            NOT NULL,
@@ -71,16 +73,16 @@ CREATE TABLE refresh_token_sessions (
         REFERENCES users (id)
 );
 
-CREATE INDEX idx_refresh_token_sessions_user ON refresh_token_sessions (user_id);
-CREATE INDEX idx_refresh_token_sessions_family ON refresh_token_sessions (family_id);
-CREATE INDEX idx_refresh_token_sessions_expires ON refresh_token_sessions (expires_at);
-CREATE INDEX idx_refresh_token_sessions_revoked ON refresh_token_sessions (revoked_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_user ON refresh_token_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_family ON refresh_token_sessions (family_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_expires ON refresh_token_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_refresh_token_sessions_revoked ON refresh_token_sessions (revoked_at);
 
 -- ---------------------------------------------------------------------------
 -- password_reset_tokens (entity: PasswordResetToken)
 -- token column: length=120, unique=true
 -- ---------------------------------------------------------------------------
-CREATE TABLE password_reset_tokens (
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
     id          UUID            NOT NULL,
     user_id     UUID            NOT NULL,
     token       VARCHAR(120)    NOT NULL,
@@ -96,7 +98,7 @@ CREATE TABLE password_reset_tokens (
 -- ---------------------------------------------------------------------------
 -- qc_exams (entity: QcExam)
 -- ---------------------------------------------------------------------------
-CREATE TABLE qc_exams (
+CREATE TABLE IF NOT EXISTS qc_exams (
     id          UUID            NOT NULL,
     name        VARCHAR(255)    NOT NULL,
     area        VARCHAR(255)    NOT NULL DEFAULT 'bioquimica',
@@ -110,7 +112,7 @@ CREATE TABLE qc_exams (
 -- ---------------------------------------------------------------------------
 -- qc_reference_values (entity: QcReferenceValue)
 -- ---------------------------------------------------------------------------
-CREATE TABLE qc_reference_values (
+CREATE TABLE IF NOT EXISTS qc_reference_values (
     id                UUID                NOT NULL,
     exam_id           UUID                NOT NULL,
     name              VARCHAR(255)        NOT NULL,
@@ -134,7 +136,7 @@ CREATE TABLE qc_reference_values (
 -- ---------------------------------------------------------------------------
 -- qc_records (entity: QcRecord)
 -- ---------------------------------------------------------------------------
-CREATE TABLE qc_records (
+CREATE TABLE IF NOT EXISTS qc_records (
     id                UUID                NOT NULL,
     reference_id      UUID,
     exam_name         VARCHAR(255)        NOT NULL,
@@ -162,7 +164,7 @@ CREATE TABLE qc_records (
 -- ---------------------------------------------------------------------------
 -- westgard_violations (entity: WestgardViolation)
 -- ---------------------------------------------------------------------------
-CREATE TABLE westgard_violations (
+CREATE TABLE IF NOT EXISTS westgard_violations (
     id              UUID            NOT NULL,
     qc_record_id    UUID            NOT NULL,
     rule            VARCHAR(255)    NOT NULL,
@@ -177,7 +179,7 @@ CREATE TABLE westgard_violations (
 -- ---------------------------------------------------------------------------
 -- post_calibration_records (entity: PostCalibrationRecord)
 -- ---------------------------------------------------------------------------
-CREATE TABLE post_calibration_records (
+CREATE TABLE IF NOT EXISTS post_calibration_records (
     id                       UUID                NOT NULL,
     qc_record_id             UUID                NOT NULL,
     date                     DATE                NOT NULL,
@@ -198,7 +200,7 @@ CREATE TABLE post_calibration_records (
 -- ---------------------------------------------------------------------------
 -- reagent_lots (entity: ReagentLot)
 -- ---------------------------------------------------------------------------
-CREATE TABLE reagent_lots (
+CREATE TABLE IF NOT EXISTS reagent_lots (
     id                      UUID                NOT NULL,
     name                    VARCHAR(255)        NOT NULL,
     lot_number              VARCHAR(255)        NOT NULL,
@@ -222,7 +224,7 @@ CREATE TABLE reagent_lots (
 -- ---------------------------------------------------------------------------
 -- stock_movements (entity: StockMovement)
 -- ---------------------------------------------------------------------------
-CREATE TABLE stock_movements (
+CREATE TABLE IF NOT EXISTS stock_movements (
     id              UUID                NOT NULL,
     reagent_lot_id  UUID                NOT NULL,
     type            VARCHAR(255)        NOT NULL,
@@ -238,7 +240,7 @@ CREATE TABLE stock_movements (
 -- ---------------------------------------------------------------------------
 -- maintenance_records (entity: MaintenanceRecord)
 -- ---------------------------------------------------------------------------
-CREATE TABLE maintenance_records (
+CREATE TABLE IF NOT EXISTS maintenance_records (
     id          UUID            NOT NULL,
     equipment   VARCHAR(255)    NOT NULL,
     type        VARCHAR(255)    NOT NULL,
@@ -253,7 +255,7 @@ CREATE TABLE maintenance_records (
 -- ---------------------------------------------------------------------------
 -- hematology_qc_parameters (entity: HematologyQcParameter)
 -- ---------------------------------------------------------------------------
-CREATE TABLE hematology_qc_parameters (
+CREATE TABLE IF NOT EXISTS hematology_qc_parameters (
     id                      UUID                NOT NULL,
     analito                 VARCHAR(255)        NOT NULL,
     equipamento             VARCHAR(255),
@@ -273,7 +275,7 @@ CREATE TABLE hematology_qc_parameters (
 -- ---------------------------------------------------------------------------
 -- hematology_qc_measurements (entity: HematologyQcMeasurement)
 -- ---------------------------------------------------------------------------
-CREATE TABLE hematology_qc_measurements (
+CREATE TABLE IF NOT EXISTS hematology_qc_measurements (
     id              UUID                NOT NULL,
     parameter_id    UUID                NOT NULL,
     data_medicao    DATE                NOT NULL,
@@ -293,7 +295,7 @@ CREATE TABLE hematology_qc_measurements (
 -- ---------------------------------------------------------------------------
 -- hematology_bio_records (entity: HematologyBioRecord)
 -- ---------------------------------------------------------------------------
-CREATE TABLE hematology_bio_records (
+CREATE TABLE IF NOT EXISTS hematology_bio_records (
     id                  UUID                NOT NULL,
     data_bio            DATE                NOT NULL,
     data_pad            DATE,
@@ -342,7 +344,7 @@ CREATE TABLE hematology_bio_records (
 -- ---------------------------------------------------------------------------
 -- imunologia_records (entity: ImunologiaRecord)
 -- ---------------------------------------------------------------------------
-CREATE TABLE imunologia_records (
+CREATE TABLE IF NOT EXISTS imunologia_records (
     id          UUID            NOT NULL,
     controle    VARCHAR(255),
     fabricante  VARCHAR(255),
@@ -356,7 +358,7 @@ CREATE TABLE imunologia_records (
 -- ---------------------------------------------------------------------------
 -- area_qc_parameters (entity: AreaQcParameter)
 -- ---------------------------------------------------------------------------
-CREATE TABLE area_qc_parameters (
+CREATE TABLE IF NOT EXISTS area_qc_parameters (
     id                      UUID                NOT NULL,
     area                    VARCHAR(255)        NOT NULL,
     analito                 VARCHAR(255)        NOT NULL,
@@ -377,7 +379,7 @@ CREATE TABLE area_qc_parameters (
 -- ---------------------------------------------------------------------------
 -- area_qc_measurements (entity: AreaQcMeasurement)
 -- ---------------------------------------------------------------------------
-CREATE TABLE area_qc_measurements (
+CREATE TABLE IF NOT EXISTS area_qc_measurements (
     id              UUID                NOT NULL,
     parameter_id    UUID                NOT NULL,
     area            VARCHAR(255)        NOT NULL,

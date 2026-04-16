@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS lab_settings (
 
 -- Linha singleton — so existe uma configuracao ativa
 INSERT INTO lab_settings (id, lab_name, responsible_name, responsible_registration, address, phone, email)
-VALUES (gen_random_uuid(), '', '', '', '', '', '')
-ON CONFLICT DO NOTHING;
+SELECT gen_random_uuid(), '', '', '', '', '', ''
+WHERE NOT EXISTS (SELECT 1 FROM lab_settings);
 
 -- 2) Lista de emails que recebem relatorios (ADMIN/RESPONSAVEL)
 CREATE TABLE IF NOT EXISTS lab_report_emails (
