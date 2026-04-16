@@ -1,9 +1,9 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { emitApiError } from '../lib/apiEvents'
 import type { AuthResponse } from '../types'
+import { resolveApiUrl } from './runtimeConfig'
 
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
-const API_URL = import.meta.env.DEV ? '/api' : configuredApiUrl || 'http://localhost:8080/api'
+const API_URL = resolveApiUrl()
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
   _retry?: boolean

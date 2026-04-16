@@ -9,6 +9,7 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
+COPY --from=build /app/public/config.js.template /usr/share/nginx/html/config.js.template
 COPY --from=build /app/public/robots.txt.template /usr/share/nginx/html/robots.txt.template
 COPY --from=build /app/public/sitemap.xml.template /usr/share/nginx/html/sitemap.xml.template
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template

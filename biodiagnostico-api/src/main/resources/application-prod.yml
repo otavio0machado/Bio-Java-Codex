@@ -20,4 +20,4 @@ app:
   auth:
     refresh-cookie:
       secure: ${AUTH_REFRESH_COOKIE_SECURE:true}
-      same-site: ${AUTH_REFRESH_COOKIE_SAME_SITE:Strict}
+      same-site: ${AUTH_REFRESH_COOKIE_SAME_SITE:None}
