@@ -100,7 +100,7 @@ class ReportControllerTest {
         private byte[] reagentsPdf = new byte[0];
 
         StubPdfReportService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -109,8 +109,18 @@ class ReportControllerTest {
         }
 
         @Override
+        public com.biodiagnostico.dto.response.GeneratedReport generateQcReport(String area, String periodType, Integer month, Integer year) {
+            return new com.biodiagnostico.dto.response.GeneratedReport(qcPdf, "BIO-TEST-000001", "hash", "test");
+        }
+
+        @Override
         public byte[] generateReagentsPdf() {
             return reagentsPdf;
+        }
+
+        @Override
+        public com.biodiagnostico.dto.response.GeneratedReport generateReagentsReport() {
+            return new com.biodiagnostico.dto.response.GeneratedReport(reagentsPdf, "BIO-TEST-000002", "hash", "test");
         }
     }
 }

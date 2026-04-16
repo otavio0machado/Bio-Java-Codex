@@ -1,5 +1,6 @@
 package com.biodiagnostico.controller;
 
+import com.biodiagnostico.dto.response.GeneratedReport;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.service.PdfReportService;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,21 +37,25 @@ public class ReportController {
         if (year != null && (year < 2000 || year > 2100)) {
             throw new BusinessException("Ano invalido: deve estar entre 2000 e 2100");
         }
-        byte[] bytes = pdfReportService.generateQcPdf(area, periodType, month, year);
-        String filename = (area == null || area.isBlank() ? "bioquimica" : area) + "-qc-report.pdf";
-        return pdfResponse(bytes, filename);
+        GeneratedReport report = pdfReportService.generateQcReport(area, periodType, month, year);
+        String filename = report.reportNumber() + ".pdf";
+        return pdfResponse(report, filename);
     }
 
     @GetMapping("/reagents-pdf")
     @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
     public ResponseEntity<byte[]> generateReagentsPdf() {
-        return pdfResponse(pdfReportService.generateReagentsPdf(), "reagents-report.pdf");
+        GeneratedReport report = pdfReportService.generateReagentsReport();
+        return pdfResponse(report, report.reportNumber() + ".pdf");
     }
 
-    private ResponseEntity<byte[]> pdfResponse(byte[] bytes, String filename) {
+    private ResponseEntity<byte[]> pdfResponse(GeneratedReport report, String filename) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);
         headers.setContentDisposition(ContentDisposition.attachment().filename(filename).build());
-        return ResponseEntity.ok().headers(headers).body(bytes);
+        headers.add("X-Report-Number", report.reportNumber());
+        headers.add("X-Report-Hash", report.sha256());
+        headers.setAccessControlExposeHeaders(java.util.List.of("X-Report-Number", "X-Report-Hash", "Content-Disposition"));
+        return ResponseEntity.ok().headers(headers).body(report.content());
     }
 }

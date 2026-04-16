@@ -14,6 +14,7 @@ import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
 import com.biodiagnostico.repository.HematologyBioRecordRepository;
 import com.biodiagnostico.repository.HematologyQcMeasurementRepository;
+import com.biodiagnostico.repository.LabSettingsRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
@@ -30,7 +31,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class PdfReportServiceTest {
 
-    @InjectMocks
     private PdfReportService pdfReportService;
 
     @Mock
@@ -50,6 +50,38 @@ class PdfReportServiceTest {
 
     @Mock
     private HematologyBioRecordRepository hematologyBioRecordRepository;
+
+    @Mock
+    private LabSettingsRepository labSettingsRepository;
+
+    private final ReportNumberingService reportNumberingService = new ReportNumberingService(null, null) {
+        @Override
+        public String reserveNextNumber() {
+            return "BIO-202604-000001";
+        }
+        @Override
+        public com.biodiagnostico.entity.ReportAuditLog registerGeneration(
+            String reportNumber, String area, String format, String periodLabel, byte[] content, java.util.UUID generatedBy) {
+            return null;
+        }
+    };
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        org.mockito.Mockito.lenient()
+            .when(labSettingsRepository.findSingleton())
+            .thenReturn(java.util.Optional.empty());
+        pdfReportService = new PdfReportService(
+            qcRecordRepository,
+            postCalibrationRecordRepository,
+            reagentLotRepository,
+            areaQcMeasurementRepository,
+            hematologyQcMeasurementRepository,
+            hematologyBioRecordRepository,
+            labSettingsRepository,
+            reportNumberingService
+        );
+    }
 
     @Test
     @DisplayName("deve gerar PDF de bioquímica no mês corrido com registros e retornar bytes válidos começando com %PDF")
