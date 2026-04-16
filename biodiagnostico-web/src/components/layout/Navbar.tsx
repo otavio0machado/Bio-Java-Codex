@@ -5,6 +5,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../ui'
 import { cn } from '../../utils/cn'
 import { ROLE_LABELS } from '../../lib/permissions'
+import logoBio from '../../assets/logobio.png'
 
 const areaNavItems = [
   { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker },
@@ -74,8 +75,7 @@ export function Navbar() {
             }}
             aria-label="Ir para dashboard"
           >
-            <div className="text-lg font-bold text-green-800">Biodiagnóstico</div>
-            <div className="text-xs text-neutral-500">Controle de Qualidade</div>
+            <img src={logoBio} alt="Biodiagnóstico" className="h-10 w-auto" />
           </button>
 
           <nav className="hidden items-center gap-6 md:flex">
@@ -154,8 +154,8 @@ export function Navbar() {
           >
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-lg font-bold text-green-800">Biodiagnóstico</div>
-                <div className="text-sm text-neutral-500">{user?.name}</div>
+                <img src={logoBio} alt="Biodiagnóstico" className="h-10 w-auto" />
+                <div className="mt-1 text-sm text-neutral-500">{user?.name}</div>
               </div>
               <Button variant="ghost" size="sm" onClick={closeMenus} aria-label="Fechar menu">
                 <X className="h-5 w-5" />

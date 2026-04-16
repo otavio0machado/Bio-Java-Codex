@@ -44,12 +44,16 @@ class QcServiceTest {
     @Mock
     private QcExamRepository examRepository;
 
+    @Mock
+    private com.biodiagnostico.repository.PostCalibrationRecordRepository postCalibrationRecordRepository;
+
     @BeforeEach
     void setUp() {
         QcReferenceService referenceService = new QcReferenceService(referenceRepository, examRepository);
         qcService = new QcService(recordRepository, referenceService, new WestgardEngine(), examRepository,
             new AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()),
-            new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+            postCalibrationRecordRepository);
     }
 
     @Test

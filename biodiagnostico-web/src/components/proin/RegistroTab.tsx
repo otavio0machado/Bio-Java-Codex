@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Activity, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Trash2, XCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Trash2, X, XCircle } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
@@ -17,14 +17,56 @@ interface RegistroTabProps {
   area: string
 }
 
-const WESTGARD_LABELS: Record<string, string> = {
-  '1-2s': 'Alerta: Valor excede 2 desvios padrão',
-  '1-3s': 'Erro Aleatório: Valor excede 3 desvios padrão',
-  '2-2s': 'Erro Sistemático: Dois valores consecutivos excedem 2 DP',
-  'R-4s': 'Erro Aleatório: Diferença entre valores excede 4 DP',
-  '4-1s': 'Tendência: Quatro valores consecutivos excedem 1 DP',
-  '10x': 'Tendência: Dez valores consecutivos do mesmo lado da média',
-  'SD=0': 'Desvio Padrão igual a zero',
+interface WestgardInfo {
+  title: string
+  detail: string
+  action: string
+}
+
+const WESTGARD_INFO: Record<string, WestgardInfo> = {
+  '1-2s': {
+    title: 'Valor fora da faixa de alerta (±2 DP)',
+    detail: 'Apenas um controle excedeu 2 desvios padrão.',
+    action: 'Alerta preventivo: pode liberar o resultado, mas observe a próxima corrida.',
+  },
+  '1-3s': {
+    title: 'Valor fora da faixa crítica (±3 DP)',
+    detail: 'Erro aleatório: o valor está muito distante do alvo.',
+    action: 'Não libere resultados. Recalibre e refaça o CQ antes de continuar.',
+  },
+  '2-2s': {
+    title: 'Dois controles seguidos fora de ±2 DP',
+    detail: 'Erro sistemático: padrão de desvio persistente.',
+    action: 'Verifique calibração/reagente. Refaça o CQ antes de liberar resultados.',
+  },
+  'R-4s': {
+    title: 'Diferença entre controles maior que 4 DP',
+    detail: 'Erro aleatório grave entre corridas consecutivas.',
+    action: 'Não libere resultados. Recalibre e refaça o CQ.',
+  },
+  '4-1s': {
+    title: 'Quatro controles seguidos fora de ±1 DP',
+    detail: 'Tendência persistente — possível erro sistemático leve.',
+    action: 'Inspecione reagente, calibração e condições antes do próximo lote.',
+  },
+  '10x': {
+    title: 'Dez controles seguidos do mesmo lado da média',
+    detail: 'Viés sistemático detectado.',
+    action: 'Revise calibração, reagente e armazenamento. Refaça o CQ.',
+  },
+  'SD=0': {
+    title: 'Desvio padrão zerado na referência',
+    detail: 'A referência está sem DP, o cálculo Westgard não é confiável.',
+    action: 'Ajuste o DP na aba Referências antes de registrar novos valores.',
+  },
+}
+
+function getWestgardInfo(rule: string): WestgardInfo {
+  return WESTGARD_INFO[rule] ?? {
+    title: rule,
+    detail: 'Regra Westgard acionada.',
+    action: 'Verifique o controle antes de liberar resultados.',
+  }
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -58,9 +100,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   }
   const [form, setForm] = useState<QcRecordRequest>(emptyForm)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [successMsg, setSuccessMsg] = useState<string | null>(null)
-  const [warningMsg, setWarningMsg] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<QcRecord | null>(null)
 
   // --- Pos-calibracao ---
   const [postCalRecord, setPostCalRecord] = useState<QcRecord | null>(null)
@@ -116,7 +156,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
       })
   }, [allRecords, historyDate, searchTerm, statusFilter])
 
-  const clearMessages = () => { setSuccessMsg(null); setWarningMsg(null); setErrorMsg(null); setSubmitError(null) }
+  const clearMessages = () => { setFeedback(null); setSubmitError(null) }
 
   const clearForm = () => {
     setForm(emptyForm)
@@ -130,11 +170,11 @@ export function RegistroTab({ area }: RegistroTabProps) {
       return
     }
     if (!resolvedRef && ambiguousRefs.length === 0) {
-      setErrorMsg('Cadastre uma referência para este exame antes de registrar.')
+      setSubmitError('Cadastre uma referência para este exame antes de registrar.')
       return
     }
     if (!resolvedRef && ambiguousRefs.length > 1) {
-      setWarningMsg('Selecione a referência correta abaixo.')
+      setSubmitError('Selecione a referência correta abaixo.')
       return
     }
     const ref = resolvedRef!
@@ -148,20 +188,9 @@ export function RegistroTab({ area }: RegistroTabProps) {
     try {
       const response = await createRecord.mutateAsync(payload)
       setLastCreated(response)
-      if (response.status === 'APROVADO') {
-        setSuccessMsg('Registro aprovado e salvo com sucesso.')
-      } else if (response.status === 'ALERTA') {
-        const labels = response.violations.map((v: { rule: string }) => WESTGARD_LABELS[v.rule] ?? v.rule).join('; ')
-        setWarningMsg(`Alerta: ${labels}`)
-      } else {
-        const labels = response.violations.map((v: { rule: string }) => WESTGARD_LABELS[v.rule] ?? v.rule).join('; ')
-        setErrorMsg(`Reprovado: ${labels}`)
-      }
+      setFeedback(response)
       if (response.referenceWarning) {
         toast.warning(response.referenceWarning)
-      }
-      if (response.needsCalibration) {
-        setIsPostCalOpen(true)
       }
       setForm({ ...emptyForm, equipment: form.equipment, analyst: form.analyst })
     } catch (error) {
@@ -396,11 +425,20 @@ export function RegistroTab({ area }: RegistroTabProps) {
               <Button onClick={handleSubmit} loading={createRecord.isPending}>Salvar Registro</Button>
             </div>
 
-            {/* Feedback */}
-            {successMsg ? <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-base text-green-800">{successMsg}</div> : null}
-            {warningMsg ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-base text-amber-800">{warningMsg}</div> : null}
-            {errorMsg ? <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800">{errorMsg}</div> : null}
-            {submitError ? <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800">{submitError}</div> : null}
+            {/* Feedback estruturado */}
+            {feedback ? (
+              <FeedbackPanel
+                record={feedback}
+                onDismiss={() => setFeedback(null)}
+                onOpenPostCal={() => setIsPostCalOpen(true)}
+              />
+            ) : null}
+            {submitError ? (
+              <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-800">
+                <XCircle className="mt-0.5 h-5 w-5 flex-none" />
+                <span>{submitError}</span>
+              </div>
+            ) : null}
           </>
         )}
       </Card>
@@ -455,6 +493,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
                   <th className="px-3 py-2.5">CV Lim%</th>
                   <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5">Calibrar?</th>
+                  <th className="px-3 py-2.5">Pós-Calib</th>
                   <th className="px-3 py-2.5">LJ</th>
                   <th className="px-3 py-2.5 text-right">Ação</th>
                 </tr>
@@ -487,6 +526,26 @@ export function RegistroTab({ area }: RegistroTabProps) {
                           )
                         ) : (
                           <span className="rounded-full border border-green-300 px-3 py-1 text-sm font-semibold text-green-700">NÃO</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {r.postCalibrationStatus ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className={`inline-flex w-fit rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                r.postCalibrationStatus === 'APROVADO'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {r.postCalibrationStatus}
+                            </span>
+                            <span className="font-mono text-xs text-neutral-500">
+                              {r.postCalibrationValue?.toFixed(2)} ({r.postCalibrationCv?.toFixed(2)}%)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-neutral-400">—</span>
                         )}
                       </td>
                       <td className="px-3 py-2.5">
@@ -534,6 +593,84 @@ export function RegistroTab({ area }: RegistroTabProps) {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+interface FeedbackPanelProps {
+  record: QcRecord
+  onDismiss: () => void
+  onOpenPostCal: () => void
+}
+
+function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps) {
+  const status = record.status
+  const tone =
+    status === 'APROVADO'
+      ? { border: 'border-green-200', bg: 'bg-green-50', text: 'text-green-900', iconColor: 'text-green-600', title: 'Registro aprovado' }
+      : status === 'ALERTA'
+        ? { border: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-900', iconColor: 'text-amber-600', title: 'Atenção necessária' }
+        : { border: 'border-red-200', bg: 'bg-red-50', text: 'text-red-900', iconColor: 'text-red-600', title: 'Registro reprovado' }
+
+  const Icon = status === 'APROVADO' ? CheckCircle2 : status === 'ALERTA' ? AlertTriangle : XCircle
+
+  const target = record.targetValue ?? 0
+  const sd = record.targetSd ?? 0
+  const context = `${record.examName} · ${record.value.toFixed(2)} · Alvo ${target.toFixed(2)} ± ${sd.toFixed(2)} · Z ${record.zScore.toFixed(2)}`
+
+  return (
+    <div className={`mt-3 rounded-2xl border ${tone.border} ${tone.bg} px-5 py-4 ${tone.text}`}>
+      <div className="flex items-start gap-3">
+        <Icon className={`mt-0.5 h-7 w-7 flex-none ${tone.iconColor}`} />
+        <div className="flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold">{tone.title}</div>
+              <div className="text-sm opacity-80">{context}</div>
+            </div>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded-lg p-1 text-current opacity-60 transition hover:bg-black/5 hover:opacity-100"
+              aria-label="Dispensar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {record.violations.length > 0 ? (
+            <ul className="mt-3 space-y-2">
+              {record.violations.map((v, idx) => {
+                const info = getWestgardInfo(v.rule)
+                return (
+                  <li key={idx} className="rounded-xl bg-white/70 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{info.title}</span>
+                      <span className="rounded-full bg-black/10 px-2 py-0.5 font-mono text-xs">{v.rule}</span>
+                    </div>
+                    <div className="text-sm opacity-80">{info.detail}</div>
+                    <div className="mt-1 text-sm font-medium">→ {info.action}</div>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : status === 'APROVADO' ? (
+            <div className="mt-2 text-sm opacity-80">Valor dentro da faixa aceitável. Pode liberar os resultados.</div>
+          ) : null}
+
+          {record.needsCalibration ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={onOpenPostCal}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+              >
+                Registrar pós-calibração agora
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   )
 }

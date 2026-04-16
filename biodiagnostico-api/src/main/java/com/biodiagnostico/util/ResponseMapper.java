@@ -10,6 +10,7 @@ import com.biodiagnostico.dto.response.UserResponse;
 import com.biodiagnostico.dto.response.ViolationResponse;
 import com.biodiagnostico.entity.HematologyBioRecord;
 import com.biodiagnostico.entity.MaintenanceRecord;
+import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.QcReferenceValue;
@@ -90,13 +91,20 @@ public final class ResponseMapper {
     }
 
     public static QcRecordResponse toQcRecordResponse(QcRecord record) {
-        return toQcRecordResponse(record, null);
+        return toQcRecordResponse(record, null, null);
     }
 
     public static QcRecordResponse toQcRecordResponse(QcRecord record, String referenceWarning) {
+        return toQcRecordResponse(record, referenceWarning, null);
+    }
+
+    public static QcRecordResponse toQcRecordResponse(QcRecord record, String referenceWarning, PostCalibrationRecord postCalibration) {
         List<ViolationResponse> violations = record.getViolations() == null
             ? List.of()
             : record.getViolations().stream().map(ResponseMapper::toViolationResponse).toList();
+        Double postValue = postCalibration != null ? postCalibration.getPostCalibrationValue() : null;
+        Double postCv = postCalibration != null ? postCalibration.getPostCalibrationCv() : null;
+        String postStatus = computePostCalibrationStatus(postCv, record.getCvLimit());
         return new QcRecordResponse(
             record.getId(),
             record.getReference() != null ? record.getReference().getId() : null,
@@ -118,8 +126,17 @@ public final class ResponseMapper {
             violations,
             record.getCreatedAt(),
             record.getUpdatedAt(),
-            referenceWarning
+            referenceWarning,
+            postValue,
+            postCv,
+            postStatus
         );
+    }
+
+    private static String computePostCalibrationStatus(Double postCv, Double cvLimit) {
+        if (postCv == null) return null;
+        double limit = cvLimit != null ? cvLimit : 10D;
+        return postCv <= limit ? "APROVADO" : "REPROVADO";
     }
 
     public static ReagentLotResponse toReagentLotResponse(ReagentLot lot) {

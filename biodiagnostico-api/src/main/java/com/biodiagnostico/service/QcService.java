@@ -3,12 +3,14 @@ package com.biodiagnostico.service;
 import com.biodiagnostico.dto.request.QcRecordRequest;
 import com.biodiagnostico.dto.response.LeveyJenningsResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
+import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.QcReferenceValue;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
+import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.util.NumericUtils;
@@ -20,10 +22,13 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +47,7 @@ public class QcService {
     private final QcExamRepository qcExamRepository;
     private final AuditService auditService;
     private final MeterRegistry meterRegistry;
+    private final PostCalibrationRecordRepository postCalibrationRecordRepository;
 
     public QcService(
         QcRecordRepository qcRecordRepository,
@@ -49,7 +55,8 @@ public class QcService {
         WestgardEngine westgardEngine,
         QcExamRepository qcExamRepository,
         AuditService auditService,
-        MeterRegistry meterRegistry
+        MeterRegistry meterRegistry,
+        PostCalibrationRecordRepository postCalibrationRecordRepository
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.qcReferenceService = qcReferenceService;
@@ -57,6 +64,7 @@ public class QcService {
         this.qcExamRepository = qcExamRepository;
         this.auditService = auditService;
         this.meterRegistry = meterRegistry;
+        this.postCalibrationRecordRepository = postCalibrationRecordRepository;
     }
 
     @Transactional
@@ -123,16 +131,35 @@ public class QcService {
         LocalDate startDate,
         LocalDate endDate
     ) {
-        return qcRecordRepository.findByFilters(area, examName, startDate, endDate).stream()
-            .map(ResponseMapper::toQcRecordResponse)
+        List<QcRecord> records = qcRecordRepository.findByFilters(area, examName, startDate, endDate);
+        Map<UUID, PostCalibrationRecord> postCalibrations = loadPostCalibrations(records);
+        return records.stream()
+            .map(record -> ResponseMapper.toQcRecordResponse(record, null, postCalibrations.get(record.getId())))
             .toList();
     }
 
     @Transactional(readOnly = true)
     public QcRecordResponse getRecord(UUID id) {
         return qcRecordRepository.findById(id)
-            .map(ResponseMapper::toQcRecordResponse)
+            .map(record -> ResponseMapper.toQcRecordResponse(
+                record,
+                null,
+                postCalibrationRecordRepository.findByQcRecordId(record.getId()).orElse(null)
+            ))
             .orElseThrow(() -> new ResourceNotFoundException("Registro de CQ não encontrado"));
+    }
+
+    private Map<UUID, PostCalibrationRecord> loadPostCalibrations(List<QcRecord> records) {
+        if (records.isEmpty()) {
+            return new HashMap<>();
+        }
+        List<UUID> ids = records.stream().map(QcRecord::getId).toList();
+        return postCalibrationRecordRepository.findByQcRecord_IdIn(ids).stream()
+            .collect(Collectors.toMap(
+                post -> post.getQcRecord().getId(),
+                Function.identity(),
+                (left, right) -> left
+            ));
     }
 
     @Transactional

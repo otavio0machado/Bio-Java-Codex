@@ -199,7 +199,8 @@ class QcRecordControllerTest {
         StubQcService() {
             super(null, null, new com.biodiagnostico.service.WestgardEngine(), null,
                 new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                null);
         }
 
         @Override
@@ -225,7 +226,7 @@ class QcRecordControllerTest {
         return new QcRecordResponse(
             UUID.randomUUID(), null, "Glicose", "bioquimica", LocalDate.now(), "Normal", "L1",
             100D, 100D, 5D, 5D, 10D, 1D, "AU680", "Ana", "APROVADO", false, List.of(),
-            Instant.now(), Instant.now(), null
+            Instant.now(), Instant.now(), null, null, null, null
         );
     }
 

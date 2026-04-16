@@ -133,11 +133,22 @@ public class PdfReportService {
                     return;
                 }
 
-                PdfPTable table = createTable(new float[] {2.2F, 3.8F, 1.4F, 1.9F, 1.8F, 1.8F, 1.6F, 1.5F, 2.0F, 1.8F});
-                addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ");
+                PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
+                addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ", "Status Pós");
                 boolean alternate = false;
                 for (QcRecord record : records) {
                     PostCalibrationRecord post = postCalibrations.get(record.getId());
+                    String postValueCell;
+                    String postStatusCell;
+                    if (post == null) {
+                        postValueCell = Boolean.TRUE.equals(record.getNeedsCalibration()) ? "Pendente" : "—";
+                        postStatusCell = "—";
+                    } else {
+                        postValueCell = formatDecimal(post.getPostCalibrationValue());
+                        double limit = record.getCvLimit() != null ? record.getCvLimit() : 10D;
+                        double postCv = post.getPostCalibrationCv() != null ? post.getPostCalibrationCv() : 0D;
+                        postStatusCell = postCv <= limit ? "APROVADO" : "REPROVADO";
+                    }
                     addBodyRow(
                         table,
                         alternate,
@@ -150,8 +161,8 @@ public class PdfReportService {
                         formatDecimal(record.getCv()),
                         formatDecimal(record.getCvLimit()),
                         safe(record.getStatus()),
-                        post == null ? (Boolean.TRUE.equals(record.getNeedsCalibration()) ? "Pendente" : "—")
-                            : formatDecimal(post.getPostCalibrationValue())
+                        postValueCell,
+                        postStatusCell
                     );
                     alternate = !alternate;
                 }

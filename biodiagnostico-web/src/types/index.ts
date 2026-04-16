@@ -105,6 +105,9 @@ export interface QcRecord {
   createdAt: string
   updatedAt: string
   referenceWarning?: string | null
+  postCalibrationValue?: number | null
+  postCalibrationCv?: number | null
+  postCalibrationStatus?: 'APROVADO' | 'REPROVADO' | null
 }
 
 export interface QcRecordRequest {

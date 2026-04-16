@@ -2,6 +2,7 @@ package com.biodiagnostico.repository;
 
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,6 +13,8 @@ import org.springframework.data.repository.query.Param;
 public interface PostCalibrationRecordRepository extends JpaRepository<PostCalibrationRecord, UUID> {
 
     Optional<PostCalibrationRecord> findByQcRecordId(UUID qcRecordId);
+
+    List<PostCalibrationRecord> findByQcRecord_IdIn(Collection<UUID> qcRecordIds);
 
     @Query("""
         SELECT p FROM PostCalibrationRecord p

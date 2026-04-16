@@ -26,6 +26,9 @@ public record QcRecordResponse(
     List<ViolationResponse> violations,
     Instant createdAt,
     Instant updatedAt,
-    String referenceWarning
+    String referenceWarning,
+    Double postCalibrationValue,
+    Double postCalibrationCv,
+    String postCalibrationStatus
 ) {
 }
