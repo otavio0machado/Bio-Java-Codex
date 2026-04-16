@@ -43,11 +43,24 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editing, setEditing] = useState<QcReferenceValue | null>(null)
   const [form, setForm] = useState<QcReferenceRequest>(emptyReferenceForm)
+  const [validityFilter, setValidityFilter] = useState<'todas' | 'vencidas' | 'validas'>('validas')
 
-  const filteredReferences = useMemo(
-    () => references.filter((reference) => reference.exam?.area === area),
-    [area, references],
-  )
+  const filteredReferences = useMemo(() => {
+    const today = todayStr()
+    return references
+      .filter((reference) => reference.exam?.area === area)
+      .filter((reference) => {
+        if (validityFilter === 'todas') return true
+        const from = reference.validFrom?.slice(0, 10)
+        const until = reference.validUntil?.slice(0, 10)
+        const isExpired = Boolean(until) && until! < today
+        const isNotYetValid = Boolean(from) && from! > today
+        const isValid = !isExpired && !isNotYetValid
+        if (validityFilter === 'validas') return isValid
+        if (validityFilter === 'vencidas') return isExpired
+        return true
+      })
+  }, [area, references, validityFilter])
 
   const openCreate = () => {
     setEditing(null)
@@ -109,7 +122,9 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
     }
   }
 
-  if (!filteredReferences.length) {
+  const hasAnyReferenceInArea = references.some((reference) => reference.exam?.area === area)
+
+  if (!hasAnyReferenceInArea) {
     return (
       <>
         <EmptyState
@@ -133,19 +148,42 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
     )
   }
 
+  const filterButtonClass = (active: boolean) =>
+    `rounded-full px-3 py-1.5 text-sm font-medium transition ${
+      active
+        ? 'bg-green-700 text-white'
+        : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+    }`
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold text-neutral-900">Referências</h3>
           <p className="text-sm text-neutral-500">Faixas alvo ativas para a área de {area}</p>
         </div>
-        <Button onClick={openCreate} icon={<Plus className="h-4 w-4" />}>
-          Nova Referência
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className={filterButtonClass(validityFilter === 'todas')} onClick={() => setValidityFilter('todas')}>
+            Todas
+          </button>
+          <button type="button" className={filterButtonClass(validityFilter === 'vencidas')} onClick={() => setValidityFilter('vencidas')}>
+            Vencidas
+          </button>
+          <button type="button" className={filterButtonClass(validityFilter === 'validas')} onClick={() => setValidityFilter('validas')}>
+            Válidas
+          </button>
+          <Button onClick={openCreate} icon={<Plus className="h-4 w-4" />}>
+            Nova Referência
+          </Button>
+        </div>
       </div>
 
       <Card>
+        {filteredReferences.length === 0 ? (
+          <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-8 text-center text-base text-neutral-500">
+            Nenhuma referência corresponde ao filtro selecionado.
+          </div>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
@@ -201,6 +239,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
             </tbody>
           </table>
         </div>
+        )}
       </Card>
 
       <ReferenceModal
