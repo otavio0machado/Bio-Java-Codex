@@ -92,9 +92,10 @@ public class QcRecordController {
     public ResponseEntity<List<LeveyJenningsResponse>> getLeveyJenningsData(
         @RequestParam String examName,
         @RequestParam String level,
-        @RequestParam String area
+        @RequestParam String area,
+        @RequestParam(required = false) Integer days
     ) {
-        return ResponseEntity.ok(qcService.getLeveyJenningsData(examName, level, area));
+        return ResponseEntity.ok(qcService.getLeveyJenningsData(examName, level, area, days));
     }
 
     @GetMapping("/{id}/post-calibration")

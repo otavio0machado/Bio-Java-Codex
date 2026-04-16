@@ -108,10 +108,10 @@ export function useDeleteQcReference() {
   })
 }
 
-export function useLeveyJennings(examName: string, level: string, area: string) {
+export function useLeveyJennings(examName: string, level: string, area: string, days?: number) {
   return useQuery({
-    queryKey: ['levey-jennings', examName, level, area],
-    queryFn: () => qcService.getLeveyJenningsData(examName, level, area),
+    queryKey: ['levey-jennings', examName, level, area, days],
+    queryFn: () => qcService.getLeveyJenningsData(examName, level, area, days),
     enabled: Boolean(examName && level && area),
   })
 }

@@ -169,8 +169,11 @@ public class QcService {
     }
 
     @Transactional(readOnly = true)
-    public List<LeveyJenningsResponse> getLeveyJenningsData(String examName, String level, String area) {
-        return qcRecordRepository.findLeveyJenningsData(examName, level, area, PageRequest.of(0, 30)).stream()
+    public List<LeveyJenningsResponse> getLeveyJenningsData(String examName, String level, String area, Integer days) {
+        int effectiveDays = days != null && days > 0 ? days : 30;
+        LocalDate cutoff = LocalDate.now().minusDays(effectiveDays - 1L);
+        return qcRecordRepository.findLeveyJenningsData(examName, level, area, PageRequest.of(0, 500)).stream()
+            .filter(record -> record.getDate() != null && !record.getDate().isBefore(cutoff))
             .sorted(Comparator.comparing(QcRecord::getDate))
             .map(record -> {
                 double target = record.getTargetValue() != null ? record.getTargetValue() : 0.0;

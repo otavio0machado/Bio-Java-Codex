@@ -28,9 +28,9 @@ export const qcService = {
     const response = await api.get<{ totalToday: number; totalMonth: number; approvalRate: number }>('/qc/records/statistics')
     return response.data
   },
-  async getLeveyJenningsData(examName: string, level: string, area: string) {
+  async getLeveyJenningsData(examName: string, level: string, area: string, days?: number) {
     const response = await api.get<LeveyJenningsPoint[]>('/qc/records/levey-jennings', {
-      params: { examName, level, area },
+      params: { examName, level, area, days },
     })
     return response.data
   },

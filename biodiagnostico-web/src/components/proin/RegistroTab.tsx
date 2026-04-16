@@ -2,7 +2,7 @@ import axios from 'axios'
 import { Activity, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Trash2, XCircle } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCreateQcRecord, useUpdateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
+import { useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
 import { qcService } from '../../services/qcService'
 import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
@@ -38,7 +38,6 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const createRecord = useCreateQcRecord()
-  const updateRecord = useUpdateQcRecord()
   const { data: exams = [] } = useQcExams(area)
   const { data: references = [] } = useQcReferences(undefined, true)
 
@@ -212,31 +211,6 @@ export function RegistroTab({ area }: RegistroTabProps) {
       loadRecords()
       toast.success('Registro restaurado.')
     } catch { toast.error('Erro ao restaurar registro.') }
-  }
-
-  // --- Editar cvLimit de registro existente ---
-  const handleCvLimitChange = async (record: QcRecord, newCvLimit: number) => {
-    try {
-      await updateRecord.mutateAsync({
-        id: record.id,
-        request: {
-          examName: record.examName,
-          area: record.area,
-          date: record.date,
-          level: record.level,
-          lotNumber: record.lotNumber ?? '',
-          value: record.value,
-          targetValue: record.targetValue,
-          targetSd: record.targetSd,
-          cvLimit: newCvLimit,
-          equipment: record.equipment ?? '',
-          analyst: record.analyst ?? '',
-          referenceId: record.referenceId ?? undefined,
-        },
-      })
-    } catch {
-      toast.error('Erro ao atualizar CV Limite.')
-    }
   }
 
   // --- Batch submit handler ---
@@ -499,21 +473,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
                         <span className={`font-semibold ${rCv <= rCvLimit ? 'text-green-700' : 'text-red-700'}`}>{rCv.toFixed(2)}%</span>
                       </td>
                       <td className="px-3 py-2.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="w-[70px] rounded-lg border border-neutral-200 px-2 py-1 text-sm font-mono text-neutral-700 focus:border-green-400 focus:outline-none"
-                          defaultValue={rCvLimit}
-                          onBlur={(e) => {
-                            const newVal = parseFloat(e.target.value)
-                            if (!isNaN(newVal) && newVal !== rCvLimit) {
-                              void handleCvLimitChange(r, newVal)
-                            }
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                          }}
-                        />
+                        <span className="font-mono text-neutral-700">{rCvLimit.toFixed(2)}%</span>
                       </td>
                       <td className="px-3 py-2.5"><StatusBadge status={r.status} /></td>
                       <td className="px-3 py-2.5">

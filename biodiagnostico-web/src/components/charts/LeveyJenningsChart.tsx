@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { useState } from 'react'
 import { useLeveyJennings } from '../../hooks/useQcRecords'
 import type { LeveyJenningsPoint } from '../../types'
 import { Card, EmptyState, Skeleton, StatusBadge } from '../ui'
@@ -58,19 +59,59 @@ interface ChartPoint extends LeveyJenningsPoint {
 }
 
 export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChartProps) {
-  const { data, isLoading } = useLeveyJennings(examName, level, area)
+  const [daysInput, setDaysInput] = useState<string>('30')
+  const parsedDays = parseInt(daysInput, 10)
+  const effectiveDays = !isNaN(parsedDays) && parsedDays > 0 ? parsedDays : 30
+  const { data, isLoading } = useLeveyJennings(examName, level, area, effectiveDays)
+
+  const filterComponent = (
+    <div className="flex flex-col items-start gap-1">
+      <label className="text-sm font-medium text-neutral-700">Número de dias do gráfico:</label>
+      <input
+        type="number"
+        min={1}
+        value={daysInput}
+        placeholder="30 dias (padrão)"
+        onChange={(e) => setDaysInput(e.target.value)}
+        className="w-[180px] rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 focus:border-green-400 focus:outline-none"
+      />
+    </div>
+  )
+
+  const header = (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h3 className="text-lg font-semibold text-neutral-900">Levey-Jennings</h3>
+        <p className="text-sm text-neutral-500">
+          {examName} · {level} · {area}
+        </p>
+        <p className="mt-1 text-xs text-neutral-500">
+          Curva baseada nos últimos {effectiveDays} dias de registros canônicos de CQ. Faixas de referência acompanham cada registro individualmente.
+        </p>
+      </div>
+      {filterComponent}
+    </div>
+  )
 
   if (isLoading) {
-    return <Skeleton height="24rem" />
+    return (
+      <Card className="space-y-4">
+        {header}
+        <Skeleton height="24rem" />
+      </Card>
+    )
   }
 
   if (!data?.length) {
     return (
-      <EmptyState
-        icon={<Activity className="h-8 w-8" />}
-        title="Sem dados para o gráfico"
-        description="Selecione um exame e um nível que já possuam registros de CQ para visualizar a curva de Levey-Jennings."
-      />
+      <Card className="space-y-4">
+        {header}
+        <EmptyState
+          icon={<Activity className="h-8 w-8" />}
+          title="Sem dados para o gráfico"
+          description="Nenhum registro encontrado no intervalo selecionado."
+        />
+      </Card>
     )
   }
 
@@ -82,17 +123,7 @@ export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChart
 
   return (
     <Card className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-neutral-900">Levey-Jennings</h3>
-          <p className="text-sm text-neutral-500">
-            {examName} · {level} · {area}
-          </p>
-          <p className="mt-1 text-xs text-neutral-500">
-            Curva baseada nos últimos 30 registros canônicos de CQ. Faixas de referência acompanham cada registro individualmente.
-          </p>
-        </div>
-      </div>
+      {header}
       <div className="h-[26rem] w-full overflow-x-auto">
         <div className="min-w-[720px] h-full">
           <ResponsiveContainer width="100%" height="100%">
