@@ -10,7 +10,8 @@ import {
 } from '../../hooks/useQcRecords'
 import { qcService } from '../../services/qcService'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
-import { Button, Card, EmptyState, Input, Modal, Select, useToast } from '../ui'
+import { Button, Card, Combobox, EmptyState, Input, Modal, Select, useToast } from '../ui'
+import type { ComboboxOption } from '../ui'
 
 interface ReferenciasTabProps {
   area: string
@@ -44,6 +45,27 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const [editing, setEditing] = useState<QcReferenceValue | null>(null)
   const [form, setForm] = useState<QcReferenceRequest>(emptyReferenceForm)
   const [validityFilter, setValidityFilter] = useState<'todas' | 'vencidas' | 'validas'>('validas')
+
+  // Sugestoes para o Combobox "Nome do Registro": nomes distintos ja cadastrados
+  // na mesma area, usados tanto em create quanto em edit. allowCustom permite
+  // digitar um novo nome sem sair do campo.
+  const registroNameOptions = useMemo<ComboboxOption[]>(() => {
+    const set = new Map<string, number>()
+    references
+      .filter((reference) => reference.exam?.area === area)
+      .forEach((reference) => {
+        const name = reference.name?.trim()
+        if (!name) return
+        set.set(name, (set.get(name) ?? 0) + 1)
+      })
+    return Array.from(set.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({
+        value: name,
+        label: name,
+        description: count > 1 ? `${count} referencias` : undefined,
+      }))
+  }, [references, area])
 
   const filteredReferences = useMemo(() => {
     const today = todayStr()
@@ -136,6 +158,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
         <ReferenceModal
           area={area}
           exams={exams}
+          registroNameOptions={registroNameOptions}
           form={form}
           editing={editing}
           isOpen={isModalOpen}
@@ -239,6 +262,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
       <ReferenceModal
         area={area}
         exams={exams}
+        registroNameOptions={registroNameOptions}
         form={form}
         editing={editing}
         isOpen={isModalOpen}
@@ -262,6 +286,7 @@ function formatDate(value: string) {
 interface ReferenceModalProps {
   area: string
   exams: QcExam[]
+  registroNameOptions: ComboboxOption[]
   form: QcReferenceRequest
   editing: QcReferenceValue | null
   isOpen: boolean
@@ -271,13 +296,11 @@ interface ReferenceModalProps {
   isSaving: boolean
 }
 
-function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, setForm, isSaving }: ReferenceModalProps) {
+function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpen, onClose, onSave, setForm, isSaving }: ReferenceModalProps) {
   const { toast } = useToast()
   const createExam = useCreateQcExam()
   const [showNewExam, setShowNewExam] = useState(false)
   const [newExamName, setNewExamName] = useState('')
-  const [showNewName, setShowNewName] = useState(false)
-  const [newRegName, setNewRegName] = useState('')
 
   const handleCreateExam = async () => {
     if (!newExamName.trim()) {
@@ -293,16 +316,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
     } catch {
       toast.error('Não foi possível criar o exame.')
     }
-  }
-
-  const handleAddName = () => {
-    if (!newRegName.trim()) {
-      toast.warning('Informe o nome do registro.')
-      return
-    }
-    setForm((current) => ({ ...current, name: newRegName.trim() }))
-    setNewRegName('')
-    setShowNewName(false)
   }
 
   return (
@@ -322,39 +335,17 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
       }
     >
       <div className="space-y-4">
-        {/* Nome do Registro */}
-        <div className="space-y-2">
-          <Input
-            label="Nome do Registro"
-            value={form.name}
-            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Ex: Controle Normal Glicose"
-          />
-          {!showNewName ? (
-            <button
-              type="button"
-              onClick={() => setShowNewName(true)}
-              className="text-sm font-medium text-green-700 hover:text-green-800"
-            >
-              + Adicionar nome rápido
-            </button>
-          ) : (
-            <div className="flex items-end gap-2 rounded-xl bg-neutral-50 p-3">
-              <Input
-                label="Novo nome"
-                value={newRegName}
-                onChange={(event) => setNewRegName(event.target.value)}
-                placeholder="Ex: CQ Colesterol Normal"
-              />
-              <Button size="sm" onClick={handleAddName}>
-                Usar
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => { setShowNewName(false); setNewRegName('') }}>
-                Cancelar
-              </Button>
-            </div>
-          )}
-        </div>
+        {/* Nome do Registro — Combobox com busca + criar novo */}
+        <Combobox
+          label="Nome do Registro"
+          placeholder="Busque ou digite um novo nome"
+          value={form.name}
+          onChange={(next) => setForm((current) => ({ ...current, name: next }))}
+          options={registroNameOptions}
+          allowCustom
+          createLabel="Criar nome novo"
+          emptyText="Nenhum registro cadastrado — digite para criar"
+        />
 
         {/* Nome do Exame */}
         <div className="space-y-2">

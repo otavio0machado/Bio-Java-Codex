@@ -1,9 +1,19 @@
 import axios from 'axios'
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, UploadCloud } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  History,
+  RefreshCw,
+  UploadCloud,
+} from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { useCreateQcBatch } from '../../hooks/useQcRecords'
-import type { ImportedQcPreviewRow, QcRecordRequest } from '../../types'
-import { Button, Card, EmptyState, useToast } from '../ui'
+import { useImportHistory } from '../../hooks/useReports'
+import { qcService } from '../../services/qcService'
+import type { BatchImportResult, ImportedQcPreviewRow, QcRecordRequest } from '../../types'
+import { Button, Card, EmptyState, Select, Skeleton, useToast } from '../ui'
 
 interface ImportarTabProps {
   area: string
@@ -32,6 +42,38 @@ export function ImportarTab({ area }: ImportarTabProps) {
   const [isParsingFile, setIsParsingFile] = useState(false)
   const [totalRows, setTotalRows] = useState(0)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [importMode, setImportMode] = useState<'partial' | 'atomic'>('partial')
+  const [lastBatchResult, setLastBatchResult] = useState<BatchImportResult | null>(null)
+  const { data: importHistory = [], isLoading: loadingImportHistory, refetch: refetchImportHistory } = useImportHistory(10)
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const xlsx = await import('xlsx')
+      // Template canonico com headers e 1 linha de exemplo
+      const templateData = [
+        {
+          examName: 'Glicose',
+          area,
+          date: new Date().toISOString().slice(0, 10),
+          level: 'Normal',
+          value: 95.5,
+          targetValue: 95,
+          targetSd: 2,
+          lotNumber: 'L-EXEMPLO',
+          equipment: 'A15',
+          analyst: 'seu.usuario',
+          cvLimit: 10,
+        },
+      ]
+      const worksheet = xlsx.utils.json_to_sheet(templateData)
+      const workbook = xlsx.utils.book_new()
+      xlsx.utils.book_append_sheet(workbook, worksheet, 'CQ')
+      xlsx.writeFile(workbook, `template-importacao-cq-${area}.xlsx`)
+      toast.success('Template baixado. Preencha e reenvie pelo upload.')
+    } catch {
+      toast.error('Não foi possível gerar o template.')
+    }
+  }
 
   const clearPreview = () => {
     setPreviewRows([])
@@ -134,21 +176,39 @@ export function ImportarTab({ area }: ImportarTabProps) {
       toast.warning('Nenhuma linha válida foi carregada para importação.')
       return
     }
-    if (issues.length) {
-      toast.warning('Corrija os erros da planilha antes de importar.')
+    // Em modo PARTIAL permitimos enviar mesmo com issues locais; o backend
+    // responde linha-a-linha. No modo ATOMIC mantemos a validacao rigorosa.
+    if (importMode === 'atomic' && issues.length) {
+      toast.warning('Corrija os erros da planilha antes de importar em modo atômico.')
       return
     }
 
+    const payload: QcRecordRequest[] = previewRows.map((row) => {
+      const { previewId, sourceLine, ...payloadRow } = row
+      void previewId
+      void sourceLine
+      return payloadRow
+    })
+
     try {
-      const payload: QcRecordRequest[] = previewRows.map((row) => {
-        const { previewId, sourceLine, ...payloadRow } = row
-        void previewId
-        void sourceLine
-        return payloadRow
-      })
-      await createBatch.mutateAsync(payload)
-      toast.success('Importação concluída com sucesso.')
-      clearPreview()
+      if (importMode === 'partial') {
+        const result = await qcService.createBatchV2(payload, 'partial')
+        setLastBatchResult(result)
+        if (result.failureCount === 0) {
+          toast.success(`Importação concluída: ${result.successCount} registro(s).`)
+          clearPreview()
+        } else {
+          toast.warning(
+            `Importação parcial: ${result.successCount} OK, ${result.failureCount} com erro. Veja detalhes abaixo.`,
+          )
+        }
+        refetchImportHistory()
+      } else {
+        await createBatch.mutateAsync(payload)
+        toast.success('Importação concluída com sucesso.')
+        clearPreview()
+        refetchImportHistory()
+      }
     } catch (error) {
       toast.error(extractApiErrorMessage(error))
     }
@@ -156,6 +216,36 @@ export function ImportarTab({ area }: ImportarTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Cabecalho com template + modo */}
+      <Card className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-neutral-900">Importar CQ</h3>
+            <p className="text-sm text-neutral-500">
+              Envie uma planilha (.xlsx/.xls) ou baixe o template canônico. Em modo parcial, linhas inválidas não
+              abortam o lote.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <Select
+              label="Modo"
+              value={importMode}
+              onChange={(e) => setImportMode(e.target.value as 'partial' | 'atomic')}
+            >
+              <option value="partial">Parcial (recomendado)</option>
+              <option value="atomic">Atômico (tudo ou nada)</option>
+            </Select>
+            <Button
+              variant="secondary"
+              onClick={() => void handleDownloadTemplate()}
+              icon={<Download className="h-4 w-4" />}
+            >
+              Baixar template
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       <Card className="space-y-4">
         <div
           className={`flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 text-center transition-colors ${
@@ -237,9 +327,13 @@ export function ImportarTab({ area }: ImportarTabProps) {
               <Button
                 onClick={() => void handleImport()}
                 loading={createBatch.isPending}
-                disabled={isParsingFile || !previewRows.length || issues.length > 0}
+                disabled={
+                  isParsingFile ||
+                  !previewRows.length ||
+                  (importMode === 'atomic' && issues.length > 0)
+                }
               >
-                Importar
+                Importar ({importMode === 'partial' ? 'parcial' : 'atômico'})
               </Button>
             </div>
           </div>
@@ -324,6 +418,118 @@ export function ImportarTab({ area }: ImportarTabProps) {
           description="Quando a planilha for lida, o preview vai aparecer aqui antes da importação."
         />
       )}
+
+      {/* Resultado linha-a-linha da ultima importacao partial */}
+      {lastBatchResult ? (
+        <Card className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-base font-semibold text-neutral-900">Resultado linha-a-linha</h4>
+              <p className="text-sm text-neutral-500">
+                {lastBatchResult.successCount} sucesso(s), {lastBatchResult.failureCount} falha(s) em {lastBatchResult.total} linha(s).
+              </p>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setLastBatchResult(null)}>Fechar</Button>
+          </div>
+          <div className="max-h-80 overflow-y-auto rounded-xl border border-neutral-100">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
+                  <th className="px-3 py-2">Linha</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Mensagem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lastBatchResult.results.map((row) => (
+                  <tr key={row.rowIndex} className="border-b border-neutral-50">
+                    <td className="px-3 py-1.5 text-neutral-600">{row.rowIndex + 1}</td>
+                    <td className="px-3 py-1.5">
+                      {row.success ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                          <CheckCircle2 className="h-3 w-3" /> OK
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
+                          <AlertTriangle className="h-3 w-3" /> Erro
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-neutral-700">{row.message ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
+
+      {/* Historico de importacoes */}
+      <Card className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-neutral-500" />
+            <h4 className="text-base font-semibold text-neutral-900">Histórico de importações</h4>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => refetchImportHistory()} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+            Atualizar
+          </Button>
+        </div>
+        {loadingImportHistory ? (
+          <Skeleton height="6rem" />
+        ) : importHistory.length === 0 ? (
+          <EmptyState
+            icon={<History className="h-8 w-8" />}
+            title="Sem importações registradas"
+            description="Cada importação aparece aqui com usuário, contagens e status."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
+                  <th className="px-3 py-2">Quando</th>
+                  <th className="px-3 py-2">Modo</th>
+                  <th className="px-3 py-2">Total</th>
+                  <th className="px-3 py-2">OK</th>
+                  <th className="px-3 py-2">Falhas</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Usuário</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importHistory.map((run) => (
+                  <tr key={run.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
+                    <td className="whitespace-nowrap px-3 py-2 text-neutral-700">
+                      {new Date(run.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                    </td>
+                    <td className="px-3 py-2 text-neutral-700">{run.mode}</td>
+                    <td className="px-3 py-2 font-mono text-neutral-600">{run.totalRows}</td>
+                    <td className="px-3 py-2 font-mono text-emerald-700">{run.successRows}</td>
+                    <td className="px-3 py-2 font-mono text-red-700">{run.failureRows}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ' +
+                          (run.status === 'SUCCESS'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : run.status === 'PARTIAL'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-red-100 text-red-800')
+                        }
+                        title={run.errorSummary ?? ''}
+                      >
+                        {run.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-neutral-500">{run.username ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

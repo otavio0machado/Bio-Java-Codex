@@ -2,6 +2,7 @@ package com.biodiagnostico.repository;
 
 import com.biodiagnostico.entity.QcRecord;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
@@ -116,5 +117,21 @@ public interface QcRecordRepository extends JpaRepository<QcRecord, UUID> {
         @Param("area") String area,
         @Param("startDate") LocalDate startDate,
         @Param("endDate") LocalDate endDate
+    );
+
+    /**
+     * Retorna o conjunto distinto de lotNumbers usados em QC dentro de uma janela.
+     * Usado em Reagentes Fase 3 para marcar lotes como "ativos em CQ recente".
+     * O match e case-insensitive para lidar com divergencias de digitacao.
+     */
+    @Query("""
+        SELECT DISTINCT LOWER(TRIM(q.lotNumber)) FROM QcRecord q
+        WHERE q.lotNumber IS NOT NULL
+          AND LOWER(TRIM(q.lotNumber)) IN :lotNumbers
+          AND q.date >= :since
+        """)
+    List<String> findActiveLotNumbersSince(
+        @Param("lotNumbers") Collection<String> lotNumbers,
+        @Param("since") LocalDate since
     );
 }

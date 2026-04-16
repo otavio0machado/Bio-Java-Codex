@@ -1,5 +1,7 @@
 import { api } from './api'
 import type {
+  BatchImportResult,
+  ImportRun,
   LeveyJenningsPoint,
   PostCalibrationRecord,
   PostCalibrationRequest,
@@ -22,6 +24,22 @@ export const qcService = {
   },
   async createBatch(requests: QcRecordRequest[]) {
     const response = await api.post<QcRecord[]>('/qc/records/batch', requests)
+    return response.data
+  },
+  /**
+   * Importacao V2 com resposta linha-a-linha e auditoria ImportRun.
+   * mode=partial (default) nao aborta o lote quando ha falhas isoladas.
+   */
+  async createBatchV2(requests: QcRecordRequest[], mode: 'partial' | 'atomic' = 'partial') {
+    const response = await api.post<BatchImportResult>(
+      '/qc/records/batch-v2',
+      requests,
+      { params: { mode } },
+    )
+    return response.data
+  },
+  async getImportHistory(limit = 20): Promise<ImportRun[]> {
+    const response = await api.get<ImportRun[]>('/qc/records/import-history', { params: { limit } })
     return response.data
   },
   async getStatistics() {

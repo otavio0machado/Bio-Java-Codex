@@ -13,6 +13,7 @@ import { useLeveyJennings } from '../../hooks/useQcRecords'
 import type { LeveyJenningsPoint } from '../../types'
 import { Card, EmptyState, Skeleton, StatusBadge } from '../ui'
 import { Activity } from 'lucide-react'
+import { formatShortBR, formatLongBR } from '../../utils/date'
 
 interface LeveyJenningsChartProps {
   examName: string
@@ -21,10 +22,7 @@ interface LeveyJenningsChartProps {
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-  })
+  return formatShortBR(value)
 }
 
 function CustomTooltip({
@@ -41,7 +39,7 @@ function CustomTooltip({
   const data = payload[0]?.payload as ChartPoint
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-lg">
-      <div className="text-sm font-semibold text-neutral-900">{formatDate(data.date)}</div>
+      <div className="text-sm font-semibold text-neutral-900">{formatLongBR(data.date)}</div>
       <div className="mt-3 space-y-1 text-sm text-neutral-600">
         <div>Valor: <strong>{data.value.toFixed(2)}</strong></div>
         <div>Alvo: {data.target.toFixed(2)}</div>

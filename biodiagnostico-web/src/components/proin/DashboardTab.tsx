@@ -2,6 +2,7 @@ import { AlertTriangle, Beaker, CheckCircle2, TrendingUp } from 'lucide-react'
 import { useDashboardKpis } from '../../hooks/useDashboard'
 import { useQcRecords } from '../../hooks/useQcRecords'
 import { Button, Card, EmptyState, Skeleton, StatCard } from '../ui'
+import { formatLongBR } from '../../utils/date'
 
 interface DashboardTabProps {
   area: string
@@ -55,7 +56,7 @@ export function DashboardTab({ area }: DashboardTabProps) {
                 <div>
                   <div className="font-medium text-neutral-900">{record.examName}</div>
                   <div className="text-sm text-neutral-500">
-                    {new Date(record.date).toLocaleDateString('pt-BR')} · {record.level}
+                    {formatLongBR(record.date)} · {record.level}
                   </div>
                 </div>
                 <div className="text-right">

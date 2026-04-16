@@ -29,8 +29,10 @@ server:
 jwt:
   secret: ${JWT_SECRET}
   issuer: ${JWT_ISSUER:biodiagnostico-api}
-  access-token-expiry: ${JWT_ACCESS_TOKEN_EXPIRY:900000}
-  refresh-token-expiry: ${JWT_REFRESH_TOKEN_EXPIRY:604800000}
+  # Access token: 60 min (3.600.000 ms) — sessao util sem forcar logout em inatividade curta
+  access-token-expiry: ${JWT_ACCESS_TOKEN_EXPIRY:3600000}
+  # Refresh token: 30 dias (2.592.000.000 ms) — janela longa, protegido por cookie httpOnly
+  refresh-token-expiry: ${JWT_REFRESH_TOKEN_EXPIRY:2592000000}
 
 gemini:
   api-key: ${GEMINI_API_KEY:}

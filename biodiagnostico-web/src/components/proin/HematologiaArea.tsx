@@ -15,6 +15,7 @@ import type {
   HematologyParameterRequest,
 } from '../../types'
 import { Button, Card, EmptyState, Input, Modal, Select, StatusBadge, useToast } from '../ui'
+import { formatLongBR } from '../../utils/date'
 
 const analytes = [
   { key: 'Hemacias', label: 'Hemácias', shortLabel: 'RBC' },
@@ -388,7 +389,7 @@ export function HematologiaArea() {
                     <div>
                       <div className="font-semibold text-neutral-900">{measurement.analito}</div>
                       <div className="text-sm text-neutral-500">
-                        {new Date(measurement.dataMedicao).toLocaleDateString('pt-BR')} · {measurement.modoUsado}
+                        {formatLongBR(measurement.dataMedicao)} · {measurement.modoUsado}
                       </div>
                     </div>
                     <StatusBadge status={measurement.status} />
@@ -435,7 +436,7 @@ export function HematologiaArea() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="font-semibold text-neutral-900">
-                      {new Date(record.dataBio).toLocaleDateString('pt-BR')}
+                      {formatLongBR(record.dataBio)}
                     </div>
                     <div className="text-sm text-neutral-500">{record.modoCi}</div>
                   </div>

@@ -14,6 +14,53 @@ let accessToken: string | null = null
 let authUser: AuthResponse['user'] | null = null
 let refreshPromise: Promise<AuthResponse> | null = null
 let redirectScheduled = false
+let proactiveRefreshTimer: number | null = null
+
+// Janela minima (ms) antes do expiry para disparar refresh proativo.
+const PROACTIVE_REFRESH_SAFETY_MS = 30_000
+// Fracao do lifetime do token usada para agendar o refresh proativo.
+const PROACTIVE_REFRESH_FRACTION = 0.8
+
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))
+    if (typeof payload.exp === 'number') {
+      return payload.exp * 1000
+    }
+  } catch {
+    // token invalido ou nao-JWT: apenas nao agenda refresh proativo
+  }
+  return null
+}
+
+function clearProactiveRefreshTimer() {
+  if (proactiveRefreshTimer !== null) {
+    window.clearTimeout(proactiveRefreshTimer)
+    proactiveRefreshTimer = null
+  }
+}
+
+function scheduleProactiveRefresh(token: string) {
+  clearProactiveRefreshTimer()
+  const expMs = decodeJwtExpMs(token)
+  if (!expMs) return
+  const now = Date.now()
+  const lifetime = expMs - now
+  if (lifetime <= PROACTIVE_REFRESH_SAFETY_MS) return
+  const delay = Math.max(
+    PROACTIVE_REFRESH_SAFETY_MS,
+    Math.floor(lifetime * PROACTIVE_REFRESH_FRACTION),
+  )
+  proactiveRefreshTimer = window.setTimeout(() => {
+    // Se ainda ha sessao ativa, renova em background. Falhas sao silenciadas aqui;
+    // qualquer chamada futura caira no fluxo reativo de 401 -> refresh -> login.
+    if (accessToken) {
+      refreshAccessToken().catch(() => {})
+    }
+  }, delay)
+}
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -69,11 +116,13 @@ export function getAuthSnapshot() {
 function persistAuth(auth: AuthResponse) {
   accessToken = auth.accessToken
   authUser = auth.user
+  scheduleProactiveRefresh(auth.accessToken)
 }
 
 function clearAuth() {
   accessToken = null
   authUser = null
+  clearProactiveRefreshTimer()
 }
 
 async function refreshAccessToken() {
@@ -91,7 +140,17 @@ async function refreshAccessToken() {
   return refreshPromise
 }
 
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  // Se ha um refresh em andamento (reativo ou proativo) e esta request nao e
+  // de auth, aguarda o refresh terminar para usar o token novo. Isso evita
+  // enviar requests com token expirado durante a janela do refresh.
+  if (refreshPromise && !isAuthRoute(config.url)) {
+    try {
+      await refreshPromise
+    } catch {
+      // se o refresh falhar o fluxo reativo lida com logout; seguimos com o token atual
+    }
+  }
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`
   }

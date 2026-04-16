@@ -151,6 +151,42 @@ class QcRecordControllerTest {
         }
 
         @Bean
+        com.biodiagnostico.service.QcBatchImportService qcBatchImportService() {
+            // Nao usado pelos testes existentes, mas o controller exige bean.
+            return new com.biodiagnostico.service.QcBatchImportService(null, null, null) {
+                @Override
+                public com.biodiagnostico.dto.response.BatchImportResult importPartial(
+                    java.util.List<com.biodiagnostico.dto.request.QcRecordRequest> requests,
+                    org.springframework.security.core.Authentication authentication
+                ) {
+                    return new com.biodiagnostico.dto.response.BatchImportResult(
+                        java.util.UUID.randomUUID(), "PARTIAL", 0, 0, 0, java.util.List.of()
+                    );
+                }
+
+                @Override
+                public com.biodiagnostico.dto.response.BatchImportResult importAtomic(
+                    java.util.List<com.biodiagnostico.dto.request.QcRecordRequest> requests,
+                    org.springframework.security.core.Authentication authentication
+                ) {
+                    return new com.biodiagnostico.dto.response.BatchImportResult(
+                        java.util.UUID.randomUUID(), "ATOMIC", 0, 0, 0, java.util.List.of()
+                    );
+                }
+            };
+        }
+
+        @Bean
+        com.biodiagnostico.service.ImportRunService importRunService() {
+            return new com.biodiagnostico.service.ImportRunService(null) {
+                @Override
+                public java.util.List<com.biodiagnostico.dto.response.ImportRunResponse> history(int limit) {
+                    return java.util.List.of();
+                }
+            };
+        }
+
+        @Bean
         io.micrometer.core.instrument.MeterRegistry meterRegistry() {
             return new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         }

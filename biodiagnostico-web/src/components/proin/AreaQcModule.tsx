@@ -11,6 +11,7 @@ import {
 import { reportService } from '../../services/reportService'
 import type { AreaQcMeasurementRequest, AreaQcParameter, AreaQcParameterRequest, LabArea } from '../../types'
 import { Button, Card, EmptyState, Input, Select, StatusBadge, TextArea, useToast } from '../ui'
+import { formatLongBR } from '../../utils/date'
 
 interface AreaQcModuleProps {
   area: Exclude<LabArea, 'bioquimica' | 'hematologia'>
@@ -441,7 +442,7 @@ export function AreaQcModule({ area, title, description, analytes }: AreaQcModul
                     <div>
                       <div className="font-semibold text-neutral-900">{measurement.analito}</div>
                       <div className="text-sm text-neutral-500">
-                        {new Date(measurement.dataMedicao).toLocaleDateString('pt-BR')} · {measurement.modoUsado}
+                        {formatLongBR(measurement.dataMedicao)} · {measurement.modoUsado}
                       </div>
                     </div>
                     <StatusBadge status={measurement.status} />

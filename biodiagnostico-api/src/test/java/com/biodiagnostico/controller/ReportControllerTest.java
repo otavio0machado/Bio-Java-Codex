@@ -11,6 +11,7 @@ import com.biodiagnostico.exception.GlobalExceptionHandler;
 import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtAuthFilter;
 import com.biodiagnostico.service.PdfReportService;
+import com.biodiagnostico.service.ReportRunService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +70,30 @@ class ReportControllerTest {
         @Bean
         StubPdfReportService stubPdfReportService() {
             return new StubPdfReportService();
+        }
+
+        @Bean
+        ReportRunService reportRunService() {
+            return new ReportRunService(null) {
+                @Override
+                public void recordSuccess(String type, String area, String periodType, Integer month, Integer year,
+                    String reportNumber, String sha256, long sizeBytes, long durationMs,
+                    org.springframework.security.core.Authentication authentication) {
+                    // no-op em teste
+                }
+
+                @Override
+                public void recordFailure(String type, String area, String periodType, Integer month, Integer year,
+                    long durationMs, String errorMessage,
+                    org.springframework.security.core.Authentication authentication) {
+                    // no-op
+                }
+
+                @Override
+                public java.util.List<com.biodiagnostico.dto.response.ReportRunResponse> history(int limit) {
+                    return java.util.List.of();
+                }
+            };
         }
 
         @Bean

@@ -1362,3 +1362,48 @@ Ao atualizar este plano, registrar por fase:
 - evidência de validação;
 - risco residual;
 - próximo gate obrigatório.
+
+## Sprint A–E (2026-04-16) — Sessao, Registro, Referencias, Manutencao, Reagentes F1/F2/F3, Relatorios V2, Importar V2
+
+Status: **CONCLUIDO_COM_RESSALVAS** — auditor de dominio aprovou com ressalvas P0/P1/P2 registradas abaixo.
+
+Entregas principais:
+- Util `parseLocalDate` resolvendo bug de timezone em graficos e cards (Sprint A).
+- Sessao JWT 60 min + refresh proativo em 80% do lifetime + single-flight no interceptor (Sprint A).
+- Combobox reutilizavel + uso em Referencias e Manutencao; hiperlink de historico do exame em Registro (Sprint A/B).
+- Manutencao V2: KPIs, filtros, Combobox equipamento/tecnico, undo delete, historico por equipamento (Sprint B).
+- Reagentes F1 (UX): bloco "Acao hoje", filtros profissionais, ordenacao por urgencia, marcacao visual de rastreabilidade (Sprint C).
+- Reagentes F2 (Contrato): enums canonicos `ReagentStatus`/`MovementType`/`MovementReason`, `manufacturer`+`expiryDate`+`responsible` obrigatorios, `reason` obrigatorio em AJUSTE e SAIDA que zera estoque, `previousStock` gravado em TODOS os movimentos, `updateLot` reverifica unicidade antes de salvar (Sprint C). Migrations V4 + Flyway.
+- Reagentes F3 (Rastreabilidade forte): `location`, `supplier`, `receivedDate`, `openedDate` + flag derivada `usedInQcRecently` cruzando `qc_records` por janela de 30 dias (Sprint C). Migration V5.
+- Relatorios V2: entity `ReportRun`, endpoint `/api/reports/history`, feedback detalhado de geracao (tamanho/duracao), tabela de historico no frontend (Sprint D). Migration V6.
+- Importar V2: endpoint `/api/qc-records/batch-v2?mode=partial|atomic`, `BatchImportResult` linha-a-linha com `TransactionTemplate REQUIRES_NEW` por linha, entity `ImportRun` com estado `SUCCESS/PARTIAL/FAILURE`, template XLSX canonico no frontend, historico tabular (Sprint D). Migration V6.
+- Setup `vitest` + `jsdom` + `@testing-library/react`; testes iniciais de `utils/date` (12) e `Combobox` (5) — 17 testes frontend passando (Sprint E).
+
+Validacoes executadas:
+- `./mvnw test` → **167 tests, 0 failures** (backend).
+- `npm test` (vitest) → **17 tests, 0 failures** (frontend).
+- `npm run build` → **BUILD SUCCESS** (frontend).
+- `npx tsc --noEmit` → 0 erros.
+- Smoke no preview: Login, Dashboard, Reagentes, Manutencao, Registro, Referencias, Relatorios, Importar → sem erros de console.
+
+### Ressalvas do domain-auditor (pendentes para fase futura)
+
+**P0-1 — RESOLVIDO** Match Reagente<->CQ: `QcRecord.lotNumber` nao carrega `manufacturer`, entao dois lotes com mesmo `lotNumber` e fabricantes distintos colidiam. Politica conservadora adotada em `ReagentService.getLots` (`lotNumbersWithCollision`): **quando ha colisao de `lotNumber` entre fabricantes, a flag `usedInQcRecently` fica false para ambos** para evitar falso positivo. Teste cobre o cenario (`ReagentServiceTest.usedInQcRecentlyConservadorQuandoColide`). Solucao definitiva (adicionar `manufacturer` a `qc_records`) fica para fase futura com migration e retrofit dos dados historicos.
+
+**P1-2 — REGISTRADO** Divergencia Westgard entre modos ATOMIC e PARTIAL: em PARTIAL cada linha roda em transacao propria (REQUIRES_NEW), portanto `loadWestgardHistory` da linha N ja enxerga as linhas 1..N-1 commitadas; em ATOMIC todas rodam no mesmo snapshot inicial. **Mesma planilha pode produzir status diferentes entre modos**. Decisao registrada aqui: **PARTIAL e a fonte de verdade preferida** porque reproduz o comportamento de imports sequenciais reais (a decisao Westgard deve considerar o historico crescente). Frontend documenta isso no Select de modo. Teste comparativo entra no proximo sprint de cobertura.
+
+**P1-3 — REGISTRADO** Janela `QC_ACTIVE_WINDOW_DAYS=30` em `ReagentService`: **constante fixa por ora**. Decisao registrada aqui — proximo sprint externaliza em `application.yml` como `reagents.qc-active-window-days` e documenta no frontend.
+
+**P1-4 — REGISTRADO** Reversao de movimentos: `AJUSTE` usa `previousStock` (determinista); `ENTRADA/SAIDA` usam delta (pode driftar com movimentos intercalados). **Desde a Fase 2, `previousStock` e gravado em todos os movimentos**, mas a logica de `deleteMovement` ainda nao consome esse valor para `ENTRADA/SAIDA`. Decisao registrada: manter delta por ora (comportamento legado ja testado) e migrar para `previousStock` em proximo sprint com ADR + testes de drift.
+
+**P2-5 — REGISTRADO** Semantica de `updateLot`: null sobrescreve `location/supplier/receivedDate/openedDate`. Frontend sempre envia o form inteiro, entao nao ha PATCH parcial hoje. Decisao registrada: **se for necessario PATCH no futuro, criar endpoint dedicado** — manter PUT puro no `updateLot` atual.
+
+**P2-6 — REGISTRADO** `report_runs`/`import_runs` sem FK para `users`: decisao consciente (tabelas append-only de auditoria, que devem sobreviver a delete de usuario). `username` e `user_id` sao guardados como snapshots.
+
+**P2-7 — RESOLVIDO** Obrigatoriedade de `reason` validada tambem no frontend (`ReagentesTab.handleMovement`), espelhando a regra do backend.
+
+### Proximos gates obrigatorios
+
+- **Fase 3.1 Reagentes** — resolver P0-1 em definitivo (adicionar `manufacturer` em `qc_records`).
+- **Sprint F** — cobertura de testes frontend expandida (ManutencaoTab, ReagentesTab F3, ImportarTab) + fix P1-4 com ADR.
+- **Release** — tag de versao + deploy em homologacao.

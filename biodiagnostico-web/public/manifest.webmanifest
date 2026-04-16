@@ -1,0 +1,19 @@
+{
+  "name": "Biodiagnóstico 4.0",
+  "short_name": "Biodiagnóstico",
+  "description": "Sistema de Controle de Qualidade laboratorial — CQ, reagentes, manutenção e análises assistidas.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#166534",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

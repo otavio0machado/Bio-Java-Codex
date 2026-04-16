@@ -217,7 +217,7 @@ export interface ReagentLot {
   storageTemp?: string
   startDate?: string
   endDate?: string
-  status: 'ativo' | 'em_uso' | 'inativo' | 'vencido' | string
+  status: 'ativo' | 'em_uso' | 'inativo' | 'vencido' | 'quarentena' | string
   alertThresholdDays: number
   createdAt: string
   updatedAt: string
@@ -225,6 +225,12 @@ export interface ReagentLot {
   stockPct: number
   daysToRupture: number | null
   nearExpiry: boolean
+  // Fase 3: rastreabilidade forte
+  location?: string | null
+  supplier?: string | null
+  receivedDate?: string | null
+  openedDate?: string | null
+  usedInQcRecently?: boolean
 }
 
 export interface ReagentLotRequest {
@@ -242,6 +248,66 @@ export interface ReagentLotRequest {
   endDate?: string
   alertThresholdDays?: number
   status?: string
+  // Fase 3
+  location?: string
+  supplier?: string
+  receivedDate?: string
+  openedDate?: string
+}
+
+export type MovementReason =
+  | 'CONTAGEM_FISICA'
+  | 'QUEBRA'
+  | 'CONTAMINACAO'
+  | 'CORRECAO'
+  | 'VENCIMENTO'
+  | 'OUTRO'
+
+export interface ReportRun {
+  id: string
+  type: 'QC_PDF' | 'REAGENTS_PDF' | string
+  area?: string | null
+  periodType?: string | null
+  month?: number | null
+  year?: number | null
+  reportNumber?: string | null
+  sha256?: string | null
+  sizeBytes?: number | null
+  durationMs?: number | null
+  status: 'SUCCESS' | 'FAILURE' | string
+  errorMessage?: string | null
+  username?: string | null
+  createdAt: string
+}
+
+export interface ImportRun {
+  id: string
+  source: 'QC_RECORDS' | string
+  mode: 'ATOMIC' | 'PARTIAL' | string
+  totalRows: number
+  successRows: number
+  failureRows: number
+  durationMs?: number | null
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILURE' | string
+  errorSummary?: string | null
+  username?: string | null
+  createdAt: string
+}
+
+export interface BatchImportRowResult {
+  rowIndex: number
+  success: boolean
+  message?: string | null
+  record?: QcRecord | null
+}
+
+export interface BatchImportResult {
+  runId: string
+  mode: 'ATOMIC' | 'PARTIAL' | string
+  total: number
+  successCount: number
+  failureCount: number
+  results: BatchImportRowResult[]
 }
 
 export interface StockMovement {
@@ -251,14 +317,16 @@ export interface StockMovement {
   responsible?: string
   notes?: string
   previousStock?: number
+  reason?: MovementReason | string | null
   createdAt: string
 }
 
 export interface StockMovementRequest {
   type: 'ENTRADA' | 'SAIDA' | 'AJUSTE'
   quantity: number
-  responsible?: string
+  responsible: string
   notes?: string
+  reason?: MovementReason | null
 }
 
 export interface ReagentTagSummary {

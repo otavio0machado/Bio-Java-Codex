@@ -49,6 +49,13 @@ public class StockMovement {
     @Column(name = "previous_stock")
     private Double previousStock;
 
+    /**
+     * Motivo do movimento. Obrigatorio em AJUSTE e em SAIDA que zere o estoque;
+     * opcional em ENTRADA. Valida contra {@link MovementReason}.
+     */
+    @Column(length = 32)
+    private String reason;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

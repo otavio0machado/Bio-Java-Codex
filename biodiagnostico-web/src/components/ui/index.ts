@@ -1,5 +1,7 @@
 export { Button } from './Button'
 export { Card } from './Card'
+export { Combobox } from './Combobox'
+export type { ComboboxOption } from './Combobox'
 export { EmptyState } from './EmptyState'
 export { FormField } from './FormField'
 export { Input } from './Input'

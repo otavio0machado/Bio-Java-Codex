@@ -2,10 +2,14 @@ package com.biodiagnostico.controller;
 
 import com.biodiagnostico.dto.request.PostCalibrationRequest;
 import com.biodiagnostico.dto.request.QcRecordRequest;
+import com.biodiagnostico.dto.response.BatchImportResult;
+import com.biodiagnostico.dto.response.ImportRunResponse;
 import com.biodiagnostico.dto.response.LeveyJenningsResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
 import com.biodiagnostico.entity.PostCalibrationRecord;
+import com.biodiagnostico.service.ImportRunService;
 import com.biodiagnostico.service.PostCalibrationService;
+import com.biodiagnostico.service.QcBatchImportService;
 import com.biodiagnostico.service.QcService;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
@@ -16,6 +20,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -32,10 +37,19 @@ public class QcRecordController {
 
     private final QcService qcService;
     private final PostCalibrationService postCalibrationService;
+    private final QcBatchImportService qcBatchImportService;
+    private final ImportRunService importRunService;
 
-    public QcRecordController(QcService qcService, PostCalibrationService postCalibrationService) {
+    public QcRecordController(
+        QcService qcService,
+        PostCalibrationService postCalibrationService,
+        QcBatchImportService qcBatchImportService,
+        ImportRunService importRunService
+    ) {
         this.qcService = qcService;
         this.postCalibrationService = postCalibrationService;
+        this.qcBatchImportService = qcBatchImportService;
+        this.importRunService = importRunService;
     }
 
     @GetMapping
@@ -60,6 +74,33 @@ public class QcRecordController {
         @Valid @RequestBody List<QcRecordRequest> requests
     ) {
         return ResponseEntity.status(HttpStatus.CREATED).body(qcService.createRecordsBatch(requests));
+    }
+
+    /**
+     * Importacao em lote com feedback linha-a-linha e auditoria (ImportRun).
+     *
+     * Modo PARTIAL (default): linhas invalidas nao bloqueiam as validas.
+     * Modo ATOMIC: comportamento legado — qualquer falha aborta o lote inteiro.
+     */
+    @PostMapping("/batch-v2")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    public ResponseEntity<BatchImportResult> createRecordsBatchV2(
+        @RequestBody List<QcRecordRequest> requests,
+        @RequestParam(required = false, defaultValue = "partial") String mode,
+        Authentication authentication
+    ) {
+        BatchImportResult result = "atomic".equalsIgnoreCase(mode)
+            ? qcBatchImportService.importAtomic(requests, authentication)
+            : qcBatchImportService.importPartial(requests, authentication);
+        return ResponseEntity.status(HttpStatus.CREATED).body(result);
+    }
+
+    @GetMapping("/import-history")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
+    public ResponseEntity<List<ImportRunResponse>> importHistory(
+        @RequestParam(required = false, defaultValue = "20") int limit
+    ) {
+        return ResponseEntity.ok(importRunService.history(limit));
     }
 
     @GetMapping("/{id}")

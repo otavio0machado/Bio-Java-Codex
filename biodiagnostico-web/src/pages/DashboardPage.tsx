@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useDashboardAlerts, useDashboardKpis, useRecentRecords } from '../hooks/useDashboard'
 import { Card, EmptyState, Skeleton, StatCard, StatusBadge } from '../components/ui'
+import { formatLongBR } from '../utils/date'
 
 export function DashboardPage() {
   const navigate = useNavigate()
@@ -142,7 +143,7 @@ export function DashboardPage() {
                 <tbody className="divide-y divide-neutral-100">
                   {records?.map((record) => (
                     <tr key={record.id}>
-                      <td className="py-3 text-base">{new Date(record.date).toLocaleDateString('pt-BR')}</td>
+                      <td className="py-3 text-base">{formatLongBR(record.date)}</td>
                       <td className="py-3 text-base font-medium text-neutral-900">{record.examName}</td>
                       <td className="py-3 text-base font-mono">{record.value.toFixed(2)}</td>
                       <td className="py-3"><StatusBadge status={record.status} /></td>

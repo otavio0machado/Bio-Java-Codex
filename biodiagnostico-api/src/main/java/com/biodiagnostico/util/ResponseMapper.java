@@ -1,20 +1,24 @@
 package com.biodiagnostico.util;
 
 import com.biodiagnostico.dto.response.HematologyBioRecordResponse;
+import com.biodiagnostico.dto.response.ImportRunResponse;
 import com.biodiagnostico.dto.response.MaintenanceResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
 import com.biodiagnostico.dto.response.QcReferenceResponse;
 import com.biodiagnostico.dto.response.ReagentLotResponse;
+import com.biodiagnostico.dto.response.ReportRunResponse;
 import com.biodiagnostico.dto.response.StockMovementResponse;
 import com.biodiagnostico.dto.response.UserResponse;
 import com.biodiagnostico.dto.response.ViolationResponse;
 import com.biodiagnostico.entity.HematologyBioRecord;
+import com.biodiagnostico.entity.ImportRun;
 import com.biodiagnostico.entity.MaintenanceRecord;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.QcReferenceValue;
 import com.biodiagnostico.entity.ReagentLot;
+import com.biodiagnostico.entity.ReportRun;
 import com.biodiagnostico.entity.StockMovement;
 import com.biodiagnostico.entity.User;
 import com.biodiagnostico.entity.WestgardViolation;
@@ -140,6 +144,15 @@ public final class ResponseMapper {
     }
 
     public static ReagentLotResponse toReagentLotResponse(ReagentLot lot) {
+        return toReagentLotResponse(lot, false);
+    }
+
+    /**
+     * Sobrecarga que permite ao chamador informar se o lote foi usado em CQ recentemente.
+     * O mapper nao consulta o repositorio — quem chama (ReagentService.getLots) faz a
+     * consulta em batch e passa o flag pronto para cada lote.
+     */
+    public static ReagentLotResponse toReagentLotResponse(ReagentLot lot, boolean usedInQcRecently) {
         long daysLeft = lot.getExpiryDate() == null
             ? -1
             : ChronoUnit.DAYS.between(LocalDate.now(), lot.getExpiryDate());
@@ -172,7 +185,12 @@ public final class ResponseMapper {
             daysLeft,
             stockPct,
             daysToRupture,
-            nearExpiry
+            nearExpiry,
+            lot.getLocation(),
+            lot.getSupplier(),
+            lot.getReceivedDate(),
+            lot.getOpenedDate(),
+            usedInQcRecently
         );
     }
 
@@ -223,6 +241,41 @@ public final class ResponseMapper {
         );
     }
 
+    public static ReportRunResponse toReportRunResponse(ReportRun run) {
+        return new ReportRunResponse(
+            run.getId(),
+            run.getType(),
+            run.getArea(),
+            run.getPeriodType(),
+            run.getMonth(),
+            run.getYear(),
+            run.getReportNumber(),
+            run.getSha256(),
+            run.getSizeBytes(),
+            run.getDurationMs(),
+            run.getStatus(),
+            run.getErrorMessage(),
+            run.getUsername(),
+            run.getCreatedAt()
+        );
+    }
+
+    public static ImportRunResponse toImportRunResponse(ImportRun run) {
+        return new ImportRunResponse(
+            run.getId(),
+            run.getSource(),
+            run.getMode(),
+            run.getTotalRows(),
+            run.getSuccessRows(),
+            run.getFailureRows(),
+            run.getDurationMs(),
+            run.getStatus(),
+            run.getErrorSummary(),
+            run.getUsername(),
+            run.getCreatedAt()
+        );
+    }
+
     public static StockMovementResponse toStockMovementResponse(StockMovement movement) {
         return new StockMovementResponse(
             movement.getId(),
@@ -231,6 +284,7 @@ public final class ResponseMapper {
             movement.getResponsible(),
             movement.getNotes(),
             movement.getPreviousStock(),
+            movement.getReason(),
             movement.getCreatedAt()
         );
     }

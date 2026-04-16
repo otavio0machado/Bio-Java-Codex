@@ -62,7 +62,7 @@ class ReagentControllerTest {
         String body = objectMapper.writeValueAsString(
             new ReagentLotRequest("ALT", "L123", "Bio", "Bioquímica",
                 LocalDate.now().plusDays(60), 100D, "frascos", 80D, 2D, "2-8C",
-                LocalDate.now(), null, 7, "ativo"));
+                LocalDate.now(), null, 7, "ativo", null, null, null, null));
 
         mockMvc.perform(post("/api/reagents")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -87,7 +87,7 @@ class ReagentControllerTest {
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("ENTRADA", 20D, "Ana", ""));
+            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -106,7 +106,7 @@ class ReagentControllerTest {
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("SAIDA", 50D, "Ana", ""));
+            new StockMovementRequest("SAIDA", 50D, "Ana", "", null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -170,7 +170,7 @@ class ReagentControllerTest {
         List<ReagentLot> byLotNumberResponse = List.of();
 
         StubReagentService() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override

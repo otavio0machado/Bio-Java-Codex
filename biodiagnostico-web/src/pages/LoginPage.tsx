@@ -6,6 +6,7 @@ import { Navigate } from 'react-router-dom'
 import { Button, Card, Input, useToast } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { type LoginFormValues, loginSchema } from '../lib/authSchemas'
+import logoBio from '../assets/logobio.png'
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth()
@@ -39,7 +40,8 @@ export function LoginPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(255,255,255,0.18),_transparent_30%)]" />
           <div className="relative flex h-full w-full items-center">
             <div className="max-w-2xl space-y-8">
-              <div className="inline-flex rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium backdrop-blur-md">
+              <div className="inline-flex items-center gap-3 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium backdrop-blur-md">
+                <img src={logoBio} alt="Biodiagnóstico" className="h-6 w-6 rounded-full bg-white/90 p-0.5" />
                 Biodiagnóstico 4.0
               </div>
               <div className="space-y-5">
@@ -62,7 +64,8 @@ export function LoginPage() {
 
         <section className="flex items-center justify-center px-6 py-12 sm:px-10">
           <div className="w-full max-w-md space-y-8">
-            <div className="space-y-2">
+            <div className="space-y-3">
+              <img src={logoBio} alt="Biodiagnóstico" className="h-16 w-16 rounded-2xl shadow-sm" />
               <div className="text-sm font-semibold uppercase tracking-[0.18em] text-green-800">Biodiagnóstico</div>
               <h2 className="text-3xl font-bold text-neutral-900">Acesse sua conta</h2>
               <p className="text-neutral-500">Sistema de Controle de Qualidade</p>

@@ -78,6 +78,24 @@ public class ReagentLot {
     @Column(nullable = false)
     private String status = "ativo";
 
+    // ===== Fase 3: rastreabilidade forte =====
+
+    /** Localizacao fisica do lote (ex: "Geladeira 2, Prateleira B"). */
+    @Column(length = 128)
+    private String location;
+
+    /** Fornecedor que entregou o lote (pode diferir do fabricante). */
+    @Column(length = 128)
+    private String supplier;
+
+    /** Data em que o lote foi recebido no laboratorio. */
+    @Column(name = "received_date")
+    private LocalDate receivedDate;
+
+    /** Data em que o lote foi aberto para uso (diferente de startDate). */
+    @Column(name = "opened_date")
+    private LocalDate openedDate;
+
     @Builder.Default
     @Column(name = "alert_threshold_days")
     private Integer alertThresholdDays = 7;

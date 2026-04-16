@@ -8,6 +8,7 @@ import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
 import { PostCalibrationModal } from './PostCalibrationModal'
 import { VoiceRecorderModal } from './VoiceRecorderModal'
+import { ExamHistoryModal } from './ExamHistoryModal'
 
 const LeveyJenningsChart = lazy(() =>
   import('../charts/LeveyJenningsChart').then((module) => ({ default: module.LeveyJenningsChart })),
@@ -113,6 +114,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const [statusFilter, setStatusFilter] = useState('Todos')
   const { data: allRecords = [], isLoading } = useQcRecords({ area })
   const [chartRecord, setChartRecord] = useState<{ examName: string; level: string } | null>(null)
+  const [historyExam, setHistoryExam] = useState<{ examName: string; level: string | null } | null>(null)
 
   // --- Resolucao de referencia silenciosa ---
   const resolvedRef = useMemo<QcReferenceValue | null>(() => {
@@ -506,7 +508,16 @@ export function RegistroTab({ area }: RegistroTabProps) {
                   return (
                     <tr key={r.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
                       <td className="whitespace-nowrap px-3 py-2.5 text-base text-neutral-600">{formatDate(r.date)}</td>
-                      <td className="px-3 py-2.5 text-base font-semibold">{r.examName}</td>
+                      <td className="px-3 py-2.5 text-base font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryExam({ examName: r.examName, level: r.level })}
+                          className="text-left text-green-900 underline-offset-2 hover:underline focus:outline-none focus:underline"
+                          title={`Ver histórico completo de ${r.examName}`}
+                        >
+                          {r.examName}
+                        </button>
+                      </td>
                       <td className="px-3 py-2.5 font-mono text-base">{r.value.toFixed(2)}</td>
                       <td className="px-3 py-2.5">
                         <span className={`font-semibold ${rCv <= rCvLimit ? 'text-green-700' : 'text-red-700'}`}>{rCv.toFixed(2)}%</span>
@@ -583,6 +594,14 @@ export function RegistroTab({ area }: RegistroTabProps) {
           </Suspense>
         ) : null}
       </Modal>
+
+      {/* Modal Historico do Exame (clique no nome do exame) */}
+      <ExamHistoryModal
+        area={area}
+        examName={historyExam?.examName ?? null}
+        level={historyExam?.level ?? null}
+        onClose={() => setHistoryExam(null)}
+      />
 
       {/* Undo delete banner */}
       {deletedRecord && (
