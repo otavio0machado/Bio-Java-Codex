@@ -143,8 +143,8 @@ public class WestgardEngine {
         if (allAbove || allBelow) {
             return java.util.Optional.of(new Violation(
                 "10x",
-                "Alerta: Dez resultados consecutivos estão do mesmo lado da média.",
-                Severity.WARNING
+                "Erro Sistemático: Dez resultados consecutivos estão do mesmo lado da média.",
+                Severity.REJECTION
             ));
         }
         return java.util.Optional.empty();

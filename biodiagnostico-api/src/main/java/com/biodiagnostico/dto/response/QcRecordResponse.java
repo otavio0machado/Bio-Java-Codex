@@ -25,6 +25,7 @@ public record QcRecordResponse(
     Boolean needsCalibration,
     List<ViolationResponse> violations,
     Instant createdAt,
-    Instant updatedAt
+    Instant updatedAt,
+    String referenceWarning
 ) {
 }

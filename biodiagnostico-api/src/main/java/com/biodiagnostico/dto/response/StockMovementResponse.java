@@ -9,6 +9,7 @@ public record StockMovementResponse(
     Double quantity,
     String responsible,
     String notes,
+    Double previousStock,
     Instant createdAt
 ) {
 }

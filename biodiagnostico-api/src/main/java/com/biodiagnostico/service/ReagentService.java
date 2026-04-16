@@ -61,6 +61,7 @@ public class ReagentService {
             .estimatedConsumption(NumericUtils.defaultIfNull(request.estimatedConsumption()))
             .storageTemp(request.storageTemp())
             .startDate(request.startDate())
+            .endDate(request.endDate())
             .alertThresholdDays(request.alertThresholdDays() == null ? 7 : request.alertThresholdDays())
             .status(request.status() == null || request.status().isBlank() ? "ativo" : request.status())
             .build();
@@ -86,6 +87,7 @@ public class ReagentService {
         lot.setEstimatedConsumption(NumericUtils.defaultIfNull(request.estimatedConsumption()));
         lot.setStorageTemp(request.storageTemp());
         lot.setStartDate(request.startDate());
+        lot.setEndDate(request.endDate());
         lot.setAlertThresholdDays(request.alertThresholdDays() == null ? lot.getAlertThresholdDays() : request.alertThresholdDays());
         if (request.status() != null && !request.status().isBlank()) {
             lot.setStatus(request.status());
@@ -130,7 +132,6 @@ public class ReagentService {
             }
             case "AJUSTE" -> {
                 lot.setCurrentStock(quantity);
-                notes = PREVIOUS_STOCK_PREFIX + currentStock + ";" + (notes == null ? "" : notes);
             }
             default -> throw new BusinessException("Tipo de movimentação inválido");
         }
@@ -142,6 +143,7 @@ public class ReagentService {
             .quantity(quantity)
             .responsible(request.responsible())
             .notes(notes)
+            .previousStock(type.equals("AJUSTE") ? currentStock : null)
             .build();
         return stockMovementRepository.save(movement);
     }
@@ -164,7 +166,9 @@ public class ReagentService {
             }
             case "SAIDA" -> lot.setCurrentStock(currentStock + movement.getQuantity());
             case "AJUSTE" -> {
-                double previousStock = extractPreviousStock(movement.getNotes(), currentStock);
+                double previousStock = movement.getPreviousStock() != null
+                    ? movement.getPreviousStock()
+                    : extractPreviousStock(movement.getNotes(), currentStock);
                 if (previousStock < 0) {
                     throw new BusinessException(
                         "Não é possível excluir este ajuste. O estoque resultante ficaria negativo.");

@@ -62,7 +62,7 @@ class ReagentControllerTest {
         String body = objectMapper.writeValueAsString(
             new ReagentLotRequest("ALT", "L123", "Bio", "Bioquímica",
                 LocalDate.now().plusDays(60), 100D, "frascos", 80D, 2D, "2-8C",
-                LocalDate.now(), 7, "ativo"));
+                LocalDate.now(), null, 7, "ativo"));
 
         mockMvc.perform(post("/api/reagents")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -137,6 +137,11 @@ class ReagentControllerTest {
         @Bean
         StubReagentService stubReagentService() {
             return new StubReagentService();
+        }
+
+        @Bean
+        io.micrometer.core.instrument.MeterRegistry meterRegistry() {
+            return new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
         }
 
         @Bean

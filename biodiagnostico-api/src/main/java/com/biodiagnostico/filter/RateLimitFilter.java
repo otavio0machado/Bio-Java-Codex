@@ -1,6 +1,8 @@
 package com.biodiagnostico.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,16 +30,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final int maxAttempts;
     private final long windowSeconds;
+    private final MeterRegistry meterRegistry;
     private final Map<String, Deque<Instant>> failedAttemptsByClient = new ConcurrentHashMap<>();
 
     public RateLimitFilter(
         ObjectMapper objectMapper,
         @Value("${app.auth.login-rate-limit.max-attempts:5}") int maxAttempts,
-        @Value("${app.auth.login-rate-limit.window-seconds:60}") long windowSeconds
+        @Value("${app.auth.login-rate-limit.window-seconds:60}") long windowSeconds,
+        MeterRegistry meterRegistry
     ) {
         this.objectMapper = objectMapper;
         this.maxAttempts = maxAttempts;
         this.windowSeconds = windowSeconds;
+        this.meterRegistry = meterRegistry;
     }
 
     @Override
@@ -53,12 +58,20 @@ public class RateLimitFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
         String clientKey = resolveClientKey(request);
         if (hasExceededRateLimit(clientKey)) {
+            recordLoginAttempt("rate_limited");
             writeRateLimitResponse(response);
             return;
         }
 
         filterChain.doFilter(request, response);
         updateAttempts(clientKey, response.getStatus());
+
+        int status = response.getStatus();
+        if (status == HttpStatus.BAD_REQUEST.value() || status == HttpStatus.UNAUTHORIZED.value()) {
+            recordLoginAttempt("failure");
+        } else if (status < HttpStatus.BAD_REQUEST.value()) {
+            recordLoginAttempt("success");
+        }
     }
 
     private boolean hasExceededRateLimit(String clientKey) {
@@ -102,6 +115,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return forwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private void recordLoginAttempt(String result) {
+        Counter.builder("biodiagnostico.auth.login.attempts")
+            .description("Number of login attempts")
+            .tag("result", result)
+            .register(meterRegistry)
+            .increment();
     }
 
     private void writeRateLimitResponse(HttpServletResponse response) throws IOException {

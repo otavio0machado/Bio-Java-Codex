@@ -192,7 +192,8 @@ class AuthControllerTest {
             return new RateLimitFilter(
                 Jackson2ObjectMapperBuilder.json().build(),
                 10,
-                60
+                60,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry()
             );
         }
 

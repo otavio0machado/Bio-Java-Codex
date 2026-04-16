@@ -90,6 +90,10 @@ public final class ResponseMapper {
     }
 
     public static QcRecordResponse toQcRecordResponse(QcRecord record) {
+        return toQcRecordResponse(record, null);
+    }
+
+    public static QcRecordResponse toQcRecordResponse(QcRecord record, String referenceWarning) {
         List<ViolationResponse> violations = record.getViolations() == null
             ? List.of()
             : record.getViolations().stream().map(ResponseMapper::toViolationResponse).toList();
@@ -113,7 +117,8 @@ public final class ResponseMapper {
             record.getNeedsCalibration(),
             violations,
             record.getCreatedAt(),
-            record.getUpdatedAt()
+            record.getUpdatedAt(),
+            referenceWarning
         );
     }
 
@@ -208,6 +213,7 @@ public final class ResponseMapper {
             movement.getQuantity(),
             movement.getResponsible(),
             movement.getNotes(),
+            movement.getPreviousStock(),
             movement.getCreatedAt()
         );
     }

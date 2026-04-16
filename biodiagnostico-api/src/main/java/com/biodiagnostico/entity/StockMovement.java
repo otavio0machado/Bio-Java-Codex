@@ -46,6 +46,9 @@ public class StockMovement {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    @Column(name = "previous_stock")
+    private Double previousStock;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

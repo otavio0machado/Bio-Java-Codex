@@ -72,6 +72,11 @@ class ReportControllerTest {
         }
 
         @Bean
+        io.micrometer.core.instrument.MeterRegistry meterRegistry() {
+            return new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        }
+
+        @Bean
         com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
             return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, "test-issuer", 900_000, 604_800_000);
         }

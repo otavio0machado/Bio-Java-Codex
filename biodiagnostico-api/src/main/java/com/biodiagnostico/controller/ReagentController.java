@@ -105,4 +105,39 @@ public class ReagentController {
     public ResponseEntity<List<ReagentTagSummary>> getTagSummaries() {
         return ResponseEntity.ok(reagentService.getTagSummaries());
     }
+
+    @GetMapping("/export/csv")
+    public ResponseEntity<byte[]> exportCsv(
+        @RequestParam(required = false) String category,
+        @RequestParam(required = false) String status
+    ) {
+        List<ReagentLotResponse> lots = reagentService.getLots(category, status);
+        StringBuilder csv = new StringBuilder();
+        csv.append("Nome,Lote,Categoria,Fabricante,Validade,Dias Restantes,Estoque Atual,Unidade,Consumo/Dia,Temperatura,Status\n");
+        for (ReagentLotResponse lot : lots) {
+            csv.append(escapeCsv(lot.name())).append(",");
+            csv.append(escapeCsv(lot.lotNumber())).append(",");
+            csv.append(escapeCsv(lot.category())).append(",");
+            csv.append(escapeCsv(lot.manufacturer())).append(",");
+            csv.append(lot.expiryDate() != null ? lot.expiryDate() : "").append(",");
+            csv.append(lot.daysLeft()).append(",");
+            csv.append(lot.currentStock() != null ? lot.currentStock() : 0).append(",");
+            csv.append(escapeCsv(lot.stockUnit())).append(",");
+            csv.append(lot.estimatedConsumption() != null ? lot.estimatedConsumption() : 0).append(",");
+            csv.append(escapeCsv(lot.storageTemp())).append(",");
+            csv.append(escapeCsv(lot.status())).append("\n");
+        }
+        return ResponseEntity.ok()
+            .header("Content-Disposition", "attachment; filename=reagentes.csv")
+            .header("Content-Type", "text/csv; charset=UTF-8")
+            .body(csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private String escapeCsv(String value) {
+        if (value == null) return "";
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
 }

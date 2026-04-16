@@ -46,7 +46,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(invocation -> invocation.getArgument(0));
         ReagentLotRequest request = new ReagentLotRequest(
             "ALT", "L123", "Bio", "Bioquímica", LocalDate.now().plusDays(60), 100D,
-            "frascos", 80D, 2D, "2-8C", LocalDate.now(), 7, "ativo"
+            "frascos", 80D, 2D, "2-8C", LocalDate.now(), null, 7, "ativo"
         );
 
         ReagentLot lot = reagentService.createLot(request);
@@ -167,7 +167,7 @@ class ReagentServiceTest {
 
         ReagentLotRequest request = new ReagentLotRequest(
             "ALT", "L123", "Bio", "Bioquímica", LocalDate.now().plusDays(60), 100D,
-            "frascos", 80D, 2D, "2-8C", LocalDate.now(), 7, "ativo"
+            "frascos", 80D, 2D, "2-8C", LocalDate.now(), null, 7, "ativo"
         );
 
         assertThatThrownBy(() -> reagentService.createLot(request))
@@ -264,7 +264,8 @@ class ReagentServiceTest {
             lot.getId(), new StockMovementRequest("AJUSTE", 0D, "Ana", "Zerando estoque"));
 
         assertThat(lot.getCurrentStock()).isEqualTo(0D);
-        assertThat(movement.getNotes()).startsWith("PREVIOUS_STOCK=80.0;");
+        assertThat(movement.getNotes()).isEqualTo("Zerando estoque");
+        assertThat(movement.getPreviousStock()).isEqualTo(80D);
     }
 
     @Test
@@ -277,7 +278,7 @@ class ReagentServiceTest {
 
         ReagentLotRequest request = new ReagentLotRequest(
             "ALT", "L999", "OutroFab", "Bioquímica", LocalDate.now().plusDays(60), 100D,
-            "frascos", 80D, 2D, "2-8C", LocalDate.now(), 7, "ativo"
+            "frascos", 80D, 2D, "2-8C", LocalDate.now(), null, 7, "ativo"
         );
 
         assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), request))

@@ -5,6 +5,9 @@ import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -13,6 +16,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -22,6 +26,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+@Slf4j
 @Service
 public class GeminiAiService {
 
@@ -133,37 +138,50 @@ public class GeminiAiService {
     private final String model;
     private final Map<String, Deque<Instant>> rateLimitByUser = new ConcurrentHashMap<>();
     private final int maxAudioBytes;
+    private final MeterRegistry meterRegistry;
 
     public GeminiAiService(
         RestTemplate restTemplate,
         ObjectMapper objectMapper,
         @Value("${gemini.api-key}") String apiKey,
         @Value("${gemini.model}") String model,
-        @Value("${voice.max-audio-bytes:2097152}") int maxAudioBytes
+        @Value("${voice.max-audio-bytes:2097152}") int maxAudioBytes,
+        MeterRegistry meterRegistry
     ) {
         this.restTemplate = restTemplate;
         this.objectMapper = objectMapper;
         this.apiKey = apiKey;
         this.model = model;
         this.maxAudioBytes = maxAudioBytes;
+        this.meterRegistry = meterRegistry;
     }
 
     public String analyze(String userPrompt, String context) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             ensureRateLimit();
             String prompt = SYSTEM_PROMPT + "\n\n" + (context == null ? "" : context) + "\n\nPergunta: " + userPrompt;
-            return extractTextResponse(callGemini(Map.of(
+            String result = extractTextResponse(callGemini(Map.of(
                 "contents",
                 List.of(Map.of("parts", List.of(Map.of("text", prompt))))
             )));
+            recordAiRequest("analyze", "success");
+            sample.stop(aiLatencyTimer("analyze", "success"));
+            return result;
         } catch (BusinessException exception) {
+            recordAiRequest("analyze", "business_error");
+            sample.stop(aiLatencyTimer("analyze", "business_error"));
             throw exception;
         } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("analyze", "error");
+            sample.stop(aiLatencyTimer("analyze", "error"));
+            log.error("Erro na chamada Gemini para analyze", exception);
             return FRIENDLY_ERROR;
         }
     }
 
     public Map<String, Object> processVoiceForm(String audioBase64, String formType, String mimeType) {
+        Timer.Sample sample = Timer.start(meterRegistry);
         try {
             ensureRateLimit();
             String prompt = VOICE_FORM_PROMPTS.get(formType);
@@ -207,22 +225,26 @@ public class GeminiAiService {
                 )
             ));
             String rawText = cleanJsonResponse(extractTextResponse(root));
-            return objectMapper.readValue(rawText, new TypeReference<Map<String, Object>>() {
+            Map<String, Object> result = objectMapper.readValue(rawText, new TypeReference<Map<String, Object>>() {
             });
+            recordAiRequest("voice-to-form", "success");
+            sample.stop(aiLatencyTimer("voice-to-form", "success"));
+            return result;
         } catch (BusinessException exception) {
+            recordAiRequest("voice-to-form", "business_error");
+            sample.stop(aiLatencyTimer("voice-to-form", "business_error"));
             throw exception;
         } catch (java.io.IOException exception) {
+            recordAiRequest("voice-to-form", "error");
+            sample.stop(aiLatencyTimer("voice-to-form", "error"));
+            log.error("Erro na chamada Gemini para voice-to-form (IOException)", exception);
             throw new BusinessException("Não foi possível interpretar a resposta da IA.");
         } catch (RuntimeException exception) {
+            recordAiRequest("voice-to-form", "error");
+            sample.stop(aiLatencyTimer("voice-to-form", "error"));
+            log.error("Erro na chamada Gemini para voice-to-form", exception);
             throw new BusinessException(FRIENDLY_ERROR);
         }
-    }
-
-    public String analyzeQcData(List<QcRecord> records) {
-        return analyze(
-            "Analise estes dados de controle de qualidade. Identifique tendências, problemas sistemáticos, e dê recomendações práticas para o laboratório.",
-            buildQcContext(records)
-        );
     }
 
     public String buildQcContext(List<QcRecord> records) {
@@ -274,10 +296,11 @@ public class GeminiAiService {
 
     private JsonNode callGemini(Map<String, Object> body) throws java.io.IOException {
         ensureApiKeyConfigured();
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s"
-            .formatted(model, apiKey);
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
+            .formatted(model);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("x-goog-api-key", apiKey);
         ResponseEntity<String> response = restTemplate.postForEntity(url, new HttpEntity<>(body, headers), String.class);
         return objectMapper.readTree(response.getBody());
     }
@@ -294,6 +317,23 @@ public class GeminiAiService {
         if (apiKey == null || apiKey.isBlank()) {
             throw new BusinessException("GEMINI_API_KEY não configurada");
         }
+    }
+
+    private void recordAiRequest(String endpoint, String status) {
+        Counter.builder("biodiagnostico.ai.requests")
+            .description("Number of AI API requests")
+            .tag("endpoint", endpoint)
+            .tag("status", status)
+            .register(meterRegistry)
+            .increment();
+    }
+
+    private Timer aiLatencyTimer(String endpoint, String status) {
+        return Timer.builder("biodiagnostico.ai.latency")
+            .description("Latency of AI API calls")
+            .tag("endpoint", endpoint)
+            .tag("status", status)
+            .register(meterRegistry);
     }
 
     private String cleanJsonResponse(String rawText) {

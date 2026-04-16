@@ -29,8 +29,8 @@ export function StatCard({ icon, iconColor, value, label, trend }: StatCardProps
         ) : null}
       </div>
       <div>
-        <div className="text-3xl font-bold text-neutral-900">{value}</div>
-        <div className="mt-1 text-sm text-neutral-500">{label}</div>
+        <div className="text-4xl font-bold text-neutral-900">{value}</div>
+        <div className="mt-1 text-base text-neutral-500">{label}</div>
       </div>
     </Card>
   )

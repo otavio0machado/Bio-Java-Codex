@@ -104,6 +104,7 @@ export interface QcRecord {
   violations: WestgardViolation[]
   createdAt: string
   updatedAt: string
+  referenceWarning?: string | null
 }
 
 export interface QcRecordRequest {
@@ -235,6 +236,7 @@ export interface ReagentLotRequest {
   estimatedConsumption?: number
   storageTemp?: string
   startDate?: string
+  endDate?: string
   alertThresholdDays?: number
   status?: string
 }
@@ -245,6 +247,7 @@ export interface StockMovement {
   quantity: number
   responsible?: string
   notes?: string
+  previousStock?: number
   createdAt: string
 }
 

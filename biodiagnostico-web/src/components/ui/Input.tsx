@@ -15,7 +15,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   const fieldId = id ?? props.name
   return (
     <label className="block space-y-1" htmlFor={fieldId}>
-      {label ? <span className="text-sm font-medium text-neutral-700">{label}</span> : null}
+      {label ? <span className="text-base font-medium text-neutral-700">{label}</span> : null}
       <div
         className={cn(
           'flex items-center gap-3 rounded-xl border bg-white px-4 py-3 transition focus-within:ring-2',
@@ -28,7 +28,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         <input
           ref={ref}
           id={fieldId}
-          className={cn('w-full border-none bg-transparent text-sm outline-none placeholder:text-neutral-400', className)}
+          className={cn('w-full border-none bg-transparent text-base outline-none placeholder:text-neutral-400', className)}
           {...props}
         />
       </div>

@@ -15,6 +15,7 @@ public record ReagentLotRequest(
     Double estimatedConsumption,
     String storageTemp,
     LocalDate startDate,
+    LocalDate endDate,
     Integer alertThresholdDays,
     String status
 ) {

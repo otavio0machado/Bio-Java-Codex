@@ -35,7 +35,7 @@ export function ToastProvider({ children }: PropsWithChildren) {
     setItems((current) => [...current, { id, type, message }])
     window.setTimeout(() => {
       setItems((current) => current.filter((item) => item.id !== id))
-    }, 5000)
+    }, 6000)
   }, [])
 
   const value = useMemo<ToastContextValue>(
@@ -64,7 +64,7 @@ export function ToastProvider({ children }: PropsWithChildren) {
           >
             <div className="flex items-start gap-3">
               <div className="mt-0.5">{toastStyles[item.type].icon}</div>
-              <p className="text-sm font-medium">{item.message}</p>
+              <p className="text-base font-medium">{item.message}</p>
             </div>
           </div>
         ))}

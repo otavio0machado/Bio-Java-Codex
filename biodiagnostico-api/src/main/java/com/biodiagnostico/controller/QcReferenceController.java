@@ -41,6 +41,21 @@ public class QcReferenceController {
         return ResponseEntity.ok(responses);
     }
 
+    @GetMapping("/last")
+    public ResponseEntity<QcReferenceResponse> getLastReference(
+        @RequestParam UUID examId,
+        @RequestParam(defaultValue = "Normal") String level
+    ) {
+        return qcReferenceService.getReferences(examId, false).stream()
+            .filter(ref -> ref.getLevel().equalsIgnoreCase(level))
+            .max(java.util.Comparator.comparing(
+                ref -> ref.getValidFrom() != null ? ref.getValidFrom() : java.time.LocalDate.MIN
+            ))
+            .map(ResponseMapper::toQcReferenceResponse)
+            .map(ResponseEntity::ok)
+            .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     @PostMapping
     public ResponseEntity<QcReferenceResponse> createReference(@Valid @RequestBody QcReferenceRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)

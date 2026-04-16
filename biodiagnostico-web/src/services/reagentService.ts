@@ -43,4 +43,11 @@ export const reagentService = {
     const response = await api.get<ReagentTagSummary[]>('/reagents/tags')
     return response.data
   },
+  async exportCsv(category?: string, status?: string) {
+    const { data } = await api.get('/reagents/export/csv', {
+      params: { category, status },
+      responseType: 'blob',
+    })
+    return data as Blob
+  },
 }

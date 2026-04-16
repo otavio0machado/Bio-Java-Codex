@@ -13,6 +13,8 @@ import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.util.NumericUtils;
 import com.biodiagnostico.util.ResponseMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
@@ -39,19 +41,22 @@ public class QcService {
     private final WestgardEngine westgardEngine;
     private final QcExamRepository qcExamRepository;
     private final AuditService auditService;
+    private final MeterRegistry meterRegistry;
 
     public QcService(
         QcRecordRepository qcRecordRepository,
         QcReferenceService qcReferenceService,
         WestgardEngine westgardEngine,
         QcExamRepository qcExamRepository,
-        AuditService auditService
+        AuditService auditService,
+        MeterRegistry meterRegistry
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.qcReferenceService = qcReferenceService;
         this.westgardEngine = westgardEngine;
         this.qcExamRepository = qcExamRepository;
         this.auditService = auditService;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -63,9 +68,16 @@ public class QcService {
         List<QcRecord> history = loadWestgardHistory(record, null);
         applyCanonicalDecision(record, history);
         QcRecord saved = qcRecordRepository.save(record);
+        Counter.builder("biodiagnostico.qc.records.created")
+            .description("Number of QC records created")
+            .tag("area", saved.getArea() != null ? saved.getArea() : "unknown")
+            .tag("status", saved.getStatus() != null ? saved.getStatus() : "unknown")
+            .register(meterRegistry)
+            .increment();
         auditService.log("CRIAR_REGISTRO_CQ", "QcRecord", saved.getId(),
             Map.of("exame", saved.getExamName(), "area", saved.getArea(), "valor", saved.getValue(), "status", saved.getStatus()));
-        return ResponseMapper.toQcRecordResponse(saved);
+        String referenceWarning = computeReferenceWarning(saved.getReference());
+        return ResponseMapper.toQcRecordResponse(saved, referenceWarning);
     }
 
     @Transactional
@@ -228,6 +240,15 @@ public class QcService {
         record.setAnalyst(request.analyst());
         record.setViolations(new ArrayList<>());
         return record;
+    }
+
+    private String computeReferenceWarning(QcReferenceValue reference) {
+        if (reference == null || reference.getValidUntil() == null) return null;
+        long daysUntilExpiry = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), reference.getValidUntil());
+        if (daysUntilExpiry >= 0 && daysUntilExpiry <= 7) {
+            return "Referência vence em " + daysUntilExpiry + " dia" + (daysUntilExpiry != 1 ? "s" : "");
+        }
+        return null;
     }
 
     private void applyCanonicalDecision(QcRecord record, List<QcRecord> history) {

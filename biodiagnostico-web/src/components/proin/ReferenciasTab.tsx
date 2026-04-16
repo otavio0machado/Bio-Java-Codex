@@ -8,6 +8,7 @@ import {
   useQcReferences,
   useUpdateQcReference,
 } from '../../hooks/useQcRecords'
+import { qcService } from '../../services/qcService'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
 import { Button, Card, EmptyState, Input, Modal, Select, TextArea, useToast } from '../ui'
 
@@ -150,6 +151,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
             <thead>
               <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
                 <th className="px-3 py-2.5">Nome</th>
+                <th className="px-3 py-2.5">Nível</th>
                 <th className="px-3 py-2.5">Exame</th>
                 <th className="px-3 py-2.5">Alvo</th>
                 <th className="px-3 py-2.5">DP</th>
@@ -164,6 +166,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
               {filteredReferences.map((reference) => (
                 <tr key={reference.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
                   <td className="px-3 py-2.5 font-medium text-neutral-900">{reference.name}</td>
+                  <td className="px-3 py-2.5 text-neutral-600">{reference.level}</td>
                   <td className="px-3 py-2.5 text-neutral-700">{reference.exam.name}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-700">{reference.targetValue.toFixed(2)}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.targetSd.toFixed(2)}</td>
@@ -357,6 +360,37 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
             </div>
           )}
         </div>
+
+        {/* Nível */}
+        <Select label="Nível" value={form.level}
+          onChange={(e) => setForm(c => ({ ...c, level: e.target.value }))}>
+          <option value="Normal">Normal</option>
+          <option value="N1">N1</option>
+          <option value="N2">N2</option>
+          <option value="N3">N3</option>
+        </Select>
+
+        {/* Preencher com última referência */}
+        {form.examId && !editing && (
+          <button
+            type="button"
+            className="text-sm text-green-700 hover:text-green-800 underline"
+            onClick={async () => {
+              try {
+                const last = await qcService.getLastReference(form.examId, form.level)
+                setForm(c => ({
+                  ...c,
+                  targetValue: last.targetValue ?? c.targetValue,
+                  targetSd: last.targetSd ?? c.targetSd,
+                  cvMaxThreshold: last.cvMaxThreshold ?? c.cvMaxThreshold,
+                  manufacturer: last.manufacturer ?? c.manufacturer,
+                }))
+              } catch { /* nenhuma referencia anterior */ }
+            }}
+          >
+            Preencher com última referência
+          </button>
+        )}
 
         {/* Validades + Valores */}
         <div className="grid gap-4 md:grid-cols-2">

@@ -63,4 +63,13 @@ export const qcService = {
   async deleteReference(id: string) {
     await api.delete(`/qc/references/${id}`)
   },
+  async deleteRecord(id: string) {
+    await api.delete(`/qc/records/${id}`)
+  },
+  async getLastReference(examId: string, level: string) {
+    const { data } = await api.get<QcReferenceValue>('/qc/references/last', {
+      params: { examId, level },
+    })
+    return data
+  },
 }

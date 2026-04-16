@@ -1,6 +1,12 @@
 spring:
   application:
     name: biodiagnostico-api
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    locations: classpath:db/migration
+    validate-on-migrate: true
   jackson:
     default-property-inclusion: non_null
     serialization:
@@ -37,11 +43,19 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: biodiagnostico-api
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 app:
   frontend-url: ${APP_FRONTEND_URL:http://localhost:5173}

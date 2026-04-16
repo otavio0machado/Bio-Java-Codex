@@ -151,6 +151,11 @@ class QcRecordControllerTest {
         }
 
         @Bean
+        io.micrometer.core.instrument.MeterRegistry meterRegistry() {
+            return new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        }
+
+        @Bean
         com.biodiagnostico.security.JwtTokenProvider jwtTokenProvider() {
             return new com.biodiagnostico.security.JwtTokenProvider(TEST_JWT_SECRET, "test-issuer", 900_000, 604_800_000);
         }
@@ -193,7 +198,8 @@ class QcRecordControllerTest {
 
         StubQcService() {
             super(null, null, new com.biodiagnostico.service.WestgardEngine(), null,
-                new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()));
+                new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()),
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         }
 
         @Override
@@ -219,7 +225,7 @@ class QcRecordControllerTest {
         return new QcRecordResponse(
             UUID.randomUUID(), null, "Glicose", "bioquimica", LocalDate.now(), "Normal", "L1",
             100D, 100D, 5D, 5D, 10D, 1D, "AU680", "Ana", "APROVADO", false, List.of(),
-            Instant.now(), Instant.now()
+            Instant.now(), Instant.now(), null
         );
     }
 

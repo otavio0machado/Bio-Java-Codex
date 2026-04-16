@@ -15,7 +15,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   const fieldId = id ?? props.name
   return (
     <label className="block space-y-1" htmlFor={fieldId}>
-      {label ? <span className="text-sm font-medium text-neutral-700">{label}</span> : null}
+      {label ? <span className="text-base font-medium text-neutral-700">{label}</span> : null}
       <div
         className={cn(
           'flex items-center gap-3 rounded-xl border bg-white px-4 py-3 transition focus-within:ring-2',
@@ -28,7 +28,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
         <select
           ref={ref}
           id={fieldId}
-          className={cn('w-full border-none bg-transparent text-sm outline-none', className)}
+          className={cn('w-full border-none bg-transparent text-base outline-none', className)}
           {...props}
         >
           {children}

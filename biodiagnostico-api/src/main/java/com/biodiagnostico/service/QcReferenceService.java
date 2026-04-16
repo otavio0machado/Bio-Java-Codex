@@ -131,6 +131,7 @@ public class QcReferenceService {
     @Transactional
     public QcReferenceValue createReference(QcReferenceRequest request) {
         validateReferenceRequest(request);
+        checkOverlap(request.examId(), request.level(), request.validFrom(), request.validUntil(), null);
         QcExam exam = qcExamRepository.findById(request.examId())
             .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
         QcReferenceValue reference = QcReferenceValue.builder()
@@ -153,6 +154,7 @@ public class QcReferenceService {
     @Transactional
     public QcReferenceValue updateReference(UUID id, QcReferenceRequest request) {
         validateReferenceRequest(request);
+        checkOverlap(request.examId(), request.level(), request.validFrom(), request.validUntil(), id);
         QcReferenceValue reference = qcReferenceValueRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Referência não encontrada"));
         QcExam exam = qcExamRepository.findById(request.examId())
@@ -237,6 +239,20 @@ public class QcReferenceService {
 
     private boolean isLotAgnostic(QcReferenceValue reference) {
         return normalizeNullable(reference.getLotNumber()) == null;
+    }
+
+    private void checkOverlap(UUID examId, String level, LocalDate validFrom,
+                               LocalDate validUntil, UUID excludeId) {
+        LocalDate effectiveFrom = validFrom != null ? validFrom : LocalDate.MIN;
+        LocalDate effectiveUntil = validUntil != null ? validUntil : LocalDate.of(9999, 12, 31);
+        List<QcReferenceValue> overlapping = qcReferenceValueRepository.findOverlapping(
+            examId, level, effectiveFrom, effectiveUntil, excludeId
+        );
+        if (!overlapping.isEmpty()) {
+            throw new BusinessException(
+                "Já existe uma referência ativa para este exame e nível com período de validade sobreposto."
+            );
+        }
     }
 
     private void validateReferenceRequest(QcReferenceRequest request) {
