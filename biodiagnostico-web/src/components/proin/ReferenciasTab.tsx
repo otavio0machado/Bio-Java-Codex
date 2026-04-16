@@ -10,7 +10,7 @@ import {
 } from '../../hooks/useQcRecords'
 import { qcService } from '../../services/qcService'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
-import { Button, Card, EmptyState, Input, Modal, Select, TextArea, useToast } from '../ui'
+import { Button, Card, EmptyState, Input, Modal, Select, useToast } from '../ui'
 
 interface ReferenciasTabProps {
   area: string
@@ -189,13 +189,10 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
             <thead>
               <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
                 <th className="px-3 py-2.5">Nome</th>
-                <th className="px-3 py-2.5">Nível</th>
                 <th className="px-3 py-2.5">Exame</th>
                 <th className="px-3 py-2.5">Alvo</th>
                 <th className="px-3 py-2.5">DP</th>
                 <th className="px-3 py-2.5">Validade</th>
-                <th className="px-3 py-2.5">Lote</th>
-                <th className="px-3 py-2.5">Fabricante</th>
                 <th className="px-3 py-2.5 text-center">Ações</th>
               </tr>
             </thead>
@@ -203,7 +200,6 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
               {filteredReferences.map((reference) => (
                 <tr key={reference.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
                   <td className="px-3 py-2.5 font-medium text-neutral-900">{reference.name}</td>
-                  <td className="px-3 py-2.5 text-neutral-600">{reference.level}</td>
                   <td className="px-3 py-2.5 text-neutral-700">{reference.exam.name}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-700">{reference.targetValue.toFixed(2)}</td>
                   <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.targetSd.toFixed(2)}</td>
@@ -212,8 +208,6 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                     {' → '}
                     {reference.validUntil ? formatDate(reference.validUntil) : 'sem fim'}
                   </td>
-                  <td className="px-3 py-2.5 text-neutral-600">{reference.lotNumber ?? '—'}</td>
-                  <td className="px-3 py-2.5 text-neutral-600">{reference.manufacturer ?? '—'}</td>
                   <td className="px-3 py-2.5 text-center">
                     <div className="flex justify-center gap-1">
                       <button
@@ -398,15 +392,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
           )}
         </div>
 
-        {/* Nível */}
-        <Select label="Nível" value={form.level}
-          onChange={(e) => setForm(c => ({ ...c, level: e.target.value }))}>
-          <option value="Normal">Normal</option>
-          <option value="N1">N1</option>
-          <option value="N2">N2</option>
-          <option value="N3">N3</option>
-        </Select>
-
         {/* Preencher com última referência */}
         {form.examId && !editing && (
           <button
@@ -419,7 +404,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
                   ...c,
                   targetValue: last.targetValue ?? c.targetValue,
                   targetSd: last.targetSd ?? c.targetSd,
-                  manufacturer: last.manufacturer ?? c.manufacturer,
                 }))
               } catch { /* nenhuma referencia anterior */ }
             }}
@@ -460,29 +444,6 @@ function ReferenceModal({ area, exams, form, editing, isOpen, onClose, onSave, s
             onChange={(event) => setForm((current) => ({ ...current, targetSd: Number(event.target.value) }))}
           />
         </div>
-
-        {/* Opcionais */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Input
-            label="Lote (opcional)"
-            value={form.lotNumber}
-            onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))}
-            placeholder="Ex: LOT-2024-001"
-          />
-          <Input
-            label="Fabricante (opcional)"
-            value={form.manufacturer}
-            onChange={(event) => setForm((current) => ({ ...current, manufacturer: event.target.value }))}
-            placeholder="Ex: Roche, Abbott..."
-          />
-        </div>
-
-        <TextArea
-          label="Observações (opcional)"
-          value={form.notes}
-          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-          placeholder="Notas adicionais sobre esta referência..."
-        />
       </div>
     </Modal>
   )
