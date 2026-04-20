@@ -1,4 +1,16 @@
-import { Beaker, LayoutDashboard, LogOut, Menu, Settings, Users, User, X } from 'lucide-react'
+import {
+  Beaker,
+  FileText,
+  FlaskConical,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Settings,
+  Users,
+  User,
+  Wrench,
+  X,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -16,8 +28,15 @@ const areaNavItems = [
   { label: 'Uroanálise', href: '/qc?area=uroanalise', area: 'uroanalise', icon: Beaker },
 ]
 
+const managementNavItems = [
+  { label: 'Reagentes', href: '/reagentes', area: null, icon: FlaskConical },
+  { label: 'Manutenção', href: '/manutencao', area: null, icon: Wrench },
+  { label: 'Relatórios', href: '/relatorios', area: null, icon: FileText },
+]
+
 const baseNavItems = [
   { label: 'Dashboard', href: '/dashboard', area: null, icon: LayoutDashboard },
+  ...managementNavItems,
   ...areaNavItems,
 ]
 
@@ -30,13 +49,13 @@ export function Navbar() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const isDropdownOpen = dropdownPath === location.pathname
   const isMobileOpen = mobilePath === location.pathname
-  const navItems = user?.role === 'ADMIN'
+  const navItems = baseNavItems
+  const adminMenuItems = user?.role === 'ADMIN'
     ? [
-        ...baseNavItems,
-        { label: 'Usuários', href: '/admin', area: null, icon: Users },
-        { label: 'Configuração', href: '/config', area: null, icon: Settings },
+        { label: 'Usuários', href: '/admin', icon: Users },
+        { label: 'Configuração', href: '/config', icon: Settings },
       ]
-    : baseNavItems
+    : []
   const currentArea = new URLSearchParams(location.search).get('area') ?? 'bioquimica'
 
   useEffect(() => {
@@ -82,26 +101,33 @@ export function Navbar() {
             <img src={logoBio} alt="Biodiagnóstico" className="h-10 w-auto" />
           </button>
 
-          <nav className="hidden items-center gap-6 md:flex">
-            {navItems.map((item) => {
+          <nav className="hidden items-center gap-4 md:flex">
+            {navItems.map((item, index) => {
               const isOnQc = location.pathname.startsWith('/qc')
               const isActive = item.area
                 ? isOnQc && currentArea === item.area
                 : location.pathname.startsWith(item.href) && !isOnQc
+              const prev = navItems[index - 1]
+              const isFirstArea = item.area && !prev?.area
+              const isFirstAfterAreas = !item.area && prev?.area
               return (
-                <NavLink
-                  key={item.href}
-                  to={item.href}
-                  onClick={closeMenus}
-                  className={cn(
-                    'border-b-2 py-5 text-sm font-medium transition',
-                    isActive
-                      ? 'border-green-800 text-green-800'
-                      : 'border-transparent text-neutral-500 hover:text-neutral-700',
-                  )}
-                >
-                  {item.label}
-                </NavLink>
+                <div key={item.href} className="flex items-center gap-4">
+                  {isFirstArea || isFirstAfterAreas ? (
+                    <span aria-hidden="true" className="h-5 w-px bg-neutral-300" />
+                  ) : null}
+                  <NavLink
+                    to={item.href}
+                    onClick={closeMenus}
+                    className={cn(
+                      'border-b-2 py-5 text-sm font-medium transition',
+                      isActive
+                        ? 'border-green-800 text-green-800'
+                        : 'border-transparent text-neutral-500 hover:text-neutral-700',
+                    )}
+                  >
+                    {item.label}
+                  </NavLink>
+                </div>
               )
             })}
           </nav>
@@ -125,6 +151,25 @@ export function Navbar() {
                   <div className="font-semibold text-neutral-900">{user?.name}</div>
                   <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
                 </div>
+                {adminMenuItems.length > 0 ? (
+                  <>
+                    <div className="my-2 border-t border-neutral-100" />
+                    {adminMenuItems.map((item) => {
+                      const Icon = item.icon
+                      return (
+                        <NavLink
+                          key={item.href}
+                          to={item.href}
+                          onClick={closeMenus}
+                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-neutral-700 transition hover:bg-neutral-100"
+                        >
+                          <Icon className="h-4 w-4" />
+                          {item.label}
+                        </NavLink>
+                      )
+                    })}
+                  </>
+                ) : null}
                 <div className="my-2 border-t border-neutral-100" />
                 <button
                   type="button"
@@ -189,6 +234,29 @@ export function Navbar() {
                 )
               })}
             </nav>
+
+            {adminMenuItems.length > 0 ? (
+              <nav className="mt-4 space-y-2 border-t border-neutral-100 pt-4">
+                {adminMenuItems.map((item) => {
+                  const Icon = item.icon
+                  const active = location.pathname.startsWith(item.href)
+                  return (
+                    <NavLink
+                      key={item.href}
+                      to={item.href}
+                      onClick={closeMenus}
+                      className={cn(
+                        'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition',
+                        active ? 'bg-green-800 text-white' : 'text-neutral-700 hover:bg-neutral-100',
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </NavLink>
+                  )
+                })}
+              </nav>
+            ) : null}
 
             <div className="mt-auto rounded-2xl bg-neutral-50 p-4">
               <div className="font-semibold text-neutral-900">{user?.name}</div>

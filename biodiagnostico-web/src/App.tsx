@@ -7,6 +7,15 @@ import { RoleRoute } from './components/layout/RoleRoute'
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
 const ProinPage = lazy(() => import('./pages/ProinPage').then((module) => ({ default: module.ProinPage })))
+const ReagentesPage = lazy(() =>
+  import('./pages/ReagentesPage').then((module) => ({ default: module.ReagentesPage })),
+)
+const ManutencaoPage = lazy(() =>
+  import('./pages/ManutencaoPage').then((module) => ({ default: module.ManutencaoPage })),
+)
+const RelatoriosPage = lazy(() =>
+  import('./pages/RelatoriosPage').then((module) => ({ default: module.RelatoriosPage })),
+)
 const AdminPage = lazy(() => import('./pages/AdminPage').then((module) => ({ default: module.AdminPage })))
 const ConfiguracaoPage = lazy(() =>
   import('./pages/ConfiguracaoPage').then((module) => ({ default: module.ConfiguracaoPage })),
@@ -65,6 +74,30 @@ export default function App() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <ProinPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/reagentes"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ReagentesPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/manutencao"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ManutencaoPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/relatorios"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <RelatoriosPage />
               </Suspense>
             }
           />

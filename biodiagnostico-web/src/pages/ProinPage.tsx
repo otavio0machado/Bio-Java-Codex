@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Card, Skeleton } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
-import { canDownload, canImport, canWriteMaintenance, canWriteQc, canWriteReagent } from '../lib/permissions'
+import { canImport, canWriteQc } from '../lib/permissions'
 import { cn } from '../utils/cn'
 
 const DashboardTab = lazy(() => import('../components/proin/DashboardTab').then((module) => ({ default: module.DashboardTab })))
@@ -13,23 +13,16 @@ const ImportarTab = lazy(() => import('../components/proin/ImportarTab').then((m
 const ImunologiaArea = lazy(() =>
   import('../components/proin/ImunologiaArea').then((module) => ({ default: module.ImunologiaArea })),
 )
-const ManutencaoTab = lazy(() =>
-  import('../components/proin/ManutencaoTab').then((module) => ({ default: module.ManutencaoTab })),
-)
 const MicrobiologiaArea = lazy(() =>
   import('../components/proin/MicrobiologiaArea').then((module) => ({ default: module.MicrobiologiaArea })),
 )
 const ParasitologiaArea = lazy(() =>
   import('../components/proin/ParasitologiaArea').then((module) => ({ default: module.ParasitologiaArea })),
 )
-const ReagentesTab = lazy(() => import('../components/proin/ReagentesTab').then((module) => ({ default: module.ReagentesTab })))
 const ReferenciasTab = lazy(() =>
   import('../components/proin/ReferenciasTab').then((module) => ({ default: module.ReferenciasTab })),
 )
 const RegistroTab = lazy(() => import('../components/proin/RegistroTab').then((module) => ({ default: module.RegistroTab })))
-const RelatoriosTab = lazy(() =>
-  import('../components/proin/RelatoriosTab').then((module) => ({ default: module.RelatoriosTab })),
-)
 const UroanaliseArea = lazy(() =>
   import('../components/proin/UroanaliseArea').then((module) => ({ default: module.UroanaliseArea })),
 )
@@ -47,9 +40,6 @@ const allTabs = [
   { value: 'dashboard', label: 'Dashboard CQ' },
   { value: 'registro', label: 'Registro CQ' },
   { value: 'referencias', label: 'Referências' },
-  { value: 'reagentes', label: 'Reagentes' },
-  { value: 'manutencao', label: 'Manutenção' },
-  { value: 'relatorios', label: 'Relatórios' },
   { value: 'importar', label: 'Importar' },
 ]
 
@@ -58,9 +48,6 @@ export function ProinPage() {
   const tabs = useMemo(() => {
     return allTabs.filter((tab) => {
       if (tab.value === 'registro') return canWriteQc(user)
-      if (tab.value === 'reagentes') return canWriteReagent(user) || user?.role === 'ADMIN'
-      if (tab.value === 'manutencao') return canWriteMaintenance(user) || user?.role === 'ADMIN'
-      if (tab.value === 'relatorios') return canDownload(user) || true
       if (tab.value === 'importar') return canImport(user)
       return true
     })
@@ -102,12 +89,6 @@ export function ProinPage() {
         return <RegistroTab key={`registro-${currentArea}`} area={currentArea} />
       case 'referencias':
         return <ReferenciasTab area={currentArea} />
-      case 'reagentes':
-        return <ReagentesTab />
-      case 'manutencao':
-        return <ManutencaoTab />
-      case 'relatorios':
-        return <RelatoriosTab area={currentArea} />
       case 'importar':
         return <ImportarTab area={currentArea} />
       default:
