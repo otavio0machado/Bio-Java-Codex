@@ -85,12 +85,17 @@ export function ReagentsFilters({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={status} onChange={(event) => onStatusChange(event.target.value)}>
+        <Select
+          value={status}
+          onChange={(event) => onStatusChange(event.target.value)}
+          title="Vencido: passou da validade e ainda tem estoque (requer descarte). Inativo: vencido e sem estoque (histórico)."
+        >
           <option value="">Todos status</option>
           <option value="ativo">Ativo</option>
           <option value="em_uso">Em uso</option>
-          <option value="inativo">Inativo</option>
-          <option value="vencido">Vencido</option>
+          <option value="quarentena">Quarentena</option>
+          <option value="vencido">Vencido (com estoque)</option>
+          <option value="inativo">Inativo (arquivo)</option>
         </Select>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700">
           <input

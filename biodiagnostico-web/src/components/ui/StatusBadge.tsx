@@ -1,7 +1,7 @@
 import { cn } from '../../utils/cn'
 
 interface StatusBadgeProps {
-  status: 'APROVADO' | 'REPROVADO' | 'ALERTA' | 'ativo' | 'em_uso' | 'inativo' | 'vencido' | string
+  status: 'APROVADO' | 'REPROVADO' | 'ALERTA' | 'ativo' | 'em_uso' | 'inativo' | 'vencido' | 'quarentena' | string
 }
 
 const badgeMap: Record<string, string> = {
@@ -12,6 +12,7 @@ const badgeMap: Record<string, string> = {
   ALERTA: 'bg-amber-100 text-amber-800',
   em_uso: 'bg-blue-100 text-blue-800',
   inativo: 'bg-neutral-100 text-neutral-600',
+  quarentena: 'bg-amber-100 text-amber-800',
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {

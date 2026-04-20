@@ -73,13 +73,14 @@ export function createMovementForm(responsible = ''): StockMovementRequest {
 export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
   return {
     total: lots.length,
-    expiring7d: lots.filter((lot) => lot.daysLeft >= 0 && lot.daysLeft <= 7).length,
-    expiring30d: lots.filter((lot) => lot.daysLeft > 7 && lot.daysLeft <= 30).length,
-    ruptureRisk: lots.filter((lot) => lot.daysToRupture != null && lot.daysToRupture <= 5).length,
-    expired: lots.filter((lot) => lot.daysLeft < 0 || lot.status === 'vencido').length,
+    expiring7d: lots.filter((lot) => lot.status !== 'inativo' && lot.daysLeft >= 0 && lot.daysLeft <= 7).length,
+    expiring30d: lots.filter((lot) => lot.status !== 'inativo' && lot.daysLeft > 7 && lot.daysLeft <= 30).length,
+    ruptureRisk: lots.filter((lot) => lot.status !== 'inativo' && lot.daysToRupture != null && lot.daysToRupture <= 5).length,
+    expired: lots.filter((lot) => lot.status === 'vencido').length,
     noTraceability: lots.filter((lot) => !lot.manufacturer || !lot.manufacturer.trim()).length,
     noValidity: lots.filter((lot) => !lot.expiryDate).length,
     lowStock: lots.filter((lot) => {
+      if (lot.status === 'inativo') return false
       const max = lot.quantityValue || 0
       if (max <= 0) return false
       return lot.currentStock / max <= 0.2
@@ -137,19 +138,20 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   }
 
   if (filters.dashFilter === 'expiring7d') {
-    result = result.filter((lot) => lot.daysLeft >= 0 && lot.daysLeft <= 7)
+    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysLeft >= 0 && lot.daysLeft <= 7)
   } else if (filters.dashFilter === 'expiring30d') {
-    result = result.filter((lot) => lot.daysLeft > 7 && lot.daysLeft <= 30)
+    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysLeft > 7 && lot.daysLeft <= 30)
   } else if (filters.dashFilter === 'ruptureRisk') {
-    result = result.filter((lot) => lot.daysToRupture != null && lot.daysToRupture <= 5)
+    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysToRupture != null && lot.daysToRupture <= 5)
   } else if (filters.dashFilter === 'expired') {
-    result = result.filter((lot) => lot.daysLeft < 0 || lot.status === 'vencido')
+    result = result.filter((lot) => lot.status === 'vencido')
   } else if (filters.dashFilter === 'noTraceability') {
     result = result.filter((lot) => !lot.manufacturer || !lot.manufacturer.trim())
   } else if (filters.dashFilter === 'noValidity') {
     result = result.filter((lot) => !lot.expiryDate)
   } else if (filters.dashFilter === 'lowStock') {
     result = result.filter((lot) => {
+      if (lot.status === 'inativo') return false
       const max = lot.quantityValue || 0
       if (max <= 0) return false
       return lot.currentStock / max <= 0.2
@@ -183,14 +185,16 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
 
 export function getLotVisualState(lot: ReagentLot) {
   const daysLeft = lot.daysLeft ?? 999
-  const expired = daysLeft < 0 || lot.status === 'vencido'
-  const urgent = daysLeft >= 0 && daysLeft <= 7
-  const warning = daysLeft > 7 && daysLeft <= 30
+  const archived = lot.status === 'inativo'
+  const expired = !archived && lot.status === 'vencido'
+  const urgent = !archived && daysLeft >= 0 && daysLeft <= 7
+  const warning = !archived && daysLeft > 7 && daysLeft <= 30
   const stockPct = lot.stockPct ?? 0
 
   return {
     daysLeft,
     expired,
+    archived,
     urgent,
     warning,
     stockPct,
