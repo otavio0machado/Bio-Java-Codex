@@ -183,6 +183,27 @@ class ReagentServiceTest {
     }
 
     @Test
+    @DisplayName("createLot com pre-check de duplicata nao deve chamar save")
+    void createLot_comPreCheckDuplicata_naoDeveChamarSave() {
+        // Pre-check: quando findByLotNumberAndManufacturer ja retorna um lote
+        // existente, a BusinessException deve ser lancada antes de qualquer save,
+        // evitando o SQL ERROR "duplicate key" no log do PostgreSQL.
+        when(reagentLotRepository.findByLotNumberAndManufacturer("L123", "Bio"))
+            .thenReturn(List.of(lot(50D)));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica", LocalDate.now().plusDays(60), 100D,
+            "frascos", 80D, 2D, "2-8C", LocalDate.now(), null, 7, "ativo",
+            null, null, null, null
+        );
+
+        assertThatThrownBy(() -> reagentService.createLot(request))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Já existe um lote com este número e fabricante");
+        verify(reagentLotRepository, never()).save(any(ReagentLot.class));
+    }
+
+    @Test
     @DisplayName("filtragem por category e status deve usar repository")
     void filtragemPorCategoryEStatus_deveUsarRepository() {
         ReagentLot lot = lot(100D);

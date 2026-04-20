@@ -120,6 +120,14 @@ public class ReagentService {
     @Transactional
     public ReagentLot createLot(ReagentLotRequest request) {
         validateLotDates(request);
+        // Pre-check de unicidade (lotNumber, manufacturer) simetrico ao updateLot.
+        // Evita que toda colisao gere "duplicate key" no log do PostgreSQL; mantem
+        // o catch abaixo como rede de seguranca para race-condition entre check e save.
+        if (!reagentLotRepository
+                .findByLotNumberAndManufacturer(request.lotNumber(), request.manufacturer())
+                .isEmpty()) {
+            throw new BusinessException("Já existe um lote com este número e fabricante");
+        }
         String status = resolveStatus(request.status(), ReagentStatus.ATIVO);
         ReagentLot lot = ReagentLot.builder()
             .name(request.name())
