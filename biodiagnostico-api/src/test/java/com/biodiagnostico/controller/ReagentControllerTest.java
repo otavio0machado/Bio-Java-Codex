@@ -170,7 +170,7 @@ class ReagentControllerTest {
         List<ReagentLot> byLotNumberResponse = List.of();
 
         StubReagentService() {
-            super(null, null, null);
+            super(null, null, null, null);
         }
 
         @Override

@@ -43,13 +43,22 @@ public interface ReagentLotRepository extends JpaRepository<ReagentLot, UUID> {
         @Param("lotNumber") String lotNumber,
         @Param("manufacturer") String manufacturer);
 
-    @Query("SELECT r FROM ReagentLot r WHERE r.expiryDate < :today AND r.status <> 'vencido'")
-    List<ReagentLot> findExpiredNotMarked(@Param("today") LocalDate today);
+    /**
+     * Retorna lotes ja vencidos cujo status pode precisar de reclassificacao pelo
+     * scheduler. Exclui:
+     *  - {@code inativo}: estado terminal (acabou e passou da validade) — ja estavel.
+     *  - {@code quarentena}: estado manual de excecao — preserva regra laboratorial.
+     *
+     * O scheduler passa cada resultado por {@code deriveStatus} para decidir o novo
+     * valor (vencido quando tem estoque, inativo quando zerou).
+     */
+    @Query("SELECT r FROM ReagentLot r WHERE r.expiryDate < :today AND r.status NOT IN ('inativo', 'quarentena')")
+    List<ReagentLot> findExpiredNeedingReclassification(@Param("today") LocalDate today);
 
     @Query("""
         SELECT r FROM ReagentLot r
         WHERE r.expiryDate BETWEEN :startDate AND :endDate
-          AND r.status <> 'vencido'
+          AND r.status NOT IN ('vencido', 'inativo')
         ORDER BY r.expiryDate ASC
         """)
     List<ReagentLot> findExpiringLots(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
@@ -57,7 +66,7 @@ public interface ReagentLotRepository extends JpaRepository<ReagentLot, UUID> {
     @Query("""
         SELECT COUNT(r) FROM ReagentLot r
         WHERE r.expiryDate BETWEEN :startDate AND :endDate
-          AND r.status <> 'vencido'
+          AND r.status NOT IN ('vencido', 'inativo')
         """)
     long countExpiringLots(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 

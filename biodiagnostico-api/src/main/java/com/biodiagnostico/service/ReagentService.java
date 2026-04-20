@@ -18,8 +18,11 @@ import com.biodiagnostico.util.NumericUtils;
 import com.biodiagnostico.util.ResponseMapper;
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -35,18 +38,34 @@ public class ReagentService {
     /** Janela para considerar um lote "ativo em CQ" (Fase 3). */
     private static final int QC_ACTIVE_WINDOW_DAYS = 30;
 
+    // Acoes de auditoria (regulatorio ANVISA RDC 302 / ISO 15189).
+    // Transicoes automaticas de status sao registradas em audit_log para
+    // rastreabilidade externa. Chamadas diretas deste service a AuditService
+    // cobrem as mudancas originadas em fluxos operacionais (create/update/move);
+    // o scheduler registra suas proprias transicoes em trigger="scheduler".
+    public static final String AUDIT_ACTION_STATUS_DERIVED = "REAGENT_STATUS_DERIVED";
+    public static final String AUDIT_ACTION_MOVEMENT_BLOCKED = "REAGENT_MOVEMENT_BLOCKED";
+
+    public static final String AUDIT_TRIGGER_CREATE_LOT = "createLot";
+    public static final String AUDIT_TRIGGER_UPDATE_LOT = "updateLot";
+    public static final String AUDIT_TRIGGER_MOVEMENT = "movement";
+    public static final String AUDIT_TRIGGER_SCHEDULER = "scheduler";
+
     private final ReagentLotRepository reagentLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final QcRecordRepository qcRecordRepository;
+    private final AuditService auditService;
 
     public ReagentService(
         ReagentLotRepository reagentLotRepository,
         StockMovementRepository stockMovementRepository,
-        QcRecordRepository qcRecordRepository
+        QcRecordRepository qcRecordRepository,
+        AuditService auditService
     ) {
         this.reagentLotRepository = reagentLotRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.qcRecordRepository = qcRecordRepository;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -149,6 +168,9 @@ public class ReagentService {
             .receivedDate(request.receivedDate())
             .openedDate(request.openedDate())
             .build();
+        // Derivacao automatica: se o lote ja nasce vencido (expiry < today), corrige
+        // para vencido (estoque > 0) ou inativo (estoque 0). quarentena preserva.
+        applyDerivedStatus(lot, LocalDate.now(), AUDIT_TRIGGER_CREATE_LOT);
         try {
             return reagentLotRepository.save(lot);
         } catch (DataIntegrityViolationException e) {
@@ -194,6 +216,12 @@ public class ReagentService {
         lot.setSupplier(request.supplier());
         lot.setReceivedDate(request.receivedDate());
         lot.setOpenedDate(request.openedDate());
+        // Derivacao automatica pos-atualizacao. Se o admin pediu quarentena explicitamente
+        // (resolveStatus ja aplicou acima), applyDerivedStatus preserva quarentena. Se o
+        // status ficou outro (ativo/em_uso/inativo/vencido) e a validade/estoque indicarem
+        // um derivado diferente, a derivacao sobrepoe — ex: admin tentou reativar lote com
+        // validade passada, o sistema corrige para vencido/inativo.
+        applyDerivedStatus(lot, LocalDate.now(), AUDIT_TRIGGER_UPDATE_LOT);
         try {
             return reagentLotRepository.save(lot);
         } catch (DataIntegrityViolationException e) {
@@ -224,6 +252,29 @@ public class ReagentService {
             throw new BusinessException(
                 "Tipo de movimentação inválido. Valores aceitos: " + MovementType.humanList());
         }
+
+        // Lote inativo representa historico/arquivo (acabou e passou da validade).
+        // ENTRADA em inativo "ressuscitaria" o lote e quebraria a semantica do estado
+        // terminal. Obrigamos criacao de novo lote. AJUSTE continua permitido (correcao
+        // operacional de contagem — se o ajuste elevar o estoque acima de zero com
+        // validade ja vencida, a derivacao automatica reclassifica para vencido).
+        if (ReagentStatus.INATIVO.equals(lot.getStatus()) && MovementType.ENTRADA.equals(type)) {
+            // Auditoria regulatoria: registrar a tentativa bloqueada para que o
+            // auditor observe fluxo operacional mal-resolvido (usuario tentando
+            // reaproveitar lote terminal ao inves de criar um novo).
+            Map<String, Object> blockedDetails = new HashMap<>();
+            blockedDetails.put("reason", "lote_inativo");
+            blockedDetails.put("movementType", MovementType.ENTRADA);
+            auditService.log(
+                AUDIT_ACTION_MOVEMENT_BLOCKED,
+                "ReagentLot",
+                lot.getId(),
+                blockedDetails
+            );
+            throw new BusinessException(
+                "Lote inativo não aceita nova entrada. Crie um novo lote.");
+        }
+
         double quantity = NumericUtils.defaultIfNull(request.quantity());
         double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
         double nextStock;
@@ -258,6 +309,11 @@ public class ReagentService {
         }
 
         lot.setCurrentStock(nextStock);
+        // Derivacao automatica pos-movimento: se a validade ja passou, a transicao entre
+        // vencido <-> inativo segue o estoque. quarentena preserva (regra manual).
+        // Ex 1: SAIDA que zera estoque em lote vencido → inativo (arquivo/historico).
+        // Ex 2: AJUSTE que eleva estoque > 0 em lote inativo com validade passada → vencido.
+        applyDerivedStatus(lot, LocalDate.now(), AUDIT_TRIGGER_MOVEMENT);
         reagentLotRepository.save(lot);
         // previousStock passa a ser gravado em TODOS os movimentos para permitir
         // auditoria e reversao consistente independente do tipo.
@@ -355,6 +411,115 @@ public class ReagentService {
                     "A data de validade não pode ser anterior à data de início de uso.");
             }
         }
+    }
+
+    /**
+     * Retorna o status derivado para um lote dado o estoque e validade atuais.
+     * Regras:
+     *  - quarentena prevalece (estado de excecao manual — nao altera)
+     *  - expiryDate nula → mantem status atual (sem informacao suficiente para derivar)
+     *  - expiryDate &lt; today e currentStock &lt;= 0 → inativo (historico/arquivo)
+     *  - expiryDate &lt; today e currentStock &gt; 0  → vencido (risco operacional)
+     *  - senao → mantem status atual (nao muda)
+     *
+     * Valor operacional: separar RISCO (vencido com estoque, precisa descartar)
+     * de HISTORICO (inativo = acabou e passou da validade).
+     */
+    public String deriveStatus(ReagentLot lot, LocalDate today) {
+        if (lot == null) {
+            return null;
+        }
+        String current = lot.getStatus();
+        if (ReagentStatus.QUARENTENA.equals(current)) {
+            return current;
+        }
+        LocalDate expiry = lot.getExpiryDate();
+        if (expiry == null || !expiry.isBefore(today)) {
+            return current;
+        }
+        double stock = NumericUtils.defaultIfNull(lot.getCurrentStock());
+        if (stock <= 0) {
+            return ReagentStatus.INATIVO;
+        }
+        return ReagentStatus.VENCIDO;
+    }
+
+    /**
+     * Aplica {@link #deriveStatus(ReagentLot, LocalDate)} mutando o lote quando o
+     * status derivado difere do atual. Nao atua em lotes em {@code quarentena}
+     * (a propria derivacao ja preserva o valor, mas mantemos o guard explicito
+     * para deixar a intencao clara no call-site).
+     *
+     * Quando ha transicao efetiva, registra um log de auditoria (acao
+     * {@link #AUDIT_ACTION_STATUS_DERIVED}) com o {@code trigger} que originou
+     * a mudanca. Transicoes no-op (derivado == atual) nao sao logadas para
+     * evitar poluicao do audit_log.
+     *
+     * @param trigger origem semantica: {@link #AUDIT_TRIGGER_CREATE_LOT},
+     *                {@link #AUDIT_TRIGGER_UPDATE_LOT},
+     *                {@link #AUDIT_TRIGGER_MOVEMENT} ou
+     *                {@link #AUDIT_TRIGGER_SCHEDULER}.
+     */
+    private void applyDerivedStatus(ReagentLot lot, LocalDate today, String trigger) {
+        if (lot == null) return;
+        String oldStatus = lot.getStatus();
+        if (ReagentStatus.QUARENTENA.equals(oldStatus)) {
+            // Preservacao manual — quarentena nao e sobrescrita por derivacao
+            // nem gera log (nao ha transicao).
+            return;
+        }
+        String derived = deriveStatus(lot, today);
+        if (Objects.equals(oldStatus, derived)) {
+            // Sem transicao efetiva: nao logar (evita ruido em audit_log).
+            return;
+        }
+        lot.setStatus(derived);
+        recordStatusTransition(lot, oldStatus, derived, trigger);
+    }
+
+    /**
+     * Aplicacao invocada pelo scheduler: alem de mutar o status, tambem registra
+     * o log de auditoria com {@code trigger="scheduler"}. Retorna {@code true}
+     * se houve transicao efetiva (usado pelo scheduler para decidir se adiciona
+     * o lote ao batch de saveAll).
+     *
+     * Exposto como publico para que {@code ReagentExpiryScheduler} consuma a
+     * mesma regra — evita duplicar a derivacao/log em dois lugares.
+     */
+    public boolean applyDerivedStatusFromScheduler(ReagentLot lot, LocalDate today) {
+        if (lot == null) return false;
+        String oldStatus = lot.getStatus();
+        if (ReagentStatus.QUARENTENA.equals(oldStatus)) {
+            return false;
+        }
+        String derived = deriveStatus(lot, today);
+        if (Objects.equals(oldStatus, derived)) {
+            return false;
+        }
+        lot.setStatus(derived);
+        recordStatusTransition(lot, oldStatus, derived, AUDIT_TRIGGER_SCHEDULER);
+        return true;
+    }
+
+    /**
+     * Emite um AuditLog de transicao de status. Isolado para centralizar o shape
+     * dos {@code details} (comparavel entre triggers) e permitir testes uniformes.
+     */
+    private void recordStatusTransition(ReagentLot lot, String from, String to, String trigger) {
+        // HashMap (e nao Map.of) porque {@code from} pode vir nulo em lotes recem
+        // criados que nasceram com status derivado (validade passada no createLot).
+        Map<String, Object> details = new HashMap<>();
+        details.put("from", from);
+        details.put("to", to);
+        details.put("trigger", trigger);
+        details.put("expiryDate", String.valueOf(lot.getExpiryDate()));
+        details.put("currentStock", String.valueOf(lot.getCurrentStock()));
+        auditService.log(
+            AUDIT_ACTION_STATUS_DERIVED,
+            "ReagentLot",
+            lot.getId(),
+            details
+        );
     }
 
     /**

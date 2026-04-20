@@ -17,15 +17,18 @@ import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.StockMovementRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -33,7 +36,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 @ExtendWith(MockitoExtension.class)
 class ReagentServiceTest {
 
-    @InjectMocks
     private ReagentService reagentService;
 
     @Mock
@@ -44,6 +46,46 @@ class ReagentServiceTest {
 
     @Mock
     private QcRecordRepository qcRecordRepository;
+
+    /**
+     * Fake capturador de chamadas a AuditService. Usamos um fake ao inves de
+     * Mockito.mock(AuditService.class) porque o mock-maker inline falha em Java
+     * 25 nesta classe concreta. O padrao do projeto (ver QcServiceTest,
+     * AuthServiceTest) ja instancia AuditService real com nulls — aqui
+     * estendemos para gravar as invocacoes em memoria sem tocar repositorios.
+     */
+    private RecordingAuditService auditService;
+
+    @BeforeEach
+    void setUp() {
+        auditService = new RecordingAuditService();
+        reagentService = new ReagentService(
+            reagentLotRepository, stockMovementRepository, qcRecordRepository, auditService);
+    }
+
+    private static final class RecordingAuditService extends AuditService {
+        record Call(String action, String entityType, UUID entityId, Map<String, Object> details) {}
+
+        private final List<Call> calls = new ArrayList<>();
+
+        RecordingAuditService() {
+            super(null, null, new ObjectMapper());
+        }
+
+        @Override
+        public void log(String action, String entityType, UUID entityId, Map<String, Object> details) {
+            calls.add(new Call(action, entityType, entityId, details));
+        }
+
+        @Override
+        public void log(String action, String entityType, UUID entityId) {
+            log(action, entityType, entityId, null);
+        }
+
+        List<Call> callsFor(String action) {
+            return calls.stream().filter(c -> c.action().equals(action)).toList();
+        }
+    }
 
     @Test
     @DisplayName("deve criar lote com sucesso")
@@ -529,6 +571,304 @@ class ReagentServiceTest {
         assertThat(result).hasSize(2);
         assertThat(result.get(0).usedInQcRecently()).isFalse();
         assertThat(result.get(1).usedInQcRecently()).isFalse();
+    }
+
+    // ===== Derivacao automatica de status (vencido vs inativo) =====
+
+    @Test
+    @DisplayName("SAIDA que zera estoque em lote vencido com validade passada deve virar inativo")
+    void saidaZerandoEstoque_emLoteVencido_deveTornarInativo() {
+        ReagentLot lot = lot(10D);
+        lot.setStatus("vencido");
+        lot.setExpiryDate(LocalDate.now().minusDays(5));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(
+            lot.getId(), new StockMovementRequest("SAIDA", 10D, "Ana", "", "VENCIMENTO"));
+
+        assertThat(lot.getCurrentStock()).isEqualTo(0D);
+        assertThat(lot.getStatus()).isEqualTo("inativo");
+    }
+
+    @Test
+    @DisplayName("ENTRADA em lote inativo deve lancar BusinessException")
+    void entradaEmLoteInativo_deveLancarException() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("inativo");
+        lot.setExpiryDate(LocalDate.now().minusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() ->
+            reagentService.createMovement(
+                lot.getId(), new StockMovementRequest("ENTRADA", 10D, "Ana", "", null))
+        )
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Lote inativo não aceita nova entrada");
+        verify(reagentLotRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("AJUSTE em lote inativo que resulta em estoque > 0 com validade passada deve virar vencido")
+    void ajusteEmLoteInativo_queElevaEstoque_deveVirarVencido() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("inativo");
+        lot.setExpiryDate(LocalDate.now().minusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(
+            lot.getId(), new StockMovementRequest("AJUSTE", 5D, "Ana", "Recontagem fisica", "CORRECAO"));
+
+        assertThat(lot.getCurrentStock()).isEqualTo(5D);
+        assertThat(lot.getStatus()).isEqualTo("vencido");
+    }
+
+    @Test
+    @DisplayName("createLot com expiryDate passada e estoque 0 deve entrar como inativo")
+    void createLot_comValidadePassadaEEstoqueZero_deveEntrarComoInativo() {
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L-PAST-0", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(5), 100D, "frascos", 0D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        ReagentLot lot = reagentService.createLot(request);
+
+        assertThat(lot.getStatus()).isEqualTo("inativo");
+    }
+
+    @Test
+    @DisplayName("createLot com expiryDate passada e estoque > 0 deve entrar como vencido")
+    void createLot_comValidadePassadaEEstoquePositivo_deveEntrarComoVencido() {
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L-PAST-1", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(5), 100D, "frascos", 10D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        ReagentLot lot = reagentService.createLot(request);
+
+        assertThat(lot.getStatus()).isEqualTo("vencido");
+    }
+
+    @Test
+    @DisplayName("updateLot editando expiryDate para passada em lote com estoque > 0 deve virar vencido")
+    void updateLot_setValidadeParaPassada_comEstoque_deveVirarVencido() {
+        ReagentLot lot = lot(25D);
+        lot.setStatus("ativo");
+        lot.setExpiryDate(LocalDate.now().plusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(1), // expiry passa para ontem
+            100D, "frascos", 25D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        ReagentLot updated = reagentService.updateLot(lot.getId(), request);
+
+        assertThat(updated.getStatus()).isEqualTo("vencido");
+    }
+
+    @Test
+    @DisplayName("updateLot em lote quarentena com validade passada deve permanecer quarentena")
+    void updateLot_loteQuarentena_comValidadePassada_devePermanecerQuarentena() {
+        ReagentLot lot = lot(10D);
+        lot.setStatus("quarentena");
+        lot.setExpiryDate(LocalDate.now().plusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(10), // validade agora passada
+            100D, "frascos", 10D, 2D, "2-8C",
+            null, null, 7, "quarentena", // admin mantem quarentena explicitamente
+            null, null, null, null
+        );
+
+        ReagentLot updated = reagentService.updateLot(lot.getId(), request);
+
+        assertThat(updated.getStatus()).isEqualTo("quarentena");
+    }
+
+    @Test
+    @DisplayName("SAIDA que zera estoque em lote quarentena com validade passada deve permanecer quarentena")
+    void saidaZerando_emLoteQuarentena_comValidadePassada_devePermanecerQuarentena() {
+        ReagentLot lot = lot(10D);
+        lot.setStatus("quarentena");
+        lot.setExpiryDate(LocalDate.now().minusDays(2));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(
+            lot.getId(), new StockMovementRequest("SAIDA", 10D, "Ana", "", "VENCIMENTO"));
+
+        assertThat(lot.getCurrentStock()).isEqualTo(0D);
+        assertThat(lot.getStatus()).isEqualTo("quarentena");
+    }
+
+    // ===== Auditoria de transicoes automaticas (ANVISA RDC 302 / ISO 15189) =====
+
+    @Test
+    @DisplayName("createLot com validade passada e estoque 0 registra audit log trigger=createLot")
+    void createLot_validadePassadaEstoqueZero_gravaAuditLog() {
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L-AUDIT-0", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(5), 100D, "frascos", 0D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        ReagentLot lot = reagentService.createLot(request);
+
+        assertThat(lot.getStatus()).isEqualTo("inativo");
+        List<RecordingAuditService.Call> derived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
+        assertThat(derived).hasSize(1);
+        RecordingAuditService.Call call = derived.getFirst();
+        assertThat(call.entityType()).isEqualTo("ReagentLot");
+        assertThat(call.details())
+            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_CREATE_LOT)
+            .containsEntry("to", "inativo")
+            // from vem do default do builder (ativo) porque resolveStatus aplicou antes de derivar.
+            .containsEntry("from", "ativo");
+    }
+
+    @Test
+    @DisplayName("updateLot mudando expiryDate para passada registra audit log trigger=updateLot")
+    void updateLot_mudandoExpiry_gravaAuditLog() {
+        ReagentLot lot = lot(25D);
+        lot.setStatus("ativo");
+        lot.setExpiryDate(LocalDate.now().plusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(1), 100D, "frascos", 25D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        reagentService.updateLot(lot.getId(), request);
+
+        List<RecordingAuditService.Call> derived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
+        assertThat(derived).hasSize(1);
+        RecordingAuditService.Call call = derived.getFirst();
+        assertThat(call.entityId()).isEqualTo(lot.getId());
+        assertThat(call.details())
+            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_UPDATE_LOT)
+            .containsEntry("from", "ativo")
+            .containsEntry("to", "vencido");
+    }
+
+    @Test
+    @DisplayName("SAIDA que zera estoque em lote vencido registra audit log trigger=movement")
+    void createMovement_saidaZerandoVencido_gravaAuditLog() {
+        ReagentLot lot = lot(10D);
+        lot.setStatus("vencido");
+        lot.setExpiryDate(LocalDate.now().minusDays(5));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(
+            lot.getId(), new StockMovementRequest("SAIDA", 10D, "Ana", "", "VENCIMENTO"));
+
+        List<RecordingAuditService.Call> derived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
+        assertThat(derived).hasSize(1);
+        RecordingAuditService.Call call = derived.getFirst();
+        assertThat(call.entityId()).isEqualTo(lot.getId());
+        assertThat(call.details())
+            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_MOVEMENT)
+            .containsEntry("from", "vencido")
+            .containsEntry("to", "inativo");
+    }
+
+    @Test
+    @DisplayName("ENTRADA em lote inativo registra audit log REAGENT_MOVEMENT_BLOCKED")
+    void createMovement_entradaEmInativo_gravaAuditBlocked() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("inativo");
+        lot.setExpiryDate(LocalDate.now().minusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() ->
+            reagentService.createMovement(
+                lot.getId(), new StockMovementRequest("ENTRADA", 10D, "Ana", "", null))
+        )
+            .isInstanceOf(BusinessException.class);
+
+        List<RecordingAuditService.Call> blocked = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_MOVEMENT_BLOCKED);
+        assertThat(blocked).hasSize(1);
+        RecordingAuditService.Call call = blocked.getFirst();
+        assertThat(call.entityId()).isEqualTo(lot.getId());
+        assertThat(call.details())
+            .containsEntry("reason", "lote_inativo")
+            .containsEntry("movementType", "ENTRADA");
+        // Nenhum log de REAGENT_STATUS_DERIVED neste fluxo — nao ha transicao.
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_STATUS_DERIVED)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Lote quarentena com validade passada nao gera audit log (preservacao)")
+    void updateLot_quarentena_comValidadePassada_naoGeraAuditLog() {
+        ReagentLot lot = lot(10D);
+        lot.setStatus("quarentena");
+        lot.setExpiryDate(LocalDate.now().plusDays(30));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica",
+            LocalDate.now().minusDays(10), 100D, "frascos", 10D, 2D, "2-8C",
+            null, null, 7, "quarentena",
+            null, null, null, null
+        );
+
+        reagentService.updateLot(lot.getId(), request);
+
+        // Quarentena e preservacao manual — nao deve haver chamada de audit para
+        // REAGENT_STATUS_DERIVED porque nao houve transicao.
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_STATUS_DERIVED)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("No-op (derivado = atual) nao gera audit log")
+    void updateLot_semTransicao_naoGeraAuditLog() {
+        ReagentLot lot = lot(50D);
+        lot.setStatus("ativo");
+        lot.setExpiryDate(LocalDate.now().plusDays(60));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest request = new ReagentLotRequest(
+            "ALT", "L123", "Bio", "Bioquímica",
+            LocalDate.now().plusDays(90), // validade ainda futura
+            100D, "frascos", 50D, 2D, "2-8C",
+            null, null, 7, "ativo",
+            null, null, null, null
+        );
+
+        reagentService.updateLot(lot.getId(), request);
+
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_STATUS_DERIVED)).isEmpty();
     }
 
     private ReagentLot lot(double stock) {
