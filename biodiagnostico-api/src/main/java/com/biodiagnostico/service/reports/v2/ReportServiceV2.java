@@ -1,6 +1,7 @@
 package com.biodiagnostico.service.reports.v2;
 
 import com.biodiagnostico.config.ReportsV2Properties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.biodiagnostico.dto.reports.v2.GenerateReportV2Request;
 import com.biodiagnostico.dto.reports.v2.PreviewReportV2Request;
 import com.biodiagnostico.dto.reports.v2.PreviewResponse;
@@ -59,6 +60,7 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code PdfReportService}/{@code ReportController} permanecem intocados.
  */
 @Service
+@ConditionalOnProperty(prefix = "reports.v2", name = "enabled", havingValue = "true")
 public class ReportServiceV2 {
 
     private static final Logger LOG = LoggerFactory.getLogger(ReportServiceV2.class);

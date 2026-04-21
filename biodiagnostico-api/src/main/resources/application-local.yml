@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:biodiagnostico;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;NON_KEYWORDS=VALUE
+    url: jdbc:h2:mem:biodiagnostico;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;NON_KEYWORDS=VALUE,MONTH,YEAR
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -32,7 +32,7 @@ management:
 
 reports:
   v2:
-    enabled: ${REPORTS_V2_ENABLED:false}
+    enabled: ${REPORTS_V2_ENABLED:true}
     storage:
       dir: ${REPORTS_V2_STORAGE_DIR:${java.io.tmpdir}/biodiagnostico-reports-v2}
     public-base-url: ${REPORTS_V2_PUBLIC_BASE_URL:http://localhost:5173}

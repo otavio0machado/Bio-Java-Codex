@@ -16,6 +16,12 @@ const ManutencaoPage = lazy(() =>
 const RelatoriosPage = lazy(() =>
   import('./pages/RelatoriosPage').then((module) => ({ default: module.RelatoriosPage })),
 )
+const ReportBuilder = lazy(() =>
+  import('./components/relatoriosV2/ReportBuilder').then((module) => ({ default: module.ReportBuilder })),
+)
+const VerifyReportPage = lazy(() =>
+  import('./pages/VerifyReportPage').then((module) => ({ default: module.VerifyReportPage })),
+)
 const AdminPage = lazy(() => import('./pages/AdminPage').then((module) => ({ default: module.AdminPage })))
 const ConfiguracaoPage = lazy(() =>
   import('./pages/ConfiguracaoPage').then((module) => ({ default: module.ConfiguracaoPage })),
@@ -55,6 +61,14 @@ export default function App() {
         element={
           <Suspense fallback={<RouteFallback />}>
             <ResetPasswordPage />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/r/verify/:hash"
+        element={
+          <Suspense fallback={<RouteFallback />}>
+            <VerifyReportPage />
           </Suspense>
         }
       />
@@ -98,6 +112,22 @@ export default function App() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <RelatoriosPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/relatorios/legado"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <RelatoriosPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/relatorios/:code"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <ReportBuilder />
               </Suspense>
             }
           />

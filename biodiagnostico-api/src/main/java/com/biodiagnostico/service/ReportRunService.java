@@ -148,6 +148,7 @@ public class ReportRunService {
             .periodType(filters == null ? null : asStringOrNull(filters.get("periodType")))
             .month(filters == null ? null : asIntegerOrNull(filters.get("month")))
             .year(filters == null ? null : asIntegerOrNull(filters.get("year")))
+            .createdAt(ctx.now())
             .build();
 
         return repository.save(run);

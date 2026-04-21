@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,7 @@ public class LocalFilesystemReportStorage implements ReportStorage {
 
     private final Path baseDir;
 
+    @Autowired
     public LocalFilesystemReportStorage(ReportsV2Properties properties) {
         String dir = properties.getStorage() != null ? properties.getStorage().getDir() : null;
         if (dir == null || dir.isBlank()) {
