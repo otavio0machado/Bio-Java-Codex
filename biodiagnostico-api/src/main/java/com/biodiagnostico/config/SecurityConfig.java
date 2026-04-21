@@ -58,6 +58,9 @@ public class SecurityConfig {
                     "/api/auth/forgot-password",
                     "/api/auth/reset-password"
                 ).permitAll()
+                // Endpoint publico de verificacao de autenticidade do relatorio V2.
+                // Protegido por rate limit no controller.
+                .requestMatchers("/api/reports/v2/verify/**").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )

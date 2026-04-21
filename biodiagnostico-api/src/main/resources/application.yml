@@ -41,6 +41,15 @@ gemini:
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
 
+reports:
+  v2:
+    enabled: ${REPORTS_V2_ENABLED:false}
+    storage:
+      dir: ${REPORTS_V2_STORAGE_DIR:}
+    public-base-url: ${REPORTS_V2_PUBLIC_BASE_URL:}
+    default-retention-days: ${REPORTS_V2_DEFAULT_RETENTION_DAYS:1825}
+    verify-rate-limit-per-minute-per-ip: ${REPORTS_V2_VERIFY_RATE_LIMIT:10}
+
 management:
   endpoints:
     web:

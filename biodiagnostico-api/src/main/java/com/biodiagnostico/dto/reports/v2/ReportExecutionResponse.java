@@ -1,0 +1,38 @@
+package com.biodiagnostico.dto.reports.v2;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * Resposta canonica de uma execucao V2, usada por {@code /generate},
+ * {@code /executions/{id}}, {@code /executions/*} e {@code /sign}.
+ *
+ * <p>Campos relacionados a assinatura:
+ * <ul>
+ *   <li>{@code sha256} — hash do PDF original (sempre presente em SUCCESS)</li>
+ *   <li>{@code signatureHash} — hash da versao assinada (null ate /sign)</li>
+ *   <li>{@code signedSha256} — alias de {@code signatureHash}, mantido para
+ *     clientes novos que queiram discriminar contra {@code sha256} sem ambiguidade.
+ *     O conteudo e identico ao de {@code signatureHash}; ambos sao expostos por
+ *     clareza de contrato.</li>
+ * </ul>
+ */
+public record ReportExecutionResponse(
+    UUID id,
+    String reportCode,
+    String format,
+    String status,
+    String reportNumber,
+    String sha256,
+    String signatureHash,
+    String signedSha256,
+    Long sizeBytes,
+    Integer pageCount,
+    String username,
+    Instant createdAt,
+    Instant signedAt,
+    Instant expiresAt,
+    String downloadUrl,
+    String verifyUrl,
+    String periodLabel
+) {}

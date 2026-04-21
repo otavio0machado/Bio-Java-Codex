@@ -100,6 +100,18 @@
             <version>1.3.39</version>
         </dependency>
 
+        <!-- ZXing: geracao de QR code para assinatura eletronica dos relatorios V2 -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>javase</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- Prometheus metrics registry (version managed by Spring Boot BOM) -->
         <dependency>
             <groupId>io.micrometer</groupId>
