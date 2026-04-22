@@ -94,7 +94,9 @@ class ReportServiceV2Test {
         service = new ReportServiceV2(
             definitionRegistry, generatorRegistry, validator, storage, signer,
             runService, runRepository, signatureLogRepository, userRepository, labSettingsService, properties,
-            null
+            null,
+            null,  // ReportDownloadLogRepository — ignorado em unit test (auditoria best-effort)
+            new ReportV2Metrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())
         );
         lenient().when(userRepository.findByUsername(any())).thenReturn(Optional.empty());
         lenient().when(runRepository.save(any(ReportRun.class))).thenAnswer(inv -> inv.getArgument(0));

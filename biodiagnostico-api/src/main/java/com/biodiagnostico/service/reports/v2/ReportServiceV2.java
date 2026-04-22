@@ -81,6 +81,9 @@ public class ReportServiceV2 {
     private final ReportsV2Properties properties;
     private final MaintenanceRecordRepository suggestionRepository;
 
+    private final com.biodiagnostico.repository.ReportDownloadLogRepository downloadLogRepository;
+    private final ReportV2Metrics metrics;
+
     public ReportServiceV2(
         ReportDefinitionRegistry definitionRegistry,
         ReportGeneratorRegistry generatorRegistry,
@@ -93,7 +96,9 @@ public class ReportServiceV2 {
         UserRepository userRepository,
         LabSettingsService labSettingsService,
         ReportsV2Properties properties,
-        MaintenanceRecordRepository suggestionRepository
+        MaintenanceRecordRepository suggestionRepository,
+        com.biodiagnostico.repository.ReportDownloadLogRepository downloadLogRepository,
+        ReportV2Metrics metrics
     ) {
         this.definitionRegistry = definitionRegistry;
         this.generatorRegistry = generatorRegistry;
@@ -107,6 +112,8 @@ public class ReportServiceV2 {
         this.labSettingsService = labSettingsService;
         this.properties = properties;
         this.suggestionRepository = suggestionRepository;
+        this.downloadLogRepository = downloadLogRepository;
+        this.metrics = metrics;
     }
 
     // ---------- Catalogo ----------
@@ -150,6 +157,8 @@ public class ReportServiceV2 {
         ReportGenerator generator = generatorRegistry.resolve(request.code());
         GenerationContext ctx = buildContext(auth);
 
+        // Metrica: duracao total de generate (inclui storage + ReportRun record)
+        long startNs = System.nanoTime();
         try {
             ReportArtifact artifact = generator.generate(new ReportFilters(rawFilters), ctx);
             String yearMonth = yearMonthFromReportNumber(artifact.reportNumber());
@@ -165,18 +174,26 @@ public class ReportServiceV2 {
             ReportRun run = reportRunService.recordSuccessV2(
                 artifact, definition, storageKey, ctx, rawFilters, format
             );
+            metrics.recordGeneration(request.code(), true,
+                java.time.Duration.ofNanos(System.nanoTime() - startNs));
             // warnings sao transientes do request atual. Persistir em ReportRun
             // exigiria migration; como sao apenas metadata de UX (frontend
             // mostra toast e banner), ficam expostos apenas na resposta imediata.
             return ReportV2Mapper.toResponse(run, properties.getPublicBaseUrl(), artifact.warnings());
         } catch (InvalidFilterException | ReportCodeNotFoundException | AccessDeniedException ex) {
+            metrics.recordGeneration(request.code(), false,
+                java.time.Duration.ofNanos(System.nanoTime() - startNs));
             reportRunService.recordFailureV2(definition, ctx, rawFilters, format, ex.getMessage());
             throw ex;
         } catch (RuntimeException ex) {
+            metrics.recordGeneration(request.code(), false,
+                java.time.Duration.ofNanos(System.nanoTime() - startNs));
             LOG.error("Falha ao gerar relatorio V2 code={} filters={}", request.code(), rawFilters, ex);
             reportRunService.recordFailureV2(definition, ctx, rawFilters, format, ex.getMessage());
             throw ex;
         } catch (IOException ex) {
+            metrics.recordGeneration(request.code(), false,
+                java.time.Duration.ofNanos(System.nanoTime() - startNs));
             LOG.error("Falha IO ao persistir artefato V2", ex);
             reportRunService.recordFailureV2(definition, ctx, rawFilters, format, ex.getMessage());
             throw new IllegalStateException("Falha ao persistir artefato no storage", ex);
@@ -287,10 +304,17 @@ public class ReportServiceV2 {
                 .build();
             signatureLogRepository.save(log);
 
+            ReportCode code = safeReportCode(run.getReportCode());
+            if (code != null) metrics.recordSignature(code, true);
+
             return ReportV2Mapper.toResponse(updated, properties.getPublicBaseUrl());
         } catch (InvalidSignerException ex) {
+            ReportCode code = safeReportCode(run.getReportCode());
+            if (code != null) metrics.recordSignature(code, false);
             throw ex;
         } catch (IOException ex) {
+            ReportCode code = safeReportCode(run.getReportCode());
+            if (code != null) metrics.recordSignature(code, false);
             throw new IllegalStateException("Falha ao assinar relatorio", ex);
         }
     }
@@ -477,6 +501,15 @@ public class ReportServiceV2 {
 
     @Transactional(readOnly = true)
     public DownloadResult download(UUID id, Authentication auth) {
+        return download(id, auth, null, null);
+    }
+
+    /**
+     * Variante que recebe IP + user-agent para auditoria de download (ISO 15189 8.4.1).
+     * Controller injeta a partir da {@link jakarta.servlet.http.HttpServletRequest}.
+     */
+    @Transactional
+    public DownloadResult download(UUID id, Authentication auth, String clientIp, String userAgent) {
         ReportRun run = loadForAuthenticatedUser(id, auth);
         if (run.getStorageKey() == null) {
             throw new ResourceNotFoundException("Execucao nao possui artefato");
@@ -495,6 +528,16 @@ public class ReportServiceV2 {
             String originalHashHeader = isSigned ? run.getSha256() : null;
 
             byte[] bytes = reportStorage.load(keyToLoad);
+
+            // Auditoria (append-only) — ISO 15189:2022 item 8.4.1
+            persistDownloadAudit(run, auth, isSigned ? "signed" : "original", bytes.length, clientIp, userAgent);
+
+            // Metrica Prometheus
+            ReportCode code = safeReportCode(run.getReportCode());
+            if (code != null) {
+                metrics.recordDownload(code, isSigned ? "signed" : "original");
+            }
+
             return new DownloadResult(
                 bytes,
                 mediaTypeFor(run.getFormat()),
@@ -505,6 +548,55 @@ public class ReportServiceV2 {
             );
         } catch (IOException ex) {
             throw new ResourceNotFoundException("Artefato nao encontrado no storage");
+        }
+    }
+
+    private void persistDownloadAudit(ReportRun run, Authentication auth, String version,
+                                      long sizeBytes, String clientIp, String userAgent) {
+        UUID userId = null;
+        String userName = null;
+        if (auth != null && auth.isAuthenticated()) {
+            userName = auth.getName();
+            // best-effort user lookup
+            try {
+                userId = userRepository.findByUsername(userName)
+                    .map(u -> u.getId()).orElse(null);
+            } catch (RuntimeException ignored) {
+                // auditoria nunca quebra o download
+            }
+        }
+        String correlationId = org.slf4j.MDC.get("correlationId");
+        // Trim user-agent para caber em VARCHAR(500)
+        String uaTrimmed = userAgent == null ? null : (userAgent.length() > 500 ? userAgent.substring(0, 500) : userAgent);
+
+        com.biodiagnostico.entity.ReportDownloadLog log = new com.biodiagnostico.entity.ReportDownloadLog(
+            UUID.randomUUID(),
+            run.getId(),
+            run.getReportNumber(),
+            "signed".equals(version) ? run.getSignatureHash() : run.getSha256(),
+            version,
+            sizeBytes,
+            userId,
+            userName,
+            Instant.now(),
+            clientIp,
+            uaTrimmed,
+            correlationId
+        );
+        try {
+            downloadLogRepository.save(log);
+        } catch (RuntimeException ex) {
+            // Auditoria nao deve derrubar download. Log e segue.
+            LOG.warn("Falha ao persistir ReportDownloadLog — prosseguindo com download", ex);
+        }
+    }
+
+    private ReportCode safeReportCode(String name) {
+        if (name == null) return null;
+        try {
+            return ReportCode.valueOf(name);
+        } catch (IllegalArgumentException ex) {
+            return null;
         }
     }
 

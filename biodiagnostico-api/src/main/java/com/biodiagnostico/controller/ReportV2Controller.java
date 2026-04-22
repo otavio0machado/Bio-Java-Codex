@@ -161,9 +161,16 @@ public class ReportV2Controller {
 
     @GetMapping("/executions/{id}/download")
     @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
-    public ResponseEntity<byte[]> download(@PathVariable UUID id, Authentication auth) {
+    public ResponseEntity<byte[]> download(
+        @PathVariable UUID id,
+        Authentication auth,
+        HttpServletRequest httpRequest
+    ) {
         enforceRateLimit("download:" + usernameOf(auth), RATE_LIMIT_DOWNLOAD_PER_MIN_USER);
-        ReportServiceV2.DownloadResult result = service.download(id, auth);
+        // IP + User-Agent propagados para auditoria de download (ISO 15189 8.4.1)
+        String clientIp = httpRequest == null ? null : resolveIp(httpRequest);
+        String userAgent = httpRequest == null ? null : httpRequest.getHeader("User-Agent");
+        ReportServiceV2.DownloadResult result = service.download(id, auth, clientIp, userAgent);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType(result.contentType()));
         headers.setContentDisposition(ContentDisposition.attachment().filename(result.suggestedFilename()).build());

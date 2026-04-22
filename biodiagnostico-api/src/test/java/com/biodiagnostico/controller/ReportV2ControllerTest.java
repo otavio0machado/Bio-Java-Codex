@@ -218,7 +218,7 @@ class ReportV2ControllerTest {
         AtomicInteger verifyCalls = new AtomicInteger();
 
         StubReportServiceV2() {
-            super(null, null, null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         void reset() {
