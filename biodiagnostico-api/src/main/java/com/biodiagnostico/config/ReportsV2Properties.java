@@ -43,6 +43,21 @@ public class ReportsV2Properties {
     @Min(1)
     private int verifyRateLimitPerMinutePerIp = 10;
 
+    /**
+     * Tolerancia minima (em pontos percentuais de CV) para classificar uma
+     * calibracao como EFICAZ. Padrao: 0.5 — variacoes menores sao ruido
+     * analitico e nao indicam melhora real.
+     *
+     * <p>Regras de classificacao em {@code CalibracaoPrePostGenerator} e
+     * {@code CqOperationalV2Generator}:
+     * <ul>
+     *   <li>{@code delta <= -tolerancia} → EFICAZ (CV caiu o suficiente)</li>
+     *   <li>{@code -tolerancia < delta < +tolerancia} → SEM EFEITO (dentro do ruido)</li>
+     *   <li>{@code delta >= +tolerancia} → PIOROU</li>
+     * </ul>
+     */
+    private double calibrationEffectiveDeltaTolerance = 0.5;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -81,6 +96,14 @@ public class ReportsV2Properties {
 
     public void setVerifyRateLimitPerMinutePerIp(int verifyRateLimitPerMinutePerIp) {
         this.verifyRateLimitPerMinutePerIp = verifyRateLimitPerMinutePerIp;
+    }
+
+    public double getCalibrationEffectiveDeltaTolerance() {
+        return calibrationEffectiveDeltaTolerance;
+    }
+
+    public void setCalibrationEffectiveDeltaTolerance(double calibrationEffectiveDeltaTolerance) {
+        this.calibrationEffectiveDeltaTolerance = calibrationEffectiveDeltaTolerance;
     }
 
     public static class Storage {

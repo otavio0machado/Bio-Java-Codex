@@ -93,6 +93,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
     private final LabSettingsService labSettingsService;
     private final PeriodComparator periodComparator;
     private final ReportAiCommentator aiCommentator;
+    private final com.biodiagnostico.config.ReportsV2Properties properties;
 
     @Autowired
     public CqOperationalV2Generator(
@@ -107,7 +108,8 @@ public class CqOperationalV2Generator implements ReportGenerator {
         LabHeaderRenderer headerRenderer,
         LabSettingsService labSettingsService,
         PeriodComparator periodComparator,
-        ReportAiCommentator aiCommentator
+        ReportAiCommentator aiCommentator,
+        com.biodiagnostico.config.ReportsV2Properties properties
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.postCalibrationRecordRepository = postCalibrationRecordRepository;
@@ -121,6 +123,19 @@ public class CqOperationalV2Generator implements ReportGenerator {
         this.labSettingsService = labSettingsService;
         this.periodComparator = periodComparator;
         this.aiCommentator = aiCommentator;
+        this.properties = properties;
+    }
+
+    /**
+     * Classifica o efeito de uma calibracao segundo a tolerancia configurada em
+     * {@code reports.v2.calibration-effective-delta-tolerance} (default 0.5 pp).
+     * Mesma regra do CalibracaoPrePostGenerator.
+     */
+    private String classifyCalibrationDelta(double delta) {
+        double tol = properties == null ? 0.5 : properties.getCalibrationEffectiveDeltaTolerance();
+        if (delta <= -tol) return "EFICAZ";
+        if (delta >= tol) return "PIOROU";
+        return "SEM EFEITO";
     }
 
     @Override
@@ -545,7 +560,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             double origCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
             double postCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
             double delta = postCv - origCv;
-            String status = delta < 0 ? "EFICAZ" : (delta == 0 ? "SEM EFEITO" : "PIOROU");
+            String status = classifyCalibrationDelta(delta);
             ReportV2PdfTheme.bodyRow(t, alt,
                 ReportV2PdfTheme.safe(r.getExamName()),
                 ReportV2PdfTheme.safe(r.getQcRecord() == null ? null : r.getQcRecord().getLotNumber()),

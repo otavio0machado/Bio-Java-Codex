@@ -35,7 +35,8 @@ class CalibracaoPrePostGeneratorTest {
             new JFreeChartRenderer(),
             new LabHeaderRenderer(),
             GeneratorTestSupport.stubLabSettings(),
-            GeneratorTestSupport.stubAi("Analise IA Calibracao fixture")
+            GeneratorTestSupport.stubAi("Analise IA Calibracao fixture"),
+            new com.biodiagnostico.config.ReportsV2Properties()
         );
     }
 

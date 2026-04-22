@@ -81,7 +81,7 @@ class RegulatorioPacoteGeneratorTest {
     // apenas o comportamento de generate/preview por override). Evita criar
     // e passar ~12 dependencias que o construtor real exige.
     static CqOperationalV2Generator cqStub(final java.util.function.Supplier<ReportArtifact> behavior) {
-        return new CqOperationalV2Generator(null, null, null, null, null, null, null, null, null, null, null, null) {
+        return new CqOperationalV2Generator(null, null, null, null, null, null, null, null, null, null, null, null, null) {
             @Override
             public ReportArtifact generate(ReportFilters filters, GenerationContext ctx) {
                 return behavior.get();
@@ -133,7 +133,7 @@ class RegulatorioPacoteGeneratorTest {
     }
 
     static CalibracaoPrePostGenerator calibStub(final java.util.function.Supplier<ReportArtifact> behavior) {
-        return new CalibracaoPrePostGenerator(null, null, null, null, null, null) {
+        return new CalibracaoPrePostGenerator(null, null, null, null, null, null, null) {
             @Override
             public ReportArtifact generate(ReportFilters filters, GenerationContext ctx) {
                 return behavior.get();

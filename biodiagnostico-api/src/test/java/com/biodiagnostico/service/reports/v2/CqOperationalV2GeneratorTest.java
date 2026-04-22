@@ -95,7 +95,8 @@ class CqOperationalV2GeneratorTest {
             new LabHeaderRenderer(),
             labSettingsService,
             new DefaultPeriodComparator(),
-            stubAi
+            stubAi,
+            new com.biodiagnostico.config.ReportsV2Properties()
         );
     }
 

@@ -54,6 +54,7 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
     private final LabHeaderRenderer headerRenderer;
     private final LabSettingsService labSettingsService;
     private final ReportAiCommentator aiCommentator;
+    private final com.biodiagnostico.config.ReportsV2Properties properties;
 
     public CalibracaoPrePostGenerator(
         PostCalibrationRecordRepository repository,
@@ -61,7 +62,8 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
         ChartRenderer chartRenderer,
         LabHeaderRenderer headerRenderer,
         LabSettingsService labSettingsService,
-        ReportAiCommentator aiCommentator
+        ReportAiCommentator aiCommentator,
+        com.biodiagnostico.config.ReportsV2Properties properties
     ) {
         this.repository = repository;
         this.reportNumberingService = reportNumberingService;
@@ -69,6 +71,20 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
         this.headerRenderer = headerRenderer;
         this.labSettingsService = labSettingsService;
         this.aiCommentator = aiCommentator;
+        this.properties = properties;
+    }
+
+    /**
+     * Classifica o efeito de uma calibracao segundo a tolerancia configurada em
+     * {@code reports.v2.calibration-effective-delta-tolerance} (default 0.5 pp).
+     * Variacoes dentro da faixa de ruido viram "SEM EFEITO" em vez de
+     * classificacoes espurias.
+     */
+    private String classifyCalibrationDelta(double delta) {
+        double tol = properties == null ? 0.5 : properties.getCalibrationEffectiveDeltaTolerance();
+        if (delta <= -tol) return "EFICAZ";
+        if (delta >= tol) return "PIOROU";
+        return "SEM EFEITO";
     }
 
     @Override
@@ -118,9 +134,12 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
 
             List<PostCalibrationRecord> records = repository.findByQcRecordAreaAndDateRange(
                 rf.area == null ? "bioquimica" : rf.area, rf.start, rf.end);
-            long eficazes = records.stream().filter(r ->
-                r.getOriginalCv() != null && r.getPostCalibrationCv() != null
-                && r.getPostCalibrationCv() < r.getOriginalCv()).count();
+            // Tolerancia configuravel (default 0.5pp) para classificar efeito.
+            long eficazes = records.stream().filter(r -> {
+                if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
+                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                return "EFICAZ".equals(classifyCalibrationDelta(delta));
+            }).count();
             long semEfeito = records.size() - eficazes;
 
             doc.add(ReportV2PdfTheme.section("Resumo"));
@@ -141,7 +160,7 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                     double oCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
                     double pCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
                     double delta = pCv - oCv;
-                    String st = delta < 0 ? "EFICAZ" : (delta == 0 ? "SEM EFEITO" : "PIOROU");
+                    String st = classifyCalibrationDelta(delta);
                     ReportV2PdfTheme.bodyRow(t, alt,
                         ReportV2PdfTheme.safe(r.getExamName()),
                         ReportV2PdfTheme.formatDecimal(oCv),
