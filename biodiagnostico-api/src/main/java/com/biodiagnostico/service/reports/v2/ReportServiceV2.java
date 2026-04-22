@@ -7,6 +7,7 @@ import com.biodiagnostico.dto.reports.v2.PreviewReportV2Request;
 import com.biodiagnostico.dto.reports.v2.PreviewResponse;
 import com.biodiagnostico.dto.reports.v2.ReportDefinitionResponse;
 import com.biodiagnostico.dto.reports.v2.ReportExecutionResponse;
+import com.biodiagnostico.dto.reports.v2.SetReportLabelsRequest;
 import com.biodiagnostico.dto.reports.v2.SignReportV2Request;
 import com.biodiagnostico.dto.reports.v2.VerifyReportResponse;
 import com.biodiagnostico.entity.LabSettings;
@@ -15,6 +16,7 @@ import com.biodiagnostico.entity.ReportSignatureLog;
 import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.entity.User;
 import com.biodiagnostico.exception.ResourceNotFoundException;
+import com.biodiagnostico.repository.MaintenanceRecordRepository;
 import com.biodiagnostico.repository.ReportRunRepository;
 import com.biodiagnostico.repository.ReportSignatureLogRepository;
 import com.biodiagnostico.repository.UserRepository;
@@ -77,6 +79,7 @@ public class ReportServiceV2 {
     private final UserRepository userRepository;
     private final LabSettingsService labSettingsService;
     private final ReportsV2Properties properties;
+    private final MaintenanceRecordRepository suggestionRepository;
 
     public ReportServiceV2(
         ReportDefinitionRegistry definitionRegistry,
@@ -89,7 +92,8 @@ public class ReportServiceV2 {
         ReportSignatureLogRepository signatureLogRepository,
         UserRepository userRepository,
         LabSettingsService labSettingsService,
-        ReportsV2Properties properties
+        ReportsV2Properties properties,
+        MaintenanceRecordRepository suggestionRepository
     ) {
         this.definitionRegistry = definitionRegistry;
         this.generatorRegistry = generatorRegistry;
@@ -102,6 +106,7 @@ public class ReportServiceV2 {
         this.userRepository = userRepository;
         this.labSettingsService = labSettingsService;
         this.properties = properties;
+        this.suggestionRepository = suggestionRepository;
     }
 
     // ---------- Catalogo ----------
@@ -140,7 +145,7 @@ public class ReportServiceV2 {
         }
 
         Map<String, Object> rawFilters = request.filters() == null ? Map.of() : request.filters();
-        filterValidator.validate(definition.filterSpec(), rawFilters);
+        filterValidator.validate(definition.filterSpec(), rawFilters, request.code());
 
         ReportGenerator generator = generatorRegistry.resolve(request.code());
         GenerationContext ctx = buildContext(auth);
@@ -192,7 +197,7 @@ public class ReportServiceV2 {
         }
 
         Map<String, Object> rawFilters = request.filters() == null ? Map.of() : request.filters();
-        filterValidator.validate(definition.filterSpec(), rawFilters);
+        filterValidator.validate(definition.filterSpec(), rawFilters, request.code());
         ReportGenerator generator = generatorRegistry.resolve(request.code());
         GenerationContext ctx = buildContext(auth);
         ReportPreview preview = generator.preview(new ReportFilters(rawFilters), ctx);
@@ -378,6 +383,70 @@ public class ReportServiceV2 {
         return new VerifyReportResponse(
             null, null, null, null, null, null, null, null, null, false, false
         );
+    }
+
+    // ---------- Fluxo E: /labels ----------
+
+    /**
+     * Aplica adicoes e remocoes de rotulos a uma execucao V2. Idempotente:
+     * adicionar um rotulo ja presente ou remover um ausente nao gera erro.
+     *
+     * @throws InvalidFilterException quando algum valor nao pertence ao enum {@link ReportLabel}
+     */
+    @Transactional
+    public ReportExecutionResponse setLabels(UUID executionId, SetReportLabelsRequest request, Authentication auth) {
+        Set<String> roles = extractRoles(auth);
+        if (!roles.contains("ADMIN") && !roles.contains("VIGILANCIA_SANITARIA")) {
+            throw new AccessDeniedException("Apenas ADMIN/VIGILANCIA_SANITARIA podem aplicar rotulos");
+        }
+        ReportRun run = reportRunRepository.findById(executionId)
+            .orElseThrow(() -> new ResourceNotFoundException("Execucao V2 nao encontrada: " + executionId));
+
+        List<String> adds = request == null ? List.of() : request.add();
+        List<String> removes = request == null ? List.of() : request.remove();
+
+        List<String> violations = new java.util.ArrayList<>();
+        java.util.Set<String> addValues = new java.util.TreeSet<>();
+        for (String label : adds) {
+            java.util.Optional<ReportLabel> parsed = ReportLabel.parse(label);
+            if (parsed.isEmpty()) {
+                violations.add("Rotulo invalido em 'add': " + label + " (aceitos: " + ReportLabel.allValues() + ")");
+            } else {
+                addValues.add(parsed.get().value());
+            }
+        }
+        java.util.Set<String> removeValues = new java.util.TreeSet<>();
+        for (String label : removes) {
+            java.util.Optional<ReportLabel> parsed = ReportLabel.parse(label);
+            if (parsed.isEmpty()) {
+                violations.add("Rotulo invalido em 'remove': " + label + " (aceitos: " + ReportLabel.allValues() + ")");
+            } else {
+                removeValues.add(parsed.get().value());
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new InvalidFilterException(violations);
+        }
+
+        java.util.Set<String> current = new java.util.TreeSet<>(com.biodiagnostico.util.ReportV2Mapper.parseLabels(run.getLabels()));
+        current.addAll(addValues);
+        current.removeAll(removeValues);
+
+        String serialized = com.biodiagnostico.util.ReportV2Mapper.serializeLabels(new java.util.ArrayList<>(current));
+        run.setLabels(serialized);
+        ReportRun saved = reportRunRepository.save(run);
+        return com.biodiagnostico.util.ReportV2Mapper.toResponse(saved, properties.getPublicBaseUrl());
+    }
+
+    /**
+     * Retorna valores distintos de {@code maintenance_records.equipment}.
+     * Usado pelo endpoint de autocomplete {@code /suggestions/equipment}.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<String> suggestEquipments() {
+        return suggestionRepository == null
+            ? java.util.List.of()
+            : suggestionRepository.findDistinctEquipments();
     }
 
     // ---------- Listagem e download ----------

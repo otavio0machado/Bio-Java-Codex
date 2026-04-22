@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterField;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterFieldType;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterSpec;
@@ -159,6 +160,55 @@ class FilterValidatorTest {
             "area", "hematologia",
             "examIds", List.of()
         ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("STRING_ENUM_MULTI aceita valores da allowedValues")
+    void stringEnumMultiAcceptsValid() {
+        ReportFilterSpec spec = new ReportFilterSpec(List.of(
+            new ReportFilterField("rules", ReportFilterFieldType.STRING_ENUM_MULTI, false,
+                List.of("1-2s", "1-3s", "R-4s"), "Regras", null)
+        ));
+        assertThatCode(() -> validator.validate(spec, Map.of(
+            "rules", List.of("1-2s", "R-4s")
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("STRING_ENUM_MULTI rejeita valor fora do allowedValues")
+    void stringEnumMultiRejectsInvalid() {
+        ReportFilterSpec spec = new ReportFilterSpec(List.of(
+            new ReportFilterField("rules", ReportFilterFieldType.STRING_ENUM_MULTI, false,
+                List.of("1-2s", "1-3s"), "Regras", null)
+        ));
+        assertThatThrownBy(() -> validator.validate(spec, Map.of(
+            "rules", List.of("BOGUS")
+        ))).isInstanceOf(InvalidFilterException.class).hasMessageContaining("BOGUS");
+    }
+
+    @Test
+    @DisplayName("STRING aceita string nao-vazia")
+    void stringAcceptsNonBlank() {
+        ReportFilterSpec spec = new ReportFilterSpec(List.of(
+            new ReportFilterField("equipment", ReportFilterFieldType.STRING, false, null, "Equip", null)
+        ));
+        assertThatCode(() -> validator.validate(spec, Map.of(
+            "equipment", "Vitros"
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("REGULATORIO_PACOTE rejeita includeAiCommentary=true")
+    void regulatorioPacoteBlocksAi() {
+        ReportFilterSpec spec = new ReportFilterSpec(List.of(
+            new ReportFilterField("periodType", ReportFilterFieldType.STRING_ENUM, true,
+                List.of("current-month"), "Periodo", null)
+        ));
+        assertThatThrownBy(() -> validator.validate(spec,
+            Map.of("periodType", "current-month", "includeAiCommentary", true),
+            ReportCode.REGULATORIO_PACOTE))
+            .isInstanceOf(InvalidFilterException.class)
+            .hasMessageContaining("REGULATORIO_PACOTE");
     }
 
     @Test

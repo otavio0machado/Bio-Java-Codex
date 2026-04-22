@@ -41,9 +41,12 @@ class ReportDefinitionRegistryTest {
     @Test
     @DisplayName("forUserRoles filtra por intersecao com roleAccess")
     void forUserRolesFiltersIntersection() {
-        assertThat(registry.forUserRoles(Set.of("ADMIN"))).hasSize(1);
+        // Com 7 ReportCodes apos expansao Fase 1; ADMIN tem acesso a todos
+        assertThat(registry.forUserRoles(Set.of("ADMIN"))).hasSize(7);
         assertThat(registry.forUserRoles(Set.of("VISUALIZADOR"))).isEmpty();
         assertThat(registry.forUserRoles(Set.of())).isEmpty();
+        // FUNCIONARIO tem acesso aos 5 de uso corrente (nao tem MULTI_AREA nem REGULATORIO)
+        assertThat(registry.forUserRoles(Set.of("FUNCIONARIO"))).hasSize(5);
     }
 
     @Test

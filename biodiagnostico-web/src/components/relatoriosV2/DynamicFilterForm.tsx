@@ -3,7 +3,8 @@ import type {
   ReportFilterField,
   ReportFilterSpec,
 } from '../../types/reportsV2'
-import { Input, Select, TextArea } from '../ui'
+import { Combobox, Input, Select, TextArea } from '../ui'
+import { useEquipmentSuggestions } from '../../hooks/useReportsV2'
 
 interface DynamicFilterFormProps {
   filterSpec: ReportFilterSpec
@@ -195,6 +196,70 @@ function FilterFieldRenderer({ field, value, onChange, error }: FilterFieldRende
         </div>
       )
 
+    case 'STRING_ENUM_MULTI': {
+      const options = field.allowedValues ?? []
+      const selected = Array.isArray(value) ? (value as string[]) : []
+      const toggle = (opt: string) => {
+        const next = selected.includes(opt)
+          ? selected.filter((v) => v !== opt)
+          : [...selected, opt]
+        onChange(next.length > 0 ? next : undefined)
+      }
+      return (
+        <div className="space-y-1">
+          <div className="text-base font-medium text-neutral-700">{labelText}</div>
+          <div className="flex flex-wrap gap-2">
+            {options.map((opt) => {
+              const isActive = selected.includes(opt)
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => toggle(opt)}
+                  className={
+                    'rounded-full border px-3 py-1.5 text-sm font-medium transition ' +
+                    (isActive
+                      ? 'border-green-800 bg-green-800 text-white'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:border-neutral-300')
+                  }
+                  aria-pressed={isActive}
+                >
+                  {opt}
+                </button>
+              )
+            })}
+          </div>
+          {helpText ? <p className="text-xs text-neutral-500">{helpText}</p> : null}
+          {error ? <p className="text-sm text-red-500">{error}</p> : null}
+        </div>
+      )
+    }
+
+    case 'STRING':
+      if (field.key === 'equipment') {
+        return (
+          <EquipmentField
+            field={field}
+            value={value}
+            onChange={onChange}
+            error={error}
+            labelText={labelText}
+            helpText={helpText}
+          />
+        )
+      }
+      return (
+        <div className="space-y-1">
+          <Input
+            label={labelText}
+            value={typeof value === 'string' ? value : ''}
+            onChange={(event) => onChange(event.target.value || undefined)}
+            error={error}
+          />
+          {helpText ? <p className="text-xs text-neutral-500">{helpText}</p> : null}
+        </div>
+      )
+
     default:
       // Exaustividade defensiva - tipo desconhecido vira input text.
       return (
@@ -296,6 +361,34 @@ function UuidListField({ value, onChange, error, labelText, helpText }: UuidList
         error={error}
       />
       {helpText ? <p className="text-xs text-neutral-500">{helpText}</p> : null}
+    </div>
+  )
+}
+
+interface EquipmentFieldProps {
+  field: ReportFilterField
+  value: unknown
+  onChange: (value: unknown) => void
+  error?: string
+  labelText: string
+  helpText?: string
+}
+
+function EquipmentField({ value, onChange, error, labelText, helpText }: EquipmentFieldProps) {
+  const { data: suggestions = [] } = useEquipmentSuggestions()
+  const options = suggestions.map((item) => ({ value: item, label: item }))
+  return (
+    <div className="space-y-1">
+      <Combobox
+        label={labelText}
+        value={typeof value === 'string' ? value : ''}
+        onChange={(next) => onChange(next || undefined)}
+        options={options}
+        allowCustom
+        placeholder="Ex: Vitros, Cobas..."
+      />
+      {helpText ? <p className="text-xs text-neutral-500">{helpText}</p> : null}
+      {error ? <p className="text-sm text-red-500">{error}</p> : null}
     </div>
   )
 }

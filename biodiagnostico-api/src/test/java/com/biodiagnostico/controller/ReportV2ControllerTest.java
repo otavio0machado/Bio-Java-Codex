@@ -113,7 +113,8 @@ class ReportV2ControllerTest {
             Instant.now(), null, Instant.now().plusSeconds(3600),
             "/api/reports/v2/executions/xxx/download",
             "http://localhost:5173/r/verify/abc",
-            "Abril/2026"
+            "Abril/2026",
+            List.of()
         );
         service.nextGenerateResponse = response;
         mockMvc.perform(post("/api/reports/v2/generate")
@@ -217,7 +218,7 @@ class ReportV2ControllerTest {
         AtomicInteger verifyCalls = new AtomicInteger();
 
         StubReportServiceV2() {
-            super(null, null, null, null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         void reset() {

@@ -9,6 +9,7 @@ import {
   Link as LinkIcon,
   RefreshCw,
   ShieldCheck,
+  Tag,
   X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -23,6 +24,8 @@ import type {
 } from '../../types/reportsV2'
 import { Button, Card, EmptyState, Input, Select, Skeleton, useToast } from '../ui'
 import { SignReportModal } from './SignReportModal'
+import { LabelsManagerModal } from './LabelsManagerModal'
+import { REPORT_LABELS } from './reportLabels'
 
 interface ExecutionsTableProps {
   definitions: ReportDefinition[]
@@ -45,6 +48,7 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
   const [filter, setFilter] = useState<ExecutionsFilter>({ page: 0, size: PAGE_SIZE })
   const [selected, setSelected] = useState<ReportExecutionResponse | null>(null)
   const [signTarget, setSignTarget] = useState<ReportExecutionResponse | null>(null)
+  const [labelsTarget, setLabelsTarget] = useState<ReportExecutionResponse | null>(null)
 
   const query = useReportExecutions(filter)
   const page = query.data
@@ -190,8 +194,9 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
                   <th className="px-3 py-2.5">Gerado por</th>
                   <th className="px-3 py-2.5">Data</th>
                   <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5">Etiquetas</th>
                   <th className="px-3 py-2.5">Tamanho</th>
-                  <th className="px-3 py-2.5">Acoes</th>
+                  <th className="px-3 py-2.5">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,6 +221,7 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
                       })}
                     </td>
                     <td className="px-3 py-2">{renderStatus(execution)}</td>
+                    <td className="px-3 py-2">{renderLabels(execution.labels)}</td>
                     <td className="px-3 py-2 font-mono text-neutral-600">
                       {formatBytes(execution.sizeBytes)}
                     </td>
@@ -253,6 +259,17 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
                         >
                           {''}
                         </Button>
+                        {canSign ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setLabelsTarget(execution)}
+                            icon={<Tag className="h-3.5 w-3.5" />}
+                            aria-label="Etiquetas"
+                          >
+                            {''}
+                          </Button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -307,6 +324,38 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
           }}
         />
       ) : null}
+      {labelsTarget ? (
+        <LabelsManagerModal
+          execution={labelsTarget}
+          onClose={() => setLabelsTarget(null)}
+          onChange={() => {
+            setLabelsTarget(null)
+            void query.refetch()
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function renderLabels(labels: string[] | null | undefined) {
+  const list = labels ?? []
+  if (list.length === 0) return <span className="text-xs text-neutral-400">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {list.map((code) => {
+        const meta = REPORT_LABELS.find((l) => l.code === code)
+        const label = meta?.label ?? code
+        const color = meta?.color ?? 'bg-neutral-100 text-neutral-600'
+        return (
+          <span
+            key={code}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${color}`}
+          >
+            {label}
+          </span>
+        )
+      })}
     </div>
   )
 }

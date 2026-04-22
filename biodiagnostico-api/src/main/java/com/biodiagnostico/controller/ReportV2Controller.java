@@ -6,6 +6,7 @@ import com.biodiagnostico.dto.reports.v2.PreviewReportV2Request;
 import com.biodiagnostico.dto.reports.v2.PreviewResponse;
 import com.biodiagnostico.dto.reports.v2.ReportDefinitionResponse;
 import com.biodiagnostico.dto.reports.v2.ReportExecutionResponse;
+import com.biodiagnostico.dto.reports.v2.SetReportLabelsRequest;
 import com.biodiagnostico.dto.reports.v2.SignReportV2Request;
 import com.biodiagnostico.dto.reports.v2.VerifyReportResponse;
 import com.biodiagnostico.service.reports.v2.InMemoryRateLimiter;
@@ -16,6 +17,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.Page;
@@ -183,6 +185,31 @@ public class ReportV2Controller {
     public ResponseEntity<Void> cancel(@PathVariable UUID id) {
         // Placeholder para cancelamento/soft-delete. Por seguranca, 501 ate slice dedicado.
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+    }
+
+    // ---------- Labels ----------
+
+    @PostMapping("/executions/{id}/labels")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA')")
+    public ResponseEntity<ReportExecutionResponse> setLabels(
+        @PathVariable UUID id,
+        @Valid @RequestBody SetReportLabelsRequest request,
+        Authentication auth
+    ) {
+        return ResponseEntity.ok(service.setLabels(id, request, auth));
+    }
+
+    // ---------- Suggestions ----------
+
+    /**
+     * Autocomplete para o filtro {@code equipment}. Alimentado por
+     * {@code SELECT DISTINCT equipment FROM maintenance_records}. Cache de 5 min.
+     */
+    @GetMapping("/suggestions/equipment")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
+    @org.springframework.cache.annotation.Cacheable(cacheNames = "reportsV2.suggestions.equipment")
+    public ResponseEntity<Map<String, List<String>>> suggestEquipments() {
+        return ResponseEntity.ok(Map.of("items", service.suggestEquipments()));
     }
 
     // ---------- Helpers ----------

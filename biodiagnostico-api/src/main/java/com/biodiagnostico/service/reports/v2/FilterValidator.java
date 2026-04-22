@@ -1,5 +1,6 @@
 package com.biodiagnostico.service.reports.v2;
 
+import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterField;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterFieldType;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterSpec;
@@ -28,7 +29,19 @@ public class FilterValidator {
 
     private static final Logger LOG = LoggerFactory.getLogger(FilterValidator.class);
 
+    /**
+     * Overload sem contexto. Nao aplica guards que dependem do codigo do
+     * relatorio (como o bloqueio de includeAiCommentary em REGULATORIO_PACOTE).
+     */
     public void validate(ReportFilterSpec spec, Map<String, Object> rawValues) {
+        validate(spec, rawValues, null);
+    }
+
+    /**
+     * Valida com contexto do {@link ReportCode}, habilitando guards cross-field
+     * especificos (ex: REGULATORIO_PACOTE nao aceita includeAiCommentary=true).
+     */
+    public void validate(ReportFilterSpec spec, Map<String, Object> rawValues, ReportCode reportCode) {
         if (spec == null) {
             throw new IllegalArgumentException("ReportFilterSpec obrigatorio");
         }
@@ -53,14 +66,26 @@ public class FilterValidator {
 
         for (String key : values.keySet()) {
             if (!declaredKeys.contains(key)) {
-                LOG.debug("Filtro '{}' nao declarado na spec — ignorado", key);
+                LOG.debug("Filtro '{}' nao declarado na spec - ignorado", key);
             }
         }
 
-        // Cross-field rules (Ressalva 4): examIds so e suportado em area=bioquimica.
-        // Outros geradores (hematologia, generic area) ignoram silenciosamente —
-        // entao bloqueamos upstream para nao gerar laudo enganoso.
+        // Cross-field: examIds so em area=bioquimica (Ressalva 4 do F1)
         validateExamIdsOnlyForBioquimica(values, declaredKeys, violations);
+
+        // Cross-field: REGULATORIO_PACOTE nao aceita comentario IA
+        if (reportCode == ReportCode.REGULATORIO_PACOTE) {
+            Object aiRaw = values.get("includeAiCommentary");
+            if (aiRaw != null) {
+                boolean aiTrue = aiRaw instanceof Boolean b ? b
+                    : (aiRaw instanceof String s && Boolean.parseBoolean(s.trim()));
+                if (aiTrue) {
+                    violations.add(
+                        "Filtro 'includeAiCommentary' nao e suportado para REGULATORIO_PACOTE "
+                        + "(o pacote nao inclui analise IA; cada subordinado decide individualmente)");
+                }
+            }
+        }
 
         if (!violations.isEmpty()) {
             throw new InvalidFilterException(violations);
@@ -69,9 +94,7 @@ public class FilterValidator {
 
     /**
      * {@code examIds} e um filtro declarado na spec de CQ_OPERATIONAL_V2 mas hoje
-     * apenas o generator de bioquimica respeita. Para evitar que o usuario peca
-     * filtro em hematologia/imunologia/outros e receba um laudo sem filtrar
-     * (comportamento confuso), bloqueamos upstream com 422.
+     * apenas o generator de bioquimica respeita.
      */
     private void validateExamIdsOnlyForBioquimica(
         Map<String, Object> values, Set<String> declaredKeys, List<String> violations
@@ -100,6 +123,30 @@ public class FilterValidator {
                 if (!field.allowedValues().isEmpty() && !field.allowedValues().contains(asString)) {
                     violations.add("Filtro '" + field.key() + "' deve ser um de " + field.allowedValues()
                         + " (recebido: " + asString + ")");
+                }
+            }
+            case STRING_ENUM_MULTI -> {
+                if (!(rawValue instanceof List<?> list)) {
+                    violations.add("Filtro '" + field.key() + "' deve ser uma lista");
+                    return;
+                }
+                if (list.isEmpty() && field.required()) {
+                    violations.add("Filtro '" + field.key() + "' nao pode ser lista vazia");
+                    return;
+                }
+                for (Object item : list) {
+                    String str = item == null ? "null" : item.toString();
+                    if (!field.allowedValues().isEmpty() && !field.allowedValues().contains(str)) {
+                        violations.add("Filtro '" + field.key() + "' contem valor invalido '" + str
+                            + "' (aceitos: " + field.allowedValues() + ")");
+                        break;
+                    }
+                }
+            }
+            case STRING -> {
+                String asString = rawValue.toString();
+                if (asString.isBlank() && field.required()) {
+                    violations.add("Filtro '" + field.key() + "' nao pode ser vazio");
                 }
             }
             case INTEGER -> {

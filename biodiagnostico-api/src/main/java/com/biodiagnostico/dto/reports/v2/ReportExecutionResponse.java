@@ -1,6 +1,7 @@
 package com.biodiagnostico.dto.reports.v2;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -9,13 +10,16 @@ import java.util.UUID;
  *
  * <p>Campos relacionados a assinatura:
  * <ul>
- *   <li>{@code sha256} — hash do PDF original (sempre presente em SUCCESS)</li>
- *   <li>{@code signatureHash} — hash da versao assinada (null ate /sign)</li>
- *   <li>{@code signedSha256} — alias de {@code signatureHash}, mantido para
+ *   <li>{@code sha256} - hash do PDF original (sempre presente em SUCCESS)</li>
+ *   <li>{@code signatureHash} - hash da versao assinada (null ate /sign)</li>
+ *   <li>{@code signedSha256} - alias de {@code signatureHash}, mantido para
  *     clientes novos que queiram discriminar contra {@code sha256} sem ambiguidade.
  *     O conteudo e identico ao de {@code signatureHash}; ambos sao expostos por
  *     clareza de contrato.</li>
  * </ul>
+ *
+ * <p>Campo {@code labels} lista rotulos associados (ex: "oficial_mensal",
+ * "entregue_vigilancia"). Sempre nao-nula; vazia quando nao aplicados.
  */
 public record ReportExecutionResponse(
     UUID id,
@@ -34,5 +38,10 @@ public record ReportExecutionResponse(
     Instant expiresAt,
     String downloadUrl,
     String verifyUrl,
-    String periodLabel
-) {}
+    String periodLabel,
+    List<String> labels
+) {
+    public ReportExecutionResponse {
+        if (labels == null) labels = List.of();
+    }
+}

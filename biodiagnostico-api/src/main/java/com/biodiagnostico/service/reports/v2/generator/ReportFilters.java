@@ -93,4 +93,31 @@ public record ReportFilters(Map<String, Object> values) {
         if (raw instanceof String s) return Optional.of(Boolean.parseBoolean(s.trim()));
         throw new IllegalArgumentException("Filtro " + key + " nao e booleano");
     }
+
+    /**
+     * Retorna lista de strings (usado por filtros STRING_ENUM_MULTI).
+     * Aceita tanto um {@code List<?>} quanto uma string CSV.
+     */
+    public Optional<List<String>> getStringList(String key) {
+        Object raw = values.get(key);
+        if (raw == null) return Optional.empty();
+        if (raw instanceof List<?> list) {
+            List<String> converted = new ArrayList<>(list.size());
+            for (Object item : list) {
+                if (item == null) continue;
+                converted.add(item.toString());
+            }
+            return Optional.of(List.copyOf(converted));
+        }
+        if (raw instanceof String s) {
+            if (s.isBlank()) return Optional.of(List.of());
+            List<String> parts = new ArrayList<>();
+            for (String part : s.split(",")) {
+                String trimmed = part.trim();
+                if (!trimmed.isEmpty()) parts.add(trimmed);
+            }
+            return Optional.of(List.copyOf(parts));
+        }
+        throw new IllegalArgumentException("Filtro " + key + " deve ser uma lista de strings");
+    }
 }

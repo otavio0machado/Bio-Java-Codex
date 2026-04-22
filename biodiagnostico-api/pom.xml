@@ -100,6 +100,23 @@
             <version>1.3.39</version>
         </dependency>
 
+        <!-- JFreeChart: rasterizacao de graficos (Levey-Jennings, barras, heatmap) para Reports V2 -->
+        <dependency>
+            <groupId>org.jfree</groupId>
+            <artifactId>jfreechart</artifactId>
+            <version>1.5.5</version>
+        </dependency>
+
+        <!-- Spring cache + Caffeine para TTL curto em endpoints de sugestao (Reports V2) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <!-- ZXing: geracao de QR code para assinatura eletronica dos relatorios V2 -->
         <dependency>
             <groupId>com.google.zxing</groupId>

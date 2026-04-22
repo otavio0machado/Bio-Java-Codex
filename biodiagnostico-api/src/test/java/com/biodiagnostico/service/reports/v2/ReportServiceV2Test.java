@@ -93,7 +93,8 @@ class ReportServiceV2Test {
         properties.setPublicBaseUrl("http://localhost:5173");
         service = new ReportServiceV2(
             definitionRegistry, generatorRegistry, validator, storage, signer,
-            runService, runRepository, signatureLogRepository, userRepository, labSettingsService, properties
+            runService, runRepository, signatureLogRepository, userRepository, labSettingsService, properties,
+            null
         );
         lenient().when(userRepository.findByUsername(any())).thenReturn(Optional.empty());
         lenient().when(runRepository.save(any(ReportRun.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -107,7 +108,8 @@ class ReportServiceV2Test {
     @Test
     @DisplayName("listCatalog filtra por roles")
     void listCatalogFilters() {
-        assertThat(service.listCatalog(authWithRole("ADMIN"))).hasSize(1);
+        // Apos expansao Fase 1, ADMIN enxerga 7 tipos
+        assertThat(service.listCatalog(authWithRole("ADMIN"))).hasSize(7);
         assertThat(service.listCatalog(authWithRole("VISUALIZADOR"))).isEmpty();
     }
 

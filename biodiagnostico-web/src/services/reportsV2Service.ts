@@ -10,6 +10,7 @@ import type {
   ReportDefinition,
   ReportDefinitionRawResponse,
   ReportExecutionResponse,
+  SetReportLabelsRequest,
   SignReportRequest,
   VerifyReportResponse,
 } from '../types/reportsV2'
@@ -24,12 +25,20 @@ function normalizeDefinition(raw: ReportDefinitionRawResponse): ReportDefinition
     code: raw.code,
     name: raw.name,
     description: raw.description,
+    // subtitle/icon sao opcionais no contrato atual - se o backend estiver
+    // numa versao anterior ao Reports V2 expandido, caem para string vazia
+    // e o catalogo usa defaults ao renderizar.
+    subtitle: raw.subtitle ?? '',
+    icon: raw.icon ?? '',
     category: raw.category,
     supportedFormats: raw.supportedFormats as ReportDefinition['supportedFormats'],
     filterSpec: { fields: raw.filters ?? [] },
     roleAccess: raw.roleAccess ?? [],
     signatureRequired: raw.signatureRequired,
     previewSupported: raw.previewSupported,
+    // aiCommentaryCapable pode faltar em backends antigos; assumimos false
+    // para nao expor um toggle que o backend nao respeita.
+    aiCommentaryCapable: raw.aiCommentaryCapable ?? false,
     retentionDays: raw.retentionDays,
     legalBasis: raw.legalBasis,
   }
@@ -128,6 +137,32 @@ export const reportsV2Service = {
   async getExecution(id: string): Promise<ReportExecutionResponse> {
     const { data } = await api.get<ReportExecutionResponse>(`/reports/v2/executions/${id}`)
     return data
+  },
+
+  /**
+   * Aplica rotulos (add) e/ou remove (remove) em uma execucao V2. Backend
+   * aplica adicoes antes das remocoes e devolve a execucao atualizada.
+   */
+  async setLabels(id: string, req: SetReportLabelsRequest): Promise<ReportExecutionResponse> {
+    const payload: SetReportLabelsRequest = {
+      add: req.add ?? [],
+      remove: req.remove ?? [],
+    }
+    const { data } = await api.post<ReportExecutionResponse>(
+      `/reports/v2/executions/${id}/labels`,
+      payload,
+    )
+    return data
+  },
+
+  /**
+   * Sugestoes de autocomplete para o filtro {@code equipment}. O backend
+   * envolve a lista em {@code { items: string[] }} e faz cache de 5 min
+   * (que replicamos na camada de hooks).
+   */
+  async equipmentSuggestions(): Promise<string[]> {
+    const { data } = await api.get<{ items: string[] }>('/reports/v2/suggestions/equipment')
+    return data?.items ?? []
   },
 
   /**

@@ -4,5 +4,9 @@ public enum ReportCategory {
     CONTROLE_QUALIDADE,
     REAGENTES,
     MANUTENCAO,
-    HEMATOLOGIA
+    HEMATOLOGIA,
+    WESTGARD,
+    CALIBRACAO,
+    CONSOLIDADO,
+    REGULATORIO
 }

@@ -7,6 +7,16 @@ export interface LabSettings {
   address: string
   phone: string
   email: string
+  // Campos institucionais V10 (regulatório — aparecem na capa dos relatórios V2)
+  cnpj?: string | null
+  cnes?: string | null
+  registrationBody?: string | null
+  responsibleCpf?: string | null
+  technicalDirectorName?: string | null
+  technicalDirectorCpf?: string | null
+  technicalDirectorReg?: string | null
+  website?: string | null
+  sanitaryLicense?: string | null
 }
 
 export interface LabReportEmail {

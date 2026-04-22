@@ -79,15 +79,16 @@ export function ReportBuilder() {
   const handleGenerate = async () => {
     if (!reportCode) return
     setGenerateError(null)
+    const effectiveSign = definition?.signatureRequired ? true : signImmediately
     try {
       const execution = await generateMutation.mutateAsync({
         code: reportCode,
         filters,
         format,
-        signImmediately,
+        signImmediately: effectiveSign,
       })
 
-      if (signImmediately && execution.status !== 'SIGNED') {
+      if (effectiveSign && execution.status !== 'SIGNED') {
         try {
           const signed = await signMutation.mutateAsync({ id: execution.id })
           setLastExecution(signed)
@@ -192,17 +193,28 @@ export function ReportBuilder() {
               ))}
             </Select>
           ) : null}
-          {definition.signatureRequired ? (
-            <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700">
-              <input
-                type="checkbox"
-                checked={signImmediately}
-                onChange={(event) => setSignImmediately(event.target.checked)}
-                className="h-4 w-4 rounded border-neutral-300 text-green-800 focus:ring-green-800"
-              />
-              Assinar imediatamente
-            </label>
-          ) : null}
+          <label
+            className={
+              'flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm transition ' +
+              (definition.signatureRequired
+                ? 'border-purple-300 text-purple-800'
+                : 'border-neutral-200 text-neutral-700')
+            }
+            title={
+              definition.signatureRequired
+                ? 'Este relatório exige assinatura obrigatória pelo responsável técnico.'
+                : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              checked={definition.signatureRequired ? true : signImmediately}
+              disabled={definition.signatureRequired}
+              onChange={(event) => setSignImmediately(event.target.checked)}
+              className="h-4 w-4 rounded border-neutral-300 text-green-800 focus:ring-green-800 disabled:opacity-60"
+            />
+            {definition.signatureRequired ? 'Assinatura obrigatória' : 'Assinar imediatamente'}
+          </label>
           <Button
             onClick={() => void handleGenerate()}
             loading={generateMutation.isPending || signMutation.isPending}

@@ -6,12 +6,16 @@ import com.biodiagnostico.entity.HematologyQcMeasurement;
 import com.biodiagnostico.entity.LabSettings;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
 import com.biodiagnostico.repository.HematologyBioRecordRepository;
 import com.biodiagnostico.repository.HematologyQcMeasurementRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
+import com.biodiagnostico.repository.WestgardViolationRepository;
+import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
+import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinitionRegistry;
 import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
@@ -19,15 +23,21 @@ import com.biodiagnostico.service.reports.v2.generator.ReportArtifact;
 import com.biodiagnostico.service.reports.v2.generator.ReportFilters;
 import com.biodiagnostico.service.reports.v2.generator.ReportGenerator;
 import com.biodiagnostico.service.reports.v2.generator.ReportPreview;
+import com.biodiagnostico.service.reports.v2.generator.ai.ReportAiCommentator;
+import com.biodiagnostico.service.reports.v2.generator.chart.ChartRenderer;
+import com.biodiagnostico.service.reports.v2.generator.comparison.ComparisonWindow;
+import com.biodiagnostico.service.reports.v2.generator.comparison.PeriodComparator;
+import com.biodiagnostico.service.reports.v2.generator.comparison.ResolvedPeriod;
+import com.biodiagnostico.service.reports.v2.generator.pdf.LabHeaderRenderer;
+import com.biodiagnostico.service.reports.v2.generator.pdf.PdfFooterRenderer;
+import com.biodiagnostico.service.reports.v2.generator.pdf.ReportV2PdfTheme;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
-import com.lowagie.text.Font;
-import com.lowagie.text.FontFactory;
+import com.lowagie.text.Image;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Phrase;
-import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
@@ -38,68 +48,79 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.DoubleSummaryStatistics;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Gerador operacional de CQ V2 (F1 slice). Substitui funcionalmente
- * {@code /api/reports/qc-pdf} quando chamado via {@code /api/reports/v2/generate}
- * com {@code code=CQ_OPERATIONAL_V2}.
+ * Gerador operacional de CQ V2 (evolucao Fase 2). Produz um laudo completo
+ * com capa institucional, resumo executivo, tabelas por exame, graficos
+ * Levey-Jennings embutidos, secao Westgard, pos-calibracao, comparativo
+ * vs periodo anterior e comentario IA.
  *
- * <p><strong>Reutilizacao V1:</strong> este gerador consulta os <em>mesmos
- * repositorios</em> que {@code PdfReportService} para que os dados sejam
- * identicos. O layout/logica de render e deliberadamente duplicado do V1
- * nesta primeira iteracao (menor risco — V1 permanece byte-a-byte intocado).
- * Domain-auditor vai validar equivalencia numerica e ok para consolidar em
- * um helper compartilhado em iteracao seguinte.
- *
- * <p>Numeracao ({@code BIO-AAAAMM-NNNNNN}) e hash SHA-256 seguem exatamente
- * a mesma lista de codigos que V1 — via {@link ReportNumberingService}.
+ * <p>V1 ({@code PdfReportService}) permanece intocado. Reutiliza os mesmos
+ * repositorios para garantir equivalencia numerica de dados.
  */
 @Component
 public class CqOperationalV2Generator implements ReportGenerator {
 
     private static final Logger LOG = LoggerFactory.getLogger(CqOperationalV2Generator.class);
-
-    private static final Locale PT_BR = Locale.forLanguageTag("pt-BR");
-    private static final Font TITLE_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18);
-    private static final Font SUBTITLE_FONT = FontFactory.getFont(FontFactory.HELVETICA, 11, new Color(90, 100, 110));
-    private static final Font HEADER_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Color.WHITE);
-    private static final Font BODY_FONT = FontFactory.getFont(FontFactory.HELVETICA, 8);
-    private static final Font SECTION_FONT = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12, new Color(20, 83, 45));
-    private static final Font META_FONT = FontFactory.getFont(FontFactory.HELVETICA, 9, new Color(70, 80, 90));
-    private static final Color HEADER_COLOR = new Color(22, 101, 52);
-    private static final Color ROW_ALT_COLOR = new Color(244, 247, 245);
-    private static final Color BORDER_COLOR = new Color(210, 214, 218);
+    private static final Locale PT_BR = ReportV2PdfTheme.PT_BR;
+    private static final int MAX_LJ_CHARTS = 6;
+    private static final int MAX_VIOLATIONS_ROWS = 50;
 
     private final QcRecordRepository qcRecordRepository;
     private final PostCalibrationRecordRepository postCalibrationRecordRepository;
     private final AreaQcMeasurementRepository areaQcMeasurementRepository;
     private final HematologyQcMeasurementRepository hematologyQcMeasurementRepository;
     private final HematologyBioRecordRepository hematologyBioRecordRepository;
+    private final WestgardViolationRepository westgardViolationRepository;
     private final ReportNumberingService reportNumberingService;
+    private final ChartRenderer chartRenderer;
+    private final LabHeaderRenderer headerRenderer;
+    private final LabSettingsService labSettingsService;
+    private final PeriodComparator periodComparator;
+    private final ReportAiCommentator aiCommentator;
 
+    @Autowired
     public CqOperationalV2Generator(
         QcRecordRepository qcRecordRepository,
         PostCalibrationRecordRepository postCalibrationRecordRepository,
         AreaQcMeasurementRepository areaQcMeasurementRepository,
         HematologyQcMeasurementRepository hematologyQcMeasurementRepository,
         HematologyBioRecordRepository hematologyBioRecordRepository,
-        ReportNumberingService reportNumberingService
+        WestgardViolationRepository westgardViolationRepository,
+        ReportNumberingService reportNumberingService,
+        ChartRenderer chartRenderer,
+        LabHeaderRenderer headerRenderer,
+        LabSettingsService labSettingsService,
+        PeriodComparator periodComparator,
+        ReportAiCommentator aiCommentator
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.postCalibrationRecordRepository = postCalibrationRecordRepository;
         this.areaQcMeasurementRepository = areaQcMeasurementRepository;
         this.hematologyQcMeasurementRepository = hematologyQcMeasurementRepository;
         this.hematologyBioRecordRepository = hematologyBioRecordRepository;
+        this.westgardViolationRepository = westgardViolationRepository;
         this.reportNumberingService = reportNumberingService;
+        this.chartRenderer = chartRenderer;
+        this.headerRenderer = headerRenderer;
+        this.labSettingsService = labSettingsService;
+        this.periodComparator = periodComparator;
+        this.aiCommentator = aiCommentator;
     }
 
     @Override
@@ -111,26 +132,17 @@ public class CqOperationalV2Generator implements ReportGenerator {
     @Transactional
     public ReportArtifact generate(ReportFilters filters, GenerationContext ctx) {
         ResolvedFilters rf = resolveFilters(filters);
-
-        byte[] pdfBytes = renderPdf(rf, ctx, /* reserveNumber */ true);
-        String reportNumber = rf.reservedNumber; // preenchido dentro de renderPdf
+        String reportNumber = reportNumberingService.reserveNextNumber();
+        byte[] pdfBytes = renderPdf(rf, ctx, reportNumber);
         String sha256 = reportNumberingService.sha256Hex(pdfBytes);
 
-        // Auditoria compartilhada com V1 — mesma tabela, mesma semantica
         reportNumberingService.registerGeneration(
             reportNumber, rf.area, "PDF", rf.periodLabel, pdfBytes, ctx == null ? null : ctx.userId()
         );
-
         String filename = reportNumber + ".pdf";
         return new ReportArtifact(
-            pdfBytes,
-            "application/pdf",
-            filename,
-            /* pageCount */ 0,  // OpenPDF nao expoe facilmente; aceito como aproximacao
-            pdfBytes.length,
-            reportNumber,
-            sha256,
-            rf.periodLabel
+            pdfBytes, "application/pdf", filename, 0, pdfBytes.length,
+            reportNumber, sha256, rf.periodLabel
         );
     }
 
@@ -141,103 +153,126 @@ public class CqOperationalV2Generator implements ReportGenerator {
         List<String> warnings = new ArrayList<>();
 
         StringBuilder html = new StringBuilder();
-        html.append("<section class=\"preview-cq-operacional\">");
-        html.append("<h1>Relatorio Operacional de CQ (Preview)</h1>");
-        html.append("<p class=\"muted\">Area: ").append(escape(areaLabel(rf.area)))
-            .append(" · Periodo: ").append(escape(rf.periodLabel))
-            .append("</p>");
+        html.append("<section class=\"preview-cq-operacional\" style=\"font-family:sans-serif\">");
+        html.append("<h1 style=\"color:#14532d\">Relatorio Operacional de CQ</h1>");
+        html.append("<p style=\"color:#6b7280\">Area: ").append(escape(areaLabel(rf.area)))
+            .append(" &middot; Periodo: ").append(escape(rf.periodLabel)).append("</p>");
 
-        switch (rf.area) {
-            case "hematologia" -> {
-                List<HematologyQcMeasurement> meds = hematologyQcMeasurementRepository
-                    .findByDataMedicaoBetweenOrderByDataMedicaoDesc(rf.start, rf.end);
-                List<HematologyBioRecord> bio = hematologyBioRecordRepository
-                    .findByDataBioBetweenOrderByDataBioDesc(rf.start, rf.end);
-                if (meds.isEmpty() && bio.isEmpty()) {
-                    warnings.add("Nenhum dado de hematologia encontrado no periodo selecionado.");
-                }
-                html.append("<p>Medicoes QC: <strong>").append(meds.size()).append("</strong></p>");
-                html.append("<p>Registros Bio x Controle Interno: <strong>").append(bio.size()).append("</strong></p>");
-                warnings.add("Area hematologia — dados de QC e Bio consolidados no PDF final.");
-            }
-            case "imunologia", "parasitologia", "microbiologia", "uroanalise" -> {
-                List<AreaQcMeasurement> meds = areaQcMeasurementRepository
-                    .findByAreaAndDataMedicaoBetweenOrderByDataMedicaoDesc(rf.area, rf.start, rf.end);
-                if (meds.isEmpty()) {
-                    warnings.add("Nenhuma medicao encontrada no periodo selecionado.");
-                }
-                html.append("<p>Medicoes: <strong>").append(meds.size()).append("</strong></p>");
-            }
-            default -> {
-                List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange(rf.area, rf.start, rf.end);
-                if (records.isEmpty()) {
-                    warnings.add("Nenhum registro encontrado no periodo selecionado.");
-                }
-                html.append("<p>Registros de CQ: <strong>").append(records.size()).append("</strong></p>");
-                long aprovados = records.stream().filter(r -> "APROVADO".equalsIgnoreCase(r.getStatus())).count();
-                long reprovados = records.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
-                long alertas = records.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
-                html.append("<ul>")
-                    .append("<li>Aprovados: ").append(aprovados).append("</li>")
-                    .append("<li>Alerta: ").append(alertas).append("</li>")
-                    .append("<li>Reprovados: ").append(reprovados).append("</li>")
-                    .append("</ul>");
+        PeriodSummary summary = gatherSummary(rf);
+        if (summary.total == 0) {
+            warnings.add("Nenhum registro encontrado no periodo selecionado.");
+        }
+        html.append("<div style=\"display:flex;gap:12px;margin:12px 0\">")
+            .append(box("Total", String.valueOf(summary.total), "#166534"))
+            .append(box("Aprovados", String.valueOf(summary.approved), "#16a34a"))
+            .append(box("Alertas", String.valueOf(summary.alerted), "#eab308"))
+            .append(box("Reprovados", String.valueOf(summary.rejected), "#dc2626"))
+            .append(box("Taxa", String.format(PT_BR, "%.1f%%", summary.approvalRate()), "#166534"))
+            .append("</div>");
+
+        if (rf.includeComparison) {
+            Optional<ComparisonWindow> prev = periodComparator.previousWindow(rf.toResolvedPeriod());
+            if (prev.isPresent()) {
+                PeriodSummary prevSummary = gatherSummaryFor(rf.area, prev.get().start(), prev.get().end(), rf.examIds);
+                double delta = summary.approvalRate() - prevSummary.approvalRate();
+                String arrow = delta >= 0 ? "&#8593;" : "&#8595;";
+                String color = delta >= 0 ? "#16a34a" : "#dc2626";
+                html.append("<p>vs ").append(escape(prev.get().label()))
+                    .append(": <strong style=\"color:").append(color).append("\">")
+                    .append(String.format(PT_BR, "%+.1f%%", delta)).append(" ").append(arrow)
+                    .append("</strong></p>");
+            } else {
+                html.append("<p style=\"color:#b45309\">Comparativo indisponivel para periodo customizado.</p>");
             }
         }
 
-        if (!rf.examIds.isEmpty()) {
-            html.append("<p class=\"muted\">Filtro de exames aplicado: ").append(rf.examIds.size()).append(" id(s).</p>");
+        switch (rf.area) {
+            case "hematologia" -> {
+                int meds = hematologyQcMeasurementRepository
+                    .findByDataMedicaoBetweenOrderByDataMedicaoDesc(rf.start, rf.end).size();
+                int bio = hematologyBioRecordRepository
+                    .findByDataBioBetweenOrderByDataBioDesc(rf.start, rf.end).size();
+                html.append("<p>Medicoes QC: <strong>").append(meds).append("</strong></p>");
+                html.append("<p>Registros Bio x Controle Interno: <strong>").append(bio).append("</strong></p>");
+            }
+            case "imunologia", "parasitologia", "microbiologia", "uroanalise" -> {
+                int meds = areaQcMeasurementRepository
+                    .findByAreaAndDataMedicaoBetweenOrderByDataMedicaoDesc(rf.area, rf.start, rf.end).size();
+                html.append("<p>Medicoes: <strong>").append(meds).append("</strong></p>");
+            }
+            default -> {
+                html.append("<p>Registros de bioquimica: <strong>").append(summary.total).append("</strong></p>");
+            }
+        }
+
+        if (rf.includeAiCommentary) {
+            html.append("<p style=\"color:#14532d\"><em>Comentario IA: sera gerado no PDF final.</em></p>");
         }
 
         html.append("</section>");
         return new ReportPreview(html.toString(), warnings, rf.periodLabel);
     }
 
-    // ---------- Render PDF ----------
+    // ---------- Render ----------
 
-    private byte[] renderPdf(ResolvedFilters rf, GenerationContext ctx, boolean reserveNumber) {
-        String reportNumber = reserveNumber ? reportNumberingService.reserveNextNumber() : "BIO-preview";
-        rf.reservedNumber = reportNumber;
+    private byte[] renderPdf(ResolvedFilters rf, GenerationContext ctx, String reportNumber) {
         LabSettings settings = ctx != null && ctx.labSettings() != null
             ? ctx.labSettings()
-            : LabSettings.builder().build();
+            : labSettingsService.getOrCreateSingleton();
+        String responsibleName = settings == null ? "" : settings.getResponsibleName();
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            Document document = new Document(PageSize.A4.rotate(), 24F, 24F, 30F, 40F);
-            PdfWriter.getInstance(document, out);
+            Document document = new Document(PageSize.A4, 36F, 36F, 40F, 54F);
+            PdfWriter writer = PdfWriter.getInstance(document, out);
+            writer.setPageEvent(new PdfFooterRenderer(reportNumber, responsibleName));
             document.open();
 
-            Paragraph title = new Paragraph("Relatorio Operacional de CQ", TITLE_FONT);
-            title.setAlignment(Element.ALIGN_CENTER);
-            title.setSpacingAfter(4F);
-            document.add(title);
+            // 1. Capa institucional
+            ReportArtifact headerArtifact = new ReportArtifact(
+                new byte[] { 0x25, 0x50 /* placeholder */ },
+                "application/pdf", reportNumber + ".pdf",
+                1, 2L, reportNumber,
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                rf.periodLabel
+            );
+            headerRenderer.render(document, writer, settings, definition(), headerArtifact);
 
-            Paragraph subtitle = new Paragraph(
-                "Area: " + areaLabel(rf.area) + " · Periodo: " + rf.periodLabel, SUBTITLE_FONT);
-            subtitle.setAlignment(Element.ALIGN_CENTER);
-            subtitle.setSpacingAfter(10F);
-            document.add(subtitle);
+            // Contexto de dados
+            PeriodSummary summary = gatherSummary(rf);
 
-            Paragraph meta = new Paragraph(
-                "Numero do laudo: " + reportNumber
-                    + " · Gerado em: " + LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
-                    + (ctx != null && ctx.username() != null ? " · Por: " + ctx.username() : ""),
-                META_FONT);
-            meta.setAlignment(Element.ALIGN_CENTER);
-            meta.setSpacingAfter(14F);
-            document.add(meta);
+            // 2. Resumo executivo
+            renderExecutiveSummary(document, summary, rf);
 
-            if (settings.getLabName() != null && !settings.getLabName().isBlank()) {
-                Paragraph lab = new Paragraph(settings.getLabName(), META_FONT);
-                lab.setAlignment(Element.ALIGN_CENTER);
-                lab.setSpacingAfter(10F);
-                document.add(lab);
+            // 3. Tabela por exame
+            document.add(ReportV2PdfTheme.section("Estatistica por exame"));
+            switch (rf.area) {
+                case "hematologia" -> renderHematologyTables(document, rf);
+                case "imunologia", "parasitologia", "microbiologia", "uroanalise" ->
+                    renderGenericAreaTable(document, rf);
+                default -> renderBioquimicaTable(document, rf);
             }
 
-            switch (rf.area) {
-                case "hematologia" -> renderHematology(document, rf);
-                case "imunologia", "parasitologia", "microbiologia", "uroanalise" -> renderGenericArea(document, rf);
-                default -> renderBioquimica(document, rf);
+            // 4. Graficos Levey-Jennings (bioquimica)
+            if ("bioquimica".equals(rf.area)) {
+                renderLeveyJenningsCharts(document, rf);
+            }
+
+            // 5. Westgard detalhado
+            renderWestgardSection(document, rf);
+
+            // 6. Pos-calibracao (bioquimica)
+            if ("bioquimica".equals(rf.area)) {
+                renderPostCalibration(document, rf);
+            }
+
+            // 7. Comparativo
+            if (rf.includeComparison) {
+                renderComparison(document, rf, summary);
+            }
+
+            // 8. Comentario IA
+            if (rf.includeAiCommentary) {
+                renderAiCommentary(document, rf, summary, ctx);
             }
 
             document.close();
@@ -247,7 +282,330 @@ public class CqOperationalV2Generator implements ReportGenerator {
         }
     }
 
-    private void renderBioquimica(Document document, ResolvedFilters rf) throws DocumentException {
+    private void renderExecutiveSummary(Document document, PeriodSummary summary, ResolvedFilters rf)
+        throws DocumentException {
+        document.add(ReportV2PdfTheme.section("Resumo executivo"));
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1, 1});
+        cards.setWidthPercentage(100F);
+        cards.setSpacingAfter(8F);
+        cards.addCell(summaryCard("Total", String.valueOf(summary.total), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(summaryCard("Aprovados", String.valueOf(summary.approved), ReportV2PdfTheme.STATUS_APROVADO));
+        cards.addCell(summaryCard("Alertas", String.valueOf(summary.alerted), ReportV2PdfTheme.STATUS_ALERTA));
+        cards.addCell(summaryCard("Reprovados", String.valueOf(summary.rejected), ReportV2PdfTheme.STATUS_REPROVADO));
+        cards.addCell(summaryCard("Taxa aprovacao",
+            String.format(PT_BR, "%.1f%%", summary.approvalRate()), ReportV2PdfTheme.BRAND_DARK));
+        document.add(cards);
+
+        if (rf.includeComparison) {
+            Optional<ComparisonWindow> prev = periodComparator.previousWindow(rf.toResolvedPeriod());
+            if (prev.isPresent()) {
+                PeriodSummary prevSummary = gatherSummaryFor(rf.area, prev.get().start(), prev.get().end(), rf.examIds);
+                double delta = summary.approvalRate() - prevSummary.approvalRate();
+                String arrow = delta >= 0 ? "\u2191" : "\u2193";
+                Color c = delta >= 0 ? ReportV2PdfTheme.STATUS_APROVADO : ReportV2PdfTheme.STATUS_REPROVADO;
+                Paragraph p = new Paragraph(
+                    "vs " + prev.get().label() + ": "
+                    + String.format(PT_BR, "%+.1f%% ", delta) + arrow,
+                    com.lowagie.text.FontFactory.getFont(
+                        com.lowagie.text.FontFactory.HELVETICA_BOLD, 10, c));
+                p.setSpacingAfter(6F);
+                document.add(p);
+            }
+        }
+    }
+
+    private PdfPCell summaryCard(String label, String value, Color valueColor) {
+        PdfPCell cell = new PdfPCell();
+        cell.setBackgroundColor(Color.WHITE);
+        cell.setBorderColor(ReportV2PdfTheme.BORDER);
+        cell.setPadding(8F);
+        Paragraph l = new Paragraph(label, ReportV2PdfTheme.META_FONT);
+        l.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(l);
+        Paragraph v = new Paragraph(value,
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 16, valueColor));
+        v.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(v);
+        return cell;
+    }
+
+    private void renderBioquimicaTable(Document document, ResolvedFilters rf) throws DocumentException {
+        List<QcRecord> records = loadBioquimicaRecords(rf);
+        if (records.isEmpty()) {
+            document.add(new Paragraph("Nenhum registro encontrado no periodo selecionado.", ReportV2PdfTheme.BODY_FONT));
+            return;
+        }
+        Map<String, List<QcRecord>> byExamLevel = records.stream().collect(Collectors.groupingBy(
+            r -> safe(r.getExamName()) + " | " + safe(r.getLevel()) + " | " + safe(r.getLotNumber()),
+            LinkedHashMap::new, Collectors.toList()));
+        PdfPTable table = ReportV2PdfTheme.table(new float[] {2.4F, 1.2F, 1.6F, 1.5F, 1.5F, 1.3F, 1.2F, 1.6F, 1.0F});
+        ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
+        boolean alt = false;
+        for (Map.Entry<String, List<QcRecord>> entry : byExamLevel.entrySet()) {
+            List<QcRecord> group = entry.getValue();
+            String[] parts = entry.getKey().split(" \\| ");
+            String exam = parts.length > 0 ? parts[0] : "-";
+            String level = parts.length > 1 ? parts[1] : "-";
+            String lot = parts.length > 2 ? parts[2] : "-";
+            DoubleSummaryStatistics stats = group.stream().mapToDouble(QcRecord::getValue).summaryStatistics();
+            double mean = stats.getAverage();
+            double sd = stddev(group, mean);
+            double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
+            double cv = mean == 0 ? 0 : (sd / mean) * 100.0;
+            long reprovados = group.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
+            long alertas = group.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
+            String status = reprovados > 0 ? "REPROVADO" : (alertas > 0 ? "ALERTA" : "APROVADO");
+            ReportV2PdfTheme.statusRow(table, alt, status,
+                exam, level, lot,
+                ReportV2PdfTheme.formatDecimal(target),
+                ReportV2PdfTheme.formatDecimal(mean),
+                ReportV2PdfTheme.formatDecimal(sd),
+                ReportV2PdfTheme.formatDecimal(cv),
+                status,
+                String.valueOf(group.size())
+            );
+            alt = !alt;
+        }
+        document.add(table);
+    }
+
+    private void renderGenericAreaTable(Document document, ResolvedFilters rf) throws DocumentException {
+        List<AreaQcMeasurement> meds = areaQcMeasurementRepository
+            .findByAreaAndDataMedicaoBetweenOrderByDataMedicaoDesc(rf.area, rf.start, rf.end);
+        if (meds.isEmpty()) {
+            document.add(new Paragraph("Nenhuma medicao encontrada no periodo selecionado.", ReportV2PdfTheme.BODY_FONT));
+            return;
+        }
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {2.0F, 2.6F, 1.6F, 1.5F, 1.5F, 1.5F, 1.7F, 2.2F, 2.2F, 2.2F});
+        ReportV2PdfTheme.headerRow(t, "Data", "Analito", "Valor", "Min", "Max", "Modo", "Status", "Equip.", "Lote", "Nivel");
+        boolean alt = false;
+        for (AreaQcMeasurement m : meds) {
+            ReportV2PdfTheme.statusRow(t, alt, m.getStatus(),
+                ReportV2PdfTheme.formatDate(m.getDataMedicao()),
+                ReportV2PdfTheme.safe(m.getAnalito()),
+                ReportV2PdfTheme.formatDecimal(m.getValorMedido()),
+                ReportV2PdfTheme.formatDecimal(m.getMinAplicado()),
+                ReportV2PdfTheme.formatDecimal(m.getMaxAplicado()),
+                ReportV2PdfTheme.safe(m.getModoUsado()),
+                ReportV2PdfTheme.safe(m.getParameter() != null ? m.getParameter().getEquipamento() : null),
+                ReportV2PdfTheme.safe(m.getParameter() != null ? m.getParameter().getLoteControle() : null),
+                ReportV2PdfTheme.safe(m.getParameter() != null ? m.getParameter().getNivelControle() : null),
+                ReportV2PdfTheme.safe(m.getStatus())
+            );
+            alt = !alt;
+        }
+        document.add(t);
+    }
+
+    private void renderHematologyTables(Document document, ResolvedFilters rf) throws DocumentException {
+        List<HematologyQcMeasurement> meds = hematologyQcMeasurementRepository
+            .findByDataMedicaoBetweenOrderByDataMedicaoDesc(rf.start, rf.end);
+        List<HematologyBioRecord> bioRecs = hematologyBioRecordRepository
+            .findByDataBioBetweenOrderByDataBioDesc(rf.start, rf.end);
+        if (meds.isEmpty() && bioRecs.isEmpty()) {
+            document.add(new Paragraph("Nenhum dado de hematologia encontrado no periodo selecionado.", ReportV2PdfTheme.BODY_FONT));
+            return;
+        }
+        if (!meds.isEmpty()) {
+            document.add(ReportV2PdfTheme.subsection("Medicoes QC"));
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 2.4F, 1.5F, 1.4F, 1.4F, 1.4F, 1.6F});
+            ReportV2PdfTheme.headerRow(t, "Data", "Analito", "Valor", "Min", "Max", "Modo", "Status");
+            boolean alt = false;
+            for (HematologyQcMeasurement m : meds) {
+                ReportV2PdfTheme.statusRow(t, alt, m.getStatus(),
+                    ReportV2PdfTheme.formatDate(m.getDataMedicao()),
+                    ReportV2PdfTheme.safe(m.getAnalito()),
+                    ReportV2PdfTheme.formatDecimal(m.getValorMedido()),
+                    ReportV2PdfTheme.formatDecimal(m.getMinAplicado()),
+                    ReportV2PdfTheme.formatDecimal(m.getMaxAplicado()),
+                    ReportV2PdfTheme.safe(m.getModoUsado()),
+                    ReportV2PdfTheme.safe(m.getStatus())
+                );
+                alt = !alt;
+            }
+            document.add(t);
+        }
+        if (!bioRecs.isEmpty()) {
+            document.add(ReportV2PdfTheme.subsection("Bio x Controle Interno"));
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {2.0F, 2.0F, 1.7F, 1.7F, 1.8F, 1.8F});
+            ReportV2PdfTheme.headerRow(t, "Data", "Modo", "RBC", "HGB", "WBC", "PLT");
+            boolean alt = false;
+            for (HematologyBioRecord r : bioRecs) {
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    ReportV2PdfTheme.formatDate(r.getDataBio()),
+                    ReportV2PdfTheme.safe(r.getModoCi()),
+                    ReportV2PdfTheme.formatDecimal(r.getBioHemacias()),
+                    ReportV2PdfTheme.formatDecimal(r.getBioHemoglobina()),
+                    ReportV2PdfTheme.formatDecimal(r.getBioLeucocitos()),
+                    ReportV2PdfTheme.formatDecimal(r.getBioPlaquetas())
+                );
+                alt = !alt;
+            }
+            document.add(t);
+        }
+    }
+
+    private void renderLeveyJenningsCharts(Document document, ResolvedFilters rf) throws DocumentException {
+        List<QcRecord> records = loadBioquimicaRecords(rf);
+        if (records.isEmpty()) return;
+        Map<String, List<QcRecord>> byExamLevel = records.stream().collect(Collectors.groupingBy(
+            r -> safe(r.getExamName()) + "|" + safe(r.getLevel()),
+            LinkedHashMap::new, Collectors.toList()));
+
+        List<Map.Entry<String, List<QcRecord>>> top = byExamLevel.entrySet().stream()
+            .filter(e -> e.getValue().size() >= 5)
+            .sorted(Comparator.<Map.Entry<String, List<QcRecord>>>comparingInt(e -> e.getValue().size()).reversed())
+            .limit(MAX_LJ_CHARTS)
+            .collect(Collectors.toList());
+        if (top.isEmpty()) return;
+
+        document.add(ReportV2PdfTheme.section("Graficos Levey-Jennings"));
+        for (Map.Entry<String, List<QcRecord>> entry : top) {
+            List<QcRecord> group = entry.getValue();
+            double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
+            double sd = group.get(0).getTargetSd() == null || group.get(0).getTargetSd() == 0
+                ? Math.max(stddev(group, mean(group)), 0.0001)
+                : group.get(0).getTargetSd();
+            List<ChartRenderer.LjPoint> points = group.stream()
+                .sorted(Comparator.comparing(QcRecord::getDate))
+                .map(r -> new ChartRenderer.LjPoint(r.getDate(), r.getValue() == null ? 0 : r.getValue(),
+                    safe(r.getStatus())))
+                .collect(Collectors.toList());
+            String title = entry.getKey().replace('|', ' ');
+            try {
+                byte[] png = chartRenderer.renderLeveyJennings(points, target, sd, title);
+                Image img = Image.getInstance(png);
+                img.scaleToFit(500F, 260F);
+                img.setAlignment(Element.ALIGN_CENTER);
+                document.add(img);
+            } catch (Exception ex) {
+                LOG.warn("Falha ao renderizar L-J para {}", title, ex);
+            }
+        }
+    }
+
+    private void renderWestgardSection(Document document, ResolvedFilters rf) throws DocumentException {
+        List<WestgardViolation> all = westgardViolationRepository.findAll().stream()
+            .filter(v -> v.getQcRecord() != null
+                && v.getQcRecord().getDate() != null
+                && !v.getQcRecord().getDate().isBefore(rf.start)
+                && !v.getQcRecord().getDate().isAfter(rf.end)
+                && v.getQcRecord().getArea() != null
+                && v.getQcRecord().getArea().equalsIgnoreCase(rf.area))
+            .sorted(Comparator.comparing((WestgardViolation v) -> v.getQcRecord().getDate()).reversed())
+            .collect(Collectors.toList());
+        if (all.isEmpty()) {
+            // Omitimos secao silenciosamente — ausencia de violacoes e bom sinal
+            return;
+        }
+        document.add(ReportV2PdfTheme.section("Violacoes Westgard"));
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {1.4F, 1.2F, 2.4F, 1.2F, 1.6F, 3.8F});
+        ReportV2PdfTheme.headerRow(t, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
+        boolean alt = false;
+        int count = 0;
+        for (WestgardViolation v : all) {
+            if (count >= MAX_VIOLATIONS_ROWS) break;
+            ReportV2PdfTheme.bodyRow(t, alt,
+                ReportV2PdfTheme.safe(v.getRule()),
+                ReportV2PdfTheme.safe(v.getSeverity()),
+                ReportV2PdfTheme.safe(v.getQcRecord().getExamName()),
+                ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
+                ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
+                ReportV2PdfTheme.safe(v.getDescription())
+            );
+            alt = !alt;
+            count++;
+        }
+        document.add(t);
+        if (all.size() > MAX_VIOLATIONS_ROWS) {
+            Paragraph p = new Paragraph(
+                (all.size() - MAX_VIOLATIONS_ROWS) + " violacoes adicionais omitidas.",
+                ReportV2PdfTheme.META_FONT);
+            document.add(p);
+        }
+    }
+
+    private void renderPostCalibration(Document document, ResolvedFilters rf) throws DocumentException {
+        List<PostCalibrationRecord> post = postCalibrationRecordRepository
+            .findByQcRecordAreaAndDateRange("bioquimica", rf.start, rf.end);
+        if (post.isEmpty()) return;
+        document.add(ReportV2PdfTheme.section("Pos-calibracao"));
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.6F, 1.6F, 1.2F, 1.2F, 1.2F, 1.4F});
+        ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
+        boolean alt = false;
+        for (PostCalibrationRecord r : post) {
+            double origCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
+            double postCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
+            double delta = postCv - origCv;
+            String status = delta < 0 ? "EFICAZ" : (delta == 0 ? "SEM EFEITO" : "PIOROU");
+            ReportV2PdfTheme.bodyRow(t, alt,
+                ReportV2PdfTheme.safe(r.getExamName()),
+                ReportV2PdfTheme.safe(r.getQcRecord() == null ? null : r.getQcRecord().getLotNumber()),
+                ReportV2PdfTheme.formatDecimal(origCv),
+                ReportV2PdfTheme.formatDecimal(postCv),
+                String.format(PT_BR, "%+.2f", delta),
+                status,
+                ReportV2PdfTheme.formatDate(r.getDate())
+            );
+            alt = !alt;
+        }
+        document.add(t);
+    }
+
+    private void renderComparison(Document document, ResolvedFilters rf, PeriodSummary current)
+        throws DocumentException {
+        document.add(ReportV2PdfTheme.section("Comparativo com periodo anterior"));
+        Optional<ComparisonWindow> prev = periodComparator.previousWindow(rf.toResolvedPeriod());
+        if (prev.isEmpty()) {
+            Paragraph p = new Paragraph(
+                "Comparativo indisponivel para periodo customizado (date-range).",
+                ReportV2PdfTheme.META_FONT);
+            document.add(p);
+            return;
+        }
+        PeriodSummary prevSummary = gatherSummaryFor(rf.area, prev.get().start(), prev.get().end(), rf.examIds);
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {2.4F, 1.5F, 1.5F, 1.5F, 1.5F, 1.5F, 1.2F});
+        ReportV2PdfTheme.headerRow(t, "Metrica", "Atual", "Anterior", "Delta", "Atual %", "Anterior %", "Tendencia");
+        renderComparisonRow(t, false, "Total de registros", current.total, prevSummary.total);
+        renderComparisonRow(t, true, "Aprovados", current.approved, prevSummary.approved);
+        renderComparisonRow(t, false, "Alertas", current.alerted, prevSummary.alerted);
+        renderComparisonRow(t, true, "Reprovados", current.rejected, prevSummary.rejected);
+        document.add(t);
+    }
+
+    private void renderComparisonRow(PdfPTable t, boolean alt, String label, int current, int prev) {
+        int delta = current - prev;
+        String arrow = delta == 0 ? "=" : (delta > 0 ? "\u2191" : "\u2193");
+        ReportV2PdfTheme.bodyRow(t, alt,
+            label,
+            String.valueOf(current),
+            String.valueOf(prev),
+            (delta > 0 ? "+" : "") + delta,
+            "-",
+            "-",
+            arrow
+        );
+    }
+
+    private void renderAiCommentary(Document document, ResolvedFilters rf, PeriodSummary summary, GenerationContext ctx)
+        throws DocumentException {
+        document.add(ReportV2PdfTheme.section("Analise executiva"));
+        String structured = buildStructuredContext(rf, summary);
+        String commentary = aiCommentator.commentary(ReportCode.CQ_OPERATIONAL_V2, structured, ctx);
+        PdfPTable wrap = new PdfPTable(1);
+        wrap.setWidthPercentage(100F);
+        PdfPCell cell = new PdfPCell(new Phrase(commentary, ReportV2PdfTheme.AI_FONT));
+        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
+        cell.setBorderColor(ReportV2PdfTheme.BRAND_DARK);
+        cell.setPadding(10F);
+        wrap.addCell(cell);
+        document.add(wrap);
+    }
+
+    // ---------- Helpers de dados ----------
+
+    private List<QcRecord> loadBioquimicaRecords(ResolvedFilters rf) {
         List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange("bioquimica", rf.start, rf.end);
         if (!rf.examIds.isEmpty()) {
             records = records.stream()
@@ -256,137 +614,49 @@ public class CqOperationalV2Generator implements ReportGenerator {
                     && rf.examIds.contains(r.getReference().getExam().getId()))
                 .collect(Collectors.toList());
         }
-
-        Map<UUID, PostCalibrationRecord> postCalibrations = postCalibrationRecordRepository
-            .findByQcRecordAreaAndDateRange("bioquimica", rf.start, rf.end).stream()
-            .collect(Collectors.toMap(r -> r.getQcRecord().getId(), r -> r, (a, b) -> a));
-
-        if (records.isEmpty()) {
-            document.add(new Paragraph("Nenhum registro encontrado no periodo selecionado.", BODY_FONT));
-            return;
-        }
-
-        PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
-        addHeaderRow(table, "Data", "Exame", "Nivel", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pos-CQ", "Status Pos");
-        boolean alt = false;
-        for (QcRecord r : records) {
-            PostCalibrationRecord post = postCalibrations.get(r.getId());
-            String postValueCell;
-            String postStatusCell;
-            if (post == null) {
-                postValueCell = Boolean.TRUE.equals(r.getNeedsCalibration()) ? "Pendente" : "-";
-                postStatusCell = "-";
-            } else {
-                postValueCell = formatDecimal(post.getPostCalibrationValue());
-                double limit = r.getCvLimit() != null ? r.getCvLimit() : 10D;
-                double postCv = post.getPostCalibrationCv() != null ? post.getPostCalibrationCv() : 0D;
-                postStatusCell = postCv <= limit ? "APROVADO" : "REPROVADO";
-            }
-            addBodyRow(table, alt,
-                formatDate(r.getDate()),
-                safe(r.getExamName()),
-                safe(r.getLevel()),
-                safe(r.getLotNumber()),
-                formatDecimal(r.getValue()),
-                formatDecimal(r.getTargetValue()),
-                formatDecimal(r.getCv()),
-                formatDecimal(r.getCvLimit()),
-                safe(r.getStatus()),
-                postValueCell,
-                postStatusCell
-            );
-            alt = !alt;
-        }
-        document.add(table);
-        document.add(new Paragraph("Total de registros: " + records.size(), BODY_FONT));
+        return records;
     }
 
-    private void renderGenericArea(Document document, ResolvedFilters rf) throws DocumentException {
-        List<AreaQcMeasurement> measurements = areaQcMeasurementRepository
-            .findByAreaAndDataMedicaoBetweenOrderByDataMedicaoDesc(rf.area, rf.start, rf.end);
-        if (measurements.isEmpty()) {
-            document.add(new Paragraph("Nenhuma medicao encontrada no periodo selecionado.", BODY_FONT));
-            return;
-        }
-
-        PdfPTable table = createTable(new float[] {2.0F, 2.6F, 1.6F, 1.5F, 1.5F, 1.5F, 1.7F, 2.2F, 2.2F, 2.2F});
-        addHeaderRow(table, "Data", "Analito", "Valor", "Min", "Max", "Modo", "Status", "Equip.", "Lote", "Nivel");
-        boolean alt = false;
-        for (AreaQcMeasurement m : measurements) {
-            addBodyRow(table, alt,
-                formatDate(m.getDataMedicao()),
-                safe(m.getAnalito()),
-                formatDecimal(m.getValorMedido()),
-                formatDecimal(m.getMinAplicado()),
-                formatDecimal(m.getMaxAplicado()),
-                safe(m.getModoUsado()),
-                safe(m.getStatus()),
-                safe(m.getParameter() != null ? m.getParameter().getEquipamento() : null),
-                safe(m.getParameter() != null ? m.getParameter().getLoteControle() : null),
-                safe(m.getParameter() != null ? m.getParameter().getNivelControle() : null)
-            );
-            alt = !alt;
-        }
-        document.add(table);
-        document.add(new Paragraph("Total de medicoes: " + measurements.size(), BODY_FONT));
+    private PeriodSummary gatherSummary(ResolvedFilters rf) {
+        return gatherSummaryFor(rf.area, rf.start, rf.end, rf.examIds);
     }
 
-    private void renderHematology(Document document, ResolvedFilters rf) throws DocumentException {
-        List<HematologyQcMeasurement> measurements = hematologyQcMeasurementRepository
-            .findByDataMedicaoBetweenOrderByDataMedicaoDesc(rf.start, rf.end);
-        List<HematologyBioRecord> bioRecords = hematologyBioRecordRepository
-            .findByDataBioBetweenOrderByDataBioDesc(rf.start, rf.end);
-
-        if (measurements.isEmpty() && bioRecords.isEmpty()) {
-            document.add(new Paragraph("Nenhum dado de hematologia encontrado no periodo selecionado.", BODY_FONT));
-            return;
+    private PeriodSummary gatherSummaryFor(String area, LocalDate start, LocalDate end, List<UUID> examIds) {
+        PeriodSummary s = new PeriodSummary();
+        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange(area, start, end);
+        if (examIds != null && !examIds.isEmpty()) {
+            records = records.stream()
+                .filter(r -> r.getReference() != null
+                    && r.getReference().getExam() != null
+                    && examIds.contains(r.getReference().getExam().getId()))
+                .collect(Collectors.toList());
         }
+        s.total = records.size();
+        s.approved = (int) records.stream().filter(r -> "APROVADO".equalsIgnoreCase(r.getStatus())).count();
+        s.alerted = (int) records.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
+        s.rejected = (int) records.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
+        return s;
+    }
 
-        if (!measurements.isEmpty()) {
-            document.add(new Paragraph("Medicoes QC", SECTION_FONT));
-            PdfPTable mt = createTable(new float[] {1.8F, 2.4F, 1.5F, 1.4F, 1.4F, 1.4F, 1.6F, 2.0F, 2.0F, 2.0F, 2.5F});
-            addHeaderRow(mt, "Data", "Analito", "Valor", "Min", "Max", "Modo", "Status", "Equip.", "Lote", "Nivel", "Obs.");
-            boolean alt = false;
-            for (HematologyQcMeasurement m : measurements) {
-                addBodyRow(mt, alt,
-                    formatDate(m.getDataMedicao()),
-                    safe(m.getAnalito()),
-                    formatDecimal(m.getValorMedido()),
-                    formatDecimal(m.getMinAplicado()),
-                    formatDecimal(m.getMaxAplicado()),
-                    safe(m.getModoUsado()),
-                    safe(m.getStatus()),
-                    safe(m.getParameter() != null ? m.getParameter().getEquipamento() : null),
-                    safe(m.getParameter() != null ? m.getParameter().getLoteControle() : null),
-                    safe(m.getParameter() != null ? m.getParameter().getNivelControle() : null),
-                    safe(m.getObservacao())
-                );
-                alt = !alt;
+    private String buildStructuredContext(ResolvedFilters rf, PeriodSummary summary) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Area: ").append(areaLabel(rf.area)).append('\n');
+        sb.append("Periodo: ").append(rf.periodLabel).append('\n');
+        sb.append("Total de registros: ").append(summary.total).append('\n');
+        sb.append("Aprovados: ").append(summary.approved).append(" ("
+            + String.format(PT_BR, "%.1f%%", summary.approvalRate()) + ")\n");
+        sb.append("Alertas: ").append(summary.alerted).append('\n');
+        sb.append("Reprovados: ").append(summary.rejected).append('\n');
+        if (rf.includeComparison) {
+            Optional<ComparisonWindow> prev = periodComparator.previousWindow(rf.toResolvedPeriod());
+            if (prev.isPresent()) {
+                PeriodSummary prevSummary = gatherSummaryFor(rf.area, prev.get().start(), prev.get().end(), rf.examIds);
+                sb.append("Periodo anterior (").append(prev.get().label()).append("): ")
+                  .append(prevSummary.total).append(" registros, taxa ")
+                  .append(String.format(PT_BR, "%.1f%%", prevSummary.approvalRate())).append('\n');
             }
-            document.add(mt);
         }
-
-        if (!bioRecords.isEmpty()) {
-            document.add(new Paragraph(" ", BODY_FONT));
-            document.add(new Paragraph("Bio x Controle Interno", SECTION_FONT));
-            PdfPTable bt = createTable(new float[] {2.0F, 2.0F, 1.7F, 1.7F, 1.8F, 1.8F, 1.8F, 1.8F});
-            addHeaderRow(bt, "Data", "Modo", "RBC", "HGB", "WBC", "PLT", "RDW", "VPM");
-            boolean alt = false;
-            for (HematologyBioRecord r : bioRecords) {
-                addBodyRow(bt, alt,
-                    formatDate(r.getDataBio()),
-                    safe(r.getModoCi()),
-                    formatDecimal(r.getBioHemacias()),
-                    formatDecimal(r.getBioHemoglobina()),
-                    formatDecimal(r.getBioLeucocitos()),
-                    formatDecimal(r.getBioPlaquetas()),
-                    formatDecimal(r.getBioRdw()),
-                    formatDecimal(r.getBioVpm())
-                );
-                alt = !alt;
-            }
-            document.add(bt);
-        }
+        return sb.toString();
     }
 
     // ---------- Filtros ----------
@@ -403,12 +673,13 @@ public class CqOperationalV2Generator implements ReportGenerator {
         LocalDate dateFrom = filters.getDate("dateFrom").orElse(null);
         LocalDate dateTo = filters.getDate("dateTo").orElse(null);
         List<UUID> examIds = filters.getUuidList("examIds").orElse(List.of());
+        boolean includeAi = filters.getBoolean("includeAiCommentary").orElse(false);
+        boolean includeComp = filters.getBoolean("includeComparison").orElse(false);
 
         LocalDate today = LocalDate.now();
         LocalDate start;
         LocalDate end;
         String label;
-
         switch (periodType) {
             case "year" -> {
                 int resolvedYear = year != null ? year : today.getYear();
@@ -442,49 +713,39 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 end = ym.atEndOfMonth();
                 String monthLabel = ym.getMonth().getDisplayName(TextStyle.FULL, PT_BR);
                 label = capitalize(monthLabel) + "/" + ym.getYear();
+                periodType = "current-month";
             }
         }
 
         ResolvedFilters rf = new ResolvedFilters();
         rf.area = area;
+        rf.periodType = periodType;
         rf.start = start;
         rf.end = end;
         rf.periodLabel = label;
         rf.examIds = examIds;
+        rf.includeAiCommentary = includeAi;
+        rf.includeComparison = includeComp;
         return rf;
     }
 
-    // ---------- Helpers de PDF ----------
+    // ---------- Helpers estaticos ----------
 
-    private PdfPTable createTable(float[] widths) throws DocumentException {
-        PdfPTable table = new PdfPTable(widths);
-        table.setWidthPercentage(100F);
-        table.setSpacingBefore(10F);
-        table.setSpacingAfter(10F);
-        return table;
+    private static double mean(List<QcRecord> recs) {
+        return recs.stream().mapToDouble(r -> r.getValue() == null ? 0 : r.getValue()).average().orElse(0);
     }
 
-    private void addHeaderRow(PdfPTable table, String... values) {
-        for (String v : values) {
-            PdfPCell cell = new PdfPCell(new Phrase(v, HEADER_FONT));
-            cell.setHorizontalAlignment(Element.ALIGN_CENTER);
-            cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            cell.setPadding(6F);
-            cell.setBackgroundColor(HEADER_COLOR);
-            cell.setBorderColor(BORDER_COLOR);
-            table.addCell(cell);
+    private static double stddev(List<QcRecord> recs, double mean) {
+        if (recs.size() < 2) return 0;
+        double sum = 0;
+        int n = 0;
+        for (QcRecord r : recs) {
+            if (r.getValue() == null) continue;
+            double d = r.getValue() - mean;
+            sum += d * d;
+            n++;
         }
-    }
-
-    private void addBodyRow(PdfPTable table, boolean alternate, String... values) {
-        for (String v : values) {
-            PdfPCell cell = new PdfPCell(new Phrase(v, BODY_FONT));
-            cell.setPadding(5F);
-            cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            cell.setBorderColor(BORDER_COLOR);
-            cell.setBackgroundColor(alternate ? ROW_ALT_COLOR : Color.WHITE);
-            table.addCell(cell);
-        }
+        return n < 2 ? 0 : Math.sqrt(sum / (n - 1));
     }
 
     private static String areaLabel(String area) {
@@ -498,21 +759,13 @@ public class CqOperationalV2Generator implements ReportGenerator {
         };
     }
 
-    private static String formatDate(LocalDate d) {
-        return d == null ? "-" : d.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
-    }
-
-    private static String formatDecimal(Double d) {
-        return d == null ? "-" : String.format(PT_BR, "%.2f", d);
-    }
-
-    private static String safe(String v) {
-        return (v == null || v.isBlank()) ? "-" : v.trim();
-    }
-
     private static String capitalize(String v) {
         if (v == null || v.isBlank()) return "";
         return v.substring(0, 1).toUpperCase(PT_BR) + v.substring(1);
+    }
+
+    private static String safe(String v) {
+        return v == null ? "-" : v;
     }
 
     private static String escape(String v) {
@@ -520,12 +773,40 @@ public class CqOperationalV2Generator implements ReportGenerator {
         return v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
-    private static final class ResolvedFilters {
+    private static String box(String label, String value, String color) {
+        return "<div style=\"flex:1;border:1px solid #e5e7eb;padding:8px;text-align:center\">"
+            + "<div style=\"font-size:10px;color:#6b7280\">" + label + "</div>"
+            + "<div style=\"font-size:18px;font-weight:bold;color:" + color + "\">" + value + "</div>"
+            + "</div>";
+    }
+
+    // ---------- Data classes ----------
+
+    /** Filtros normalizados + datas resolvidas. */
+    static final class ResolvedFilters {
         String area;
+        String periodType;
         LocalDate start;
         LocalDate end;
         String periodLabel;
         List<UUID> examIds = List.of();
-        String reservedNumber;
+        boolean includeAiCommentary;
+        boolean includeComparison;
+
+        ResolvedPeriod toResolvedPeriod() {
+            return new ResolvedPeriod(periodType, start, end, periodLabel);
+        }
+    }
+
+    /** Resumo rapido por periodo (contagens). */
+    static final class PeriodSummary {
+        int total;
+        int approved;
+        int alerted;
+        int rejected;
+
+        double approvalRate() {
+            return total == 0 ? 0.0 : (approved * 100.0) / total;
+        }
     }
 }

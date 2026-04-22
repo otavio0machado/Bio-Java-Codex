@@ -12,12 +12,15 @@ public record ReportDefinitionResponse(
     String code,
     String name,
     String description,
+    String subtitle,
+    String icon,
     String category,
     Set<String> supportedFormats,
     List<FilterFieldDto> filters,
     Set<String> roleAccess,
     boolean signatureRequired,
     boolean previewSupported,
+    boolean aiCommentaryCapable,
     int retentionDays,
     String legalBasis
 ) {

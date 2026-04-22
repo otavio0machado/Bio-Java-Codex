@@ -5,6 +5,7 @@ import type {
   GenerateReportRequest,
   PreviewRequest,
   ReportCode,
+  SetReportLabelsRequest,
   SignReportRequest,
 } from '../types/reportsV2'
 
@@ -83,6 +84,39 @@ export function useReportExecutions(filter: ExecutionsFilter) {
     queryKey: ['reports', 'v2', 'executions', filter],
     queryFn: () => reportsV2Service.listExecutions(filter),
     staleTime: 30 * 1000,
+  })
+}
+
+/**
+ * Mutation para aplicar/remover rotulos de uma execucao V2. Invalida o
+ * cache da listagem de execucoes para forcar re-render da tabela (e do
+ * drawer se aberto) com os novos labels.
+ */
+export function useSetReportLabels() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...req }: { id: string } & SetReportLabelsRequest) =>
+      reportsV2Service.setLabels(id, req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['reports', 'v2', 'executions'] })
+    },
+  })
+}
+
+/**
+ * Hook de sugestoes para o filtro {@code equipment}. Cache de 5 minutos
+ * (alinhado ao {@code @Cacheable} do backend) - a lista muda raramente
+ * e so cresce quando um novo equipamento e registrado em manutencao.
+ */
+export function useEquipmentSuggestions() {
+  return useQuery({
+    queryKey: ['reports', 'v2', 'suggestions', 'equipment'],
+    queryFn: () => reportsV2Service.equipmentSuggestions(),
+    staleTime: 5 * 60 * 1000,
+    // Nao explode se o endpoint falhar - retorna [] vindo do service
+    // (quando a chamada rejeitar, react-query expoe o erro mas o
+    // consumidor trata sugestoes ausentes como permissivo).
+    retry: 1,
   })
 }
 

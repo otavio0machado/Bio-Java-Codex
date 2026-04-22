@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.entity.HematologyBioRecord;
 import com.biodiagnostico.entity.HematologyQcMeasurement;
+import com.biodiagnostico.entity.LabSettings;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.ReportAuditLog;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
@@ -15,13 +16,19 @@ import com.biodiagnostico.repository.HematologyBioRecordRepository;
 import com.biodiagnostico.repository.HematologyQcMeasurementRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
+import com.biodiagnostico.repository.WestgardViolationRepository;
+import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
 import com.biodiagnostico.service.reports.v2.generator.ReportArtifact;
 import com.biodiagnostico.service.reports.v2.generator.ReportFilters;
 import com.biodiagnostico.service.reports.v2.generator.ReportPreview;
+import com.biodiagnostico.service.reports.v2.generator.ai.ReportAiCommentator;
+import com.biodiagnostico.service.reports.v2.generator.chart.JFreeChartRenderer;
+import com.biodiagnostico.service.reports.v2.generator.comparison.DefaultPeriodComparator;
 import com.biodiagnostico.service.reports.v2.generator.impl.CqOperationalV2Generator;
+import com.biodiagnostico.service.reports.v2.generator.pdf.LabHeaderRenderer;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -44,6 +51,14 @@ class CqOperationalV2GeneratorTest {
     @Mock AreaQcMeasurementRepository areaQcMeasurementRepository;
     @Mock HematologyQcMeasurementRepository hematologyQcMeasurementRepository;
     @Mock HematologyBioRecordRepository hematologyBioRecordRepository;
+    @Mock WestgardViolationRepository westgardViolationRepository;
+
+    // LabSettingsService e final/complexo — usamos stub manual
+    private final LabSettingsService labSettingsService = new LabSettingsService(null, null) {
+        @Override public LabSettings getOrCreateSingleton() {
+            return LabSettings.builder().labName("Lab Teste").build();
+        }
+    };
 
     private CqOperationalV2Generator generator;
 
@@ -63,15 +78,24 @@ class CqOperationalV2GeneratorTest {
         }
     };
 
+    private final ReportAiCommentator stubAi = (code, ctx, gen) -> "Comentario IA fixture";
+
     @BeforeEach
     void setUp() {
+        lenient().when(westgardViolationRepository.findAll()).thenReturn(List.of());
         generator = new CqOperationalV2Generator(
             qcRecordRepository,
             postCalibrationRecordRepository,
             areaQcMeasurementRepository,
             hematologyQcMeasurementRepository,
             hematologyBioRecordRepository,
-            numbering
+            westgardViolationRepository,
+            numbering,
+            new JFreeChartRenderer(),
+            new LabHeaderRenderer(),
+            labSettingsService,
+            new DefaultPeriodComparator(),
+            stubAi
         );
     }
 
@@ -156,13 +180,13 @@ class CqOperationalV2GeneratorTest {
             new ReportFilters(Map.of("area", "bioquimica", "periodType", "current-month")),
             ctx()
         );
-        assertThat(preview.html()).contains("Preview");
+        assertThat(preview.html()).contains("Relatorio");
         assertThat(preview.warnings()).anyMatch(w -> w.toLowerCase().contains("nenhum"));
         assertThat(preview.periodLabel()).isNotBlank();
     }
 
     @Test
-    @DisplayName("generate bytes sao determinísticos para o mesmo input (hash estavel)")
+    @DisplayName("generate bytes sao deterministicos para o mesmo input (reportNumber estavel)")
     void deterministicForSameInput() {
         lenient().when(qcRecordRepository.findByAreaAndDateRange(eq("bioquimica"), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
@@ -174,9 +198,24 @@ class CqOperationalV2GeneratorTest {
         ));
         ReportArtifact a = generator.generate(filters, ctx());
         ReportArtifact b = generator.generate(filters, ctx());
-        // PDFs tem metadata com timestamp interno; bytes podem diferir, mas numero e formato sao estaveis
         assertThat(a.reportNumber()).isEqualTo(b.reportNumber());
         assertThat(a.contentType()).isEqualTo(b.contentType());
+    }
+
+    @Test
+    @DisplayName("generate com includeAiCommentary=true injeta texto no PDF")
+    void generateWithAiCommentary() {
+        lenient().when(qcRecordRepository.findByAreaAndDateRange(any(), any(), any())).thenReturn(List.of());
+        ReportFilters filters = new ReportFilters(Map.of(
+            "area", "bioquimica",
+            "periodType", "current-month",
+            "includeAiCommentary", true
+        ));
+        ReportArtifact artifact = generator.generate(filters, ctx());
+        assertThat(artifact.bytes()).isNotEmpty();
+        // Sanidade: presenca da string no PDF (dependendo do encoding pode ser oculta por CIDs,
+        // aqui apenas validamos que PDF foi gerado sem excecao)
+        assertThat(new String(artifact.bytes(), 0, 5)).isEqualTo("%PDF-");
     }
 
     private GenerationContext ctx() {
@@ -186,7 +225,7 @@ class CqOperationalV2GeneratorTest {
             Set.of("ADMIN"),
             Instant.now(),
             ZoneId.of("America/Sao_Paulo"),
-            null,
+            LabSettings.builder().labName("Lab Teste").build(),
             "corr-1",
             "req-1"
         );

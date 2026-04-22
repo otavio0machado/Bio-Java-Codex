@@ -26,4 +26,34 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
           AND m.nextDate <= CURRENT_DATE
         """)
     long countPendingMaintenances();
+
+    /**
+     * Retorna valores distintos de {@code equipment}, ordenados. Usado para
+     * autocomplete nos filtros de Reports V2. Alimentado pelo endpoint
+     * {@code GET /api/reports/v2/suggestions/equipment} com cache de 5 min.
+     */
+    @Query("""
+        SELECT DISTINCT m.equipment FROM MaintenanceRecord m
+        WHERE m.equipment IS NOT NULL AND m.equipment <> ''
+        ORDER BY m.equipment
+        """)
+    List<String> findDistinctEquipments();
+
+    /**
+     * Retorna manutencoes no intervalo de datas. Usado pelo generator de
+     * MANUTENCAO_KPI.
+     */
+    @Query("""
+        SELECT m FROM MaintenanceRecord m
+        WHERE m.date BETWEEN :start AND :end
+          AND (:equipment IS NULL OR LOWER(m.equipment) = LOWER(:equipment))
+          AND (:type IS NULL OR LOWER(m.type) = LOWER(:type))
+        ORDER BY m.date DESC
+        """)
+    List<MaintenanceRecord> findInPeriod(
+        @org.springframework.data.repository.query.Param("start") java.time.LocalDate start,
+        @org.springframework.data.repository.query.Param("end") java.time.LocalDate end,
+        @org.springframework.data.repository.query.Param("equipment") String equipment,
+        @org.springframework.data.repository.query.Param("type") String type
+    );
 }

@@ -6,6 +6,7 @@ import com.biodiagnostico.entity.ReportRun;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterField;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFormat;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -27,12 +28,15 @@ public final class ReportV2Mapper {
             def.code().name(),
             def.name(),
             def.description(),
+            def.subtitle(),
+            def.icon(),
             def.category().name(),
             def.supportedFormats().stream().map(ReportFormat::name).collect(Collectors.toUnmodifiableSet()),
             fields,
             Set.copyOf(def.roleAccess()),
             def.signatureRequired(),
             def.previewSupported(),
+            def.aiCommentaryCapable(),
             def.retentionDays(),
             def.legalBasis()
         );
@@ -66,8 +70,43 @@ public final class ReportV2Mapper {
             run.getExpiresAt(),
             downloadUrl,
             verifyUrl,
-            periodLabel
+            periodLabel,
+            parseLabels(run.getLabels())
         );
+    }
+
+    /**
+     * Converte o CSV armazenado em {@code report_runs.labels} em {@code List<String>}.
+     * Valores em branco e duplicados sao filtrados. A lista retornada e ordenada
+     * para produzir respostas deterministicas.
+     */
+    public static List<String> parseLabels(String csv) {
+        if (csv == null || csv.isBlank()) return List.of();
+        List<String> items = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.TreeSet<>();
+        for (String part : csv.split(",")) {
+            String trimmed = part == null ? "" : part.trim();
+            if (trimmed.isEmpty()) continue;
+            seen.add(trimmed);
+        }
+        items.addAll(seen);
+        return List.copyOf(items);
+    }
+
+    /**
+     * Serializa lista de labels em CSV ordenado e deduplicado.
+     * Utilizado por {@code ReportServiceV2.setLabels}.
+     */
+    public static String serializeLabels(List<String> labels) {
+        if (labels == null || labels.isEmpty()) return null;
+        java.util.Set<String> deduped = new java.util.TreeSet<>();
+        for (String l : labels) {
+            if (l == null) continue;
+            String trimmed = l.trim();
+            if (!trimmed.isEmpty()) deduped.add(trimmed);
+        }
+        if (deduped.isEmpty()) return null;
+        return String.join(",", deduped);
     }
 
     private static ReportDefinitionResponse.FilterFieldDto toFilterFieldDto(ReportFilterField f) {

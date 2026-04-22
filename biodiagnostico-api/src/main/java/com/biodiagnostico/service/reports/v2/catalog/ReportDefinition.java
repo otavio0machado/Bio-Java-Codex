@@ -21,30 +21,36 @@ import java.util.Set;
  * desenho cumpre RDC ANVISA 786/2023 + ISO 15189:2022, que exigem 5 anos de
  * retencao minima do laudo e guarda permanente do registro de responsabilidade.
  *
- * @param code              codigo estavel (chave primaria)
- * @param name              nome amigavel (pt-BR)
- * @param description       descricao curta
- * @param category          categoria de navegacao
- * @param supportedFormats  formatos que o generator sabe produzir
- * @param filterSpec        declaracao dos filtros aceitos
- * @param roleAccess        roles que podem gerar/visualizar
- * @param signatureRequired true = relatorio exige assinatura explicita pos-geracao
- * @param previewSupported  true = suporta endpoint /preview (HTML)
- * @param retentionDays     tempo <strong>minimo</strong> (em dias) para manter
- *                          o PDF acessivel via {@code /download}; nao afeta
- *                          auditoria ou log de assinatura
- * @param legalBasis        fundamento legal/regulatorio (texto livre, para rodape e auditoria)
+ * @param code                  codigo estavel (chave primaria)
+ * @param name                  nome amigavel (pt-BR)
+ * @param description           descricao curta
+ * @param subtitle              subtitulo longo/tagline (pode ser null)
+ * @param icon                  identificador de icone para UI (heroicons slug)
+ * @param category              categoria de navegacao
+ * @param supportedFormats      formatos que o generator sabe produzir
+ * @param filterSpec            declaracao dos filtros aceitos
+ * @param roleAccess            roles que podem gerar/visualizar
+ * @param signatureRequired     true = relatorio exige assinatura explicita pos-geracao
+ * @param previewSupported      true = suporta endpoint /preview (HTML)
+ * @param aiCommentaryCapable   true = generator suporta injetar comentario IA
+ * @param retentionDays         tempo <strong>minimo</strong> (em dias) para manter
+ *                              o PDF acessivel via {@code /download}; nao afeta
+ *                              auditoria ou log de assinatura
+ * @param legalBasis            fundamento legal/regulatorio (texto livre, para rodape e auditoria)
  */
 public record ReportDefinition(
     ReportCode code,
     String name,
     String description,
+    String subtitle,
+    String icon,
     ReportCategory category,
     Set<ReportFormat> supportedFormats,
     ReportFilterSpec filterSpec,
     Set<String> roleAccess,
     boolean signatureRequired,
     boolean previewSupported,
+    boolean aiCommentaryCapable,
     int retentionDays,
     String legalBasis
 ) {
