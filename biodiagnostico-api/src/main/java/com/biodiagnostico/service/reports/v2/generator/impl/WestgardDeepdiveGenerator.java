@@ -219,26 +219,65 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 }
             }
 
-            // Heatmap dia-semana x semana-mes
-            doc.add(ReportV2PdfTheme.section("Distribuicao temporal (dia da semana x semana do mes)"));
-            double[][] matrix = new double[7][5]; // dia [0..6] x semana [0..4]
+            // Heatmap dia-semana x semana-mes SEPARADO por severidade.
+            // Ressalva dominio-auditor: misturar advertencia+rejeicao no mesmo
+            // mapa suprime a informacao mais importante (onde caem as rejeicoes,
+            // que forcam repeticao do lote). Agora renderizamos 2 matrizes:
+            // REJEICAO (critico) + ADVERTENCIA (atencao).
+            double[][] matrixRej = new double[7][5];
+            double[][] matrixAdv = new double[7][5];
+            long countRej = 0, countAdv = 0;
             for (WestgardViolation v : violations) {
                 if (v.getQcRecord() == null || v.getQcRecord().getDate() == null) continue;
                 LocalDate d = v.getQcRecord().getDate();
                 int dow = d.getDayOfWeek().getValue() - 1; // 0..6 (Seg..Dom)
                 int week = Math.min(4, (d.getDayOfMonth() - 1) / 7);
-                matrix[dow][week]++;
+                String sev = v.getSeverity() == null ? "" : v.getSeverity().toUpperCase(Locale.ROOT);
+                if (sev.startsWith("REJ") || "CRITICAL".equals(sev)) {
+                    matrixRej[dow][week]++;
+                    countRej++;
+                } else {
+                    matrixAdv[dow][week]++;
+                    countAdv++;
+                }
             }
             List<String> xLabels = List.of("Seg", "Ter", "Qua", "Qui", "Sex", "Sab", "Dom");
             List<String> yLabels = List.of("Sem 1", "Sem 2", "Sem 3", "Sem 4", "Sem 5");
-            try {
-                byte[] png = chartRenderer.renderHeatmap(matrix, xLabels, yLabels, "Violacoes no tempo");
-                Image img = Image.getInstance(png);
-                img.scaleToFit(500F, 220F);
-                img.setAlignment(Element.ALIGN_CENTER);
-                doc.add(img);
-            } catch (Exception ex) {
-                LOG.warn("Falha ao renderizar heatmap", ex);
+
+            if (countRej > 0) {
+                doc.add(ReportV2PdfTheme.section("Distribuicao temporal — Rejeicoes (" + countRej + ")"));
+                try {
+                    byte[] png = chartRenderer.renderHeatmap(matrixRej, xLabels, yLabels,
+                        "Rejeicoes por dia-semana x semana-mes");
+                    Image img = Image.getInstance(png);
+                    img.scaleToFit(500F, 220F);
+                    img.setAlignment(Element.ALIGN_CENTER);
+                    doc.add(img);
+                } catch (Exception ex) {
+                    LOG.warn("Falha ao renderizar heatmap de rejeicoes", ex);
+                }
+            }
+            if (countAdv > 0) {
+                doc.add(ReportV2PdfTheme.section("Distribuicao temporal — Advertencias (" + countAdv + ")"));
+                try {
+                    byte[] png = chartRenderer.renderHeatmap(matrixAdv, xLabels, yLabels,
+                        "Advertencias por dia-semana x semana-mes");
+                    Image img = Image.getInstance(png);
+                    img.scaleToFit(500F, 220F);
+                    img.setAlignment(Element.ALIGN_CENTER);
+                    doc.add(img);
+                } catch (Exception ex) {
+                    LOG.warn("Falha ao renderizar heatmap de advertencias", ex);
+                }
+            }
+            if (countRej == 0 && countAdv == 0) {
+                com.lowagie.text.Paragraph empty = new com.lowagie.text.Paragraph(
+                    "Sem violacoes registradas no periodo selecionado.",
+                    com.lowagie.text.FontFactory.getFont(
+                        com.lowagie.text.FontFactory.HELVETICA, 10F,
+                        com.lowagie.text.Font.ITALIC, ReportV2PdfTheme.MUTED));
+                empty.setSpacingBefore(6F);
+                doc.add(empty);
             }
 
             // Lista detalhada top 30
