@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -34,6 +35,18 @@ public class GlobalExceptionHandler {
         }
         return ResponseEntity.badRequest()
             .body(ApiError.of(HttpStatus.BAD_REQUEST, "Dados inválidos", fields));
+    }
+
+    // Corpo malformado: Jackson falha ao desserializar (ex: "" para LocalDate).
+    // Sem este handler o Spring devolve 400 sem body, e o frontend mostra apenas
+    // "Request failed with status code 400" — sem pista do campo culpado.
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiError> handleUnreadable(HttpMessageNotReadableException exception) {
+        return ResponseEntity.badRequest()
+            .body(ApiError.of(
+                HttpStatus.BAD_REQUEST,
+                "Corpo da requisição inválido. Verifique os campos enviados (datas devem estar no formato yyyy-MM-dd ou ausentes)."
+            ));
     }
 
     @ExceptionHandler(AccessDeniedException.class)

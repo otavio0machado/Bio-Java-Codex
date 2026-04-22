@@ -147,8 +147,10 @@ export function ReagentLotModal({
             <Input
               label="Início de Uso"
               type="date"
-              value={form.startDate}
-              onChange={(event) => setForm((current) => ({ ...current, startDate: event.target.value }))}
+              value={form.startDate ?? ''}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, startDate: event.target.value || undefined }))
+              }
             />
             <Input
               label="Data Fim de Uso"
@@ -191,13 +193,17 @@ export function ReagentLotModal({
               label="Data de recebimento"
               type="date"
               value={form.receivedDate ?? ''}
-              onChange={(event) => setForm((current) => ({ ...current, receivedDate: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, receivedDate: event.target.value || undefined }))
+              }
             />
             <Input
               label="Data de abertura"
               type="date"
               value={form.openedDate ?? ''}
-              onChange={(event) => setForm((current) => ({ ...current, openedDate: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, openedDate: event.target.value || undefined }))
+              }
             />
           </div>
         </FormSection>

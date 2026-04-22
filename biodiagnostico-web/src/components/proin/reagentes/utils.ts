@@ -55,8 +55,8 @@ export function createEmptyLotForm(): ReagentLotRequest {
     status: 'ativo',
     location: '',
     supplier: '',
-    receivedDate: '',
-    openedDate: '',
+    receivedDate: undefined,
+    openedDate: undefined,
   }
 }
 

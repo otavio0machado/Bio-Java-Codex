@@ -122,14 +122,14 @@ export function ReagentesTab() {
       currentStock: lot.currentStock,
       estimatedConsumption: lot.estimatedConsumption,
       storageTemp: lot.storageTemp ?? '',
-      startDate: lot.startDate ?? '',
+      startDate: lot.startDate ?? undefined,
       endDate: lot.endDate ?? undefined,
       alertThresholdDays: lot.alertThresholdDays,
       status: lot.status,
       location: lot.location ?? '',
       supplier: lot.supplier ?? '',
-      receivedDate: lot.receivedDate ?? '',
-      openedDate: lot.openedDate ?? '',
+      receivedDate: lot.receivedDate ?? undefined,
+      openedDate: lot.openedDate ?? undefined,
     })
     setIsLotModalOpen(true)
   }
