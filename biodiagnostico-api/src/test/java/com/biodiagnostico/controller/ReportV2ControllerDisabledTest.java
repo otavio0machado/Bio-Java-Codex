@@ -44,15 +44,15 @@ class ReportV2ControllerDisabledTest {
     }
 
     @Test
-    @DisplayName("ReportsV2StartupValidator: enabled=true sem storage.dir falha")
-    void startupValidatorFailsWhenMisconfigured() {
+    @DisplayName("ReportsV2StartupValidator: enabled=true sem storage.dir degrada com WARN (nao lanca)")
+    void startupValidatorWarnsWhenMisconfigured() {
+        // Regressao: originalmente o validator lancava IllegalStateException quando
+        // reports.v2.storage.dir nao estava configurado. Isso derrubava prod em
+        // crashloop quando a flag era ligada antes de setar o env var. Agora o
+        // validator apenas emite WARN e o LocalFilesystemReportStorage aplica
+        // fallback para java.io.tmpdir.
         ReportsV2Properties p = new ReportsV2Properties();
         p.setEnabled(true);
-        try {
-            new ReportsV2StartupValidator(p).validate();
-            throw new AssertionError("Esperava IllegalStateException");
-        } catch (IllegalStateException ex) {
-            assertThat(ex.getMessage()).contains("storage.dir");
-        }
+        new ReportsV2StartupValidator(p).validate(); // nao lanca
     }
 }

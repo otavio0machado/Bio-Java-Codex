@@ -34,15 +34,17 @@ public class ReportsV2StartupValidator {
         }
         String storageDir = properties.getStorage() != null ? properties.getStorage().getDir() : null;
         if (storageDir == null || storageDir.isBlank()) {
-            throw new IllegalStateException(
-                "reports.v2.enabled=true mas reports.v2.storage.dir nao foi configurado. "
-                + "Defina REPORTS_V2_STORAGE_DIR ou reports.v2.storage.dir no application.yml."
+            // WARN e continua. O storage bean ja aplica fallback para
+            // java.io.tmpdir — preferimos ephemeral a crashloop em prod.
+            LOG.warn(
+                "reports.v2.enabled=true mas reports.v2.storage.dir nao configurado. "
+                + "Storage esta em tmpdir ephemeral. Defina REPORTS_V2_STORAGE_DIR para persistencia confiavel."
             );
         }
         if (properties.getPublicBaseUrl() == null || properties.getPublicBaseUrl().isBlank()) {
-            throw new IllegalStateException(
-                "reports.v2.enabled=true mas reports.v2.public-base-url nao foi configurado. "
-                + "Defina REPORTS_V2_PUBLIC_BASE_URL ou reports.v2.public-base-url no application.yml."
+            LOG.warn(
+                "reports.v2.enabled=true mas reports.v2.public-base-url nao configurado. "
+                + "QR code de verificacao usara URL relativa — configure REPORTS_V2_PUBLIC_BASE_URL."
             );
         }
         LOG.info("Reports V2 habilitado. storage.dir={} publicBaseUrl={} retentionDays={}",

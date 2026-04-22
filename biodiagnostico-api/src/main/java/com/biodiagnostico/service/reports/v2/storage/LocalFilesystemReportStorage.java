@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -27,15 +29,28 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "reports.v2", name = "enabled", havingValue = "true")
 public class LocalFilesystemReportStorage implements ReportStorage {
 
+    private static final Logger LOG = LoggerFactory.getLogger(LocalFilesystemReportStorage.class);
+    private static final String FALLBACK_SUBDIR = "biodiagnostico-reports-v2";
+
     private final Path baseDir;
 
     @Autowired
     public LocalFilesystemReportStorage(ReportsV2Properties properties) {
         String dir = properties.getStorage() != null ? properties.getStorage().getDir() : null;
         if (dir == null || dir.isBlank()) {
-            throw new IllegalStateException("reports.v2.storage.dir obrigatorio quando reports.v2.enabled=true");
+            // Nao lancamos — em prod o ambiente pode ter ligado a flag antes
+            // de configurar REPORTS_V2_STORAGE_DIR e preferimos um fallback
+            // ephemeral a derrubar o container em crashloop. Storage em tmp e
+            // aceitavel para piloto; Supabase Storage entra numa proxima fase.
+            Path fallback = Paths.get(System.getProperty("java.io.tmpdir"), FALLBACK_SUBDIR).toAbsolutePath();
+            LOG.warn(
+                "reports.v2.storage.dir nao configurado. Usando fallback ephemeral em {}. "
+                + "Configure REPORTS_V2_STORAGE_DIR para persistencia confiavel.",
+                fallback);
+            this.baseDir = fallback;
+        } else {
+            this.baseDir = Paths.get(dir).toAbsolutePath();
         }
-        this.baseDir = Paths.get(dir).toAbsolutePath();
     }
 
     /**
