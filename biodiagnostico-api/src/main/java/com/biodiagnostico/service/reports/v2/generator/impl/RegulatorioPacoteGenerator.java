@@ -17,6 +17,9 @@ import com.lowagie.text.Document;
 import com.lowagie.text.Element;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
+import com.lowagie.text.Phrase;
+import com.lowagie.text.pdf.PdfPCell;
+import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfCopy;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.PdfWriter;
@@ -24,12 +27,12 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Optional;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,11 +45,19 @@ import org.springframework.transaction.annotation.Transactional;
  * - Indice textual
  * - Cada subordinado como secao
  *
- * <p><strong>Decisao de design</strong>: numeracao "queima" e aceitavel na
- * primeira iteracao. Cada subordinado reserva seu proprio numero; o pacote
- * usa seu proprio numero novo. Em iteracao futura podemos introduzir um
- * parametro {@code ctx.isSubordinate} para evitar isso, mas o impacto da
- * mudanca no contrato dos subordinados e desproporcional.
+ * <p><strong>Isolamento de transacao (T1)</strong>: cada generator subordinado
+ * roda em transacao separada via {@link SubordinateInvocation} (propagacao
+ * REQUIRES_NEW). Motivacao: quando uma secao falha com SQLException, a tx
+ * outer entra em {@code current transaction is aborted, commands ignored} e
+ * toda geracao do pacote morre em cascata. Com REQUIRES_NEW, cada secao tem
+ * seu proprio escopo transacional — falhas ficam contidas.
+ *
+ * <p><strong>Falha parcial visivel (T2)</strong>: quando menos de 6 secoes
+ * geram, o pacote e emitido mesmo assim. Na declaracao de autenticidade
+ * imprimimos uma caixa de atencao listando quais secoes falharam; o
+ * {@link ReportArtifact#warnings()} exposto no response carrega a mesma lista
+ * para que o frontend mostre toast/banner. Apenas quando TODAS as 6 falham o
+ * pacote aborta (documento fantasma sem conteudo nao e aceitavel).
  *
  * <p><strong>Preview</strong>: HTML leve listando secoes, sem gerar o pacote
  * pesado (para economizar tempo de resposta).
@@ -67,6 +78,7 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
     private final ReportNumberingService reportNumberingService;
     private final LabHeaderRenderer headerRenderer;
     private final LabSettingsService labSettingsService;
+    private final SubordinateInvocation subordinate;
 
     public RegulatorioPacoteGenerator(
         CqOperationalV2Generator cqGen,
@@ -77,7 +89,8 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
         MultiAreaConsolidadoGenerator multiAreaGen,
         ReportNumberingService reportNumberingService,
         LabHeaderRenderer headerRenderer,
-        LabSettingsService labSettingsService
+        LabSettingsService labSettingsService,
+        SubordinateInvocation subordinate
     ) {
         this.cqGen = cqGen;
         this.westgardGen = westgardGen;
@@ -88,6 +101,7 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
         this.reportNumberingService = reportNumberingService;
         this.headerRenderer = headerRenderer;
         this.labSettingsService = labSettingsService;
+        this.subordinate = subordinate;
     }
 
     @Override
@@ -102,43 +116,20 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
         String periodLabel = periodLabel(filters);
 
         List<SectionPdf> sections = new ArrayList<>();
-        try {
-            // Cada subordinado retorna seu proprio PDF (com seu proprio numero)
-            sections.add(section("Relatorio Operacional de CQ",
-                cqGen.generate(forwardCqFilters(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao CQ falhou", ex);
-        }
-        try {
-            sections.add(section("Westgard Deepdive",
-                westgardGen.generate(forwardWestgardFilters(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao Westgard falhou", ex);
-        }
-        try {
-            sections.add(section("Rastreabilidade de Reagentes",
-                reagentesGen.generate(forwardEmpty(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao Reagentes falhou", ex);
-        }
-        try {
-            sections.add(section("KPIs de Manutencao",
-                manutencaoGen.generate(forwardPeriodOnly(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao Manutencao falhou", ex);
-        }
-        try {
-            sections.add(section("Calibracao Pre/Pos",
-                calibracaoGen.generate(forwardPeriodOnly(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao Calibracao falhou", ex);
-        }
-        try {
-            sections.add(section("Consolidado Multi-area",
-                multiAreaGen.generate(forwardMultiAreaFilters(filters), ctx).bytes()));
-        } catch (RuntimeException ex) {
-            LOG.warn("Secao Multi-area falhou", ex);
-        }
+        List<String> warnings = new ArrayList<>();
+
+        runSection(sections, warnings, "Relatorio Operacional de CQ",
+            () -> cqGen.generate(forwardCqFilters(filters), ctx).bytes());
+        runSection(sections, warnings, "Westgard Deepdive",
+            () -> westgardGen.generate(forwardWestgardFilters(filters), ctx).bytes());
+        runSection(sections, warnings, "Rastreabilidade de Reagentes",
+            () -> reagentesGen.generate(forwardEmpty(filters), ctx).bytes());
+        runSection(sections, warnings, "KPIs de Manutencao",
+            () -> manutencaoGen.generate(forwardPeriodOnly(filters), ctx).bytes());
+        runSection(sections, warnings, "Calibracao Pre/Pos",
+            () -> calibracaoGen.generate(forwardPeriodOnly(filters), ctx).bytes());
+        runSection(sections, warnings, "Consolidado Multi-area",
+            () -> multiAreaGen.generate(forwardMultiAreaFilters(filters), ctx).bytes());
 
         // Garantia regulatoria: pacote vazio e documento fantasma. Se todas as
         // 6 secoes falharam, aborta para nao emitir laudo com numero + auditoria
@@ -150,12 +141,30 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
             );
         }
 
-        byte[] merged = mergePackage(sections, ctx, reportNumber, periodLabel);
+        byte[] merged = mergePackage(sections, ctx, reportNumber, periodLabel, warnings);
         String sha256 = reportNumberingService.sha256Hex(merged);
         reportNumberingService.registerGeneration(reportNumber, "regulatorio", "PDF", periodLabel,
             merged, ctx == null ? null : ctx.userId());
         return new ReportArtifact(merged, "application/pdf", reportNumber + ".pdf", 0,
-            merged.length, reportNumber, sha256, periodLabel);
+            merged.length, reportNumber, sha256, periodLabel, List.copyOf(warnings));
+    }
+
+    /**
+     * Invoca {@code task} em tx isolada (REQUIRES_NEW). Em caso de falha,
+     * adiciona warning e segue para a proxima secao.
+     */
+    private void runSection(
+        List<SectionPdf> out,
+        List<String> warnings,
+        String title,
+        Supplier<byte[]> task
+    ) {
+        Optional<byte[]> result = subordinate.runIsolated(title, task);
+        if (result.isPresent()) {
+            out.add(new SectionPdf(title, result.get()));
+        } else {
+            warnings.add("Secao '" + title + "' falhou — conteudo omitido");
+        }
     }
 
     @Override
@@ -181,14 +190,15 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
     // ---------- merge ----------
 
     private byte[] mergePackage(List<SectionPdf> sections, GenerationContext ctx,
-                                String reportNumber, String periodLabel) {
+                                String reportNumber, String periodLabel,
+                                List<String> warnings) {
         LabSettings settings = ctx != null && ctx.labSettings() != null ? ctx.labSettings()
             : labSettingsService.getOrCreateSingleton();
         String respName = settings == null ? "" : settings.getResponsibleName();
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             // Passo 1: gerar declaracao de autenticidade como PDF independente
-            byte[] declaration = buildDeclaration(reportNumber, periodLabel, ctx);
+            byte[] declaration = buildDeclaration(reportNumber, periodLabel, ctx, warnings);
 
             // Passo 2: concatenar com PdfCopy
             Document mergedDoc = new Document(PageSize.A4);
@@ -217,7 +227,8 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
         }
     }
 
-    private byte[] buildDeclaration(String reportNumber, String periodLabel, GenerationContext ctx) {
+    private byte[] buildDeclaration(String reportNumber, String periodLabel, GenerationContext ctx,
+                                    List<String> warnings) {
         LabSettings settings = ctx != null && ctx.labSettings() != null ? ctx.labSettings()
             : labSettingsService.getOrCreateSingleton();
         String respName = settings == null ? "-" : settings.getResponsibleName();
@@ -245,6 +256,27 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
             p.setAlignment(Element.ALIGN_JUSTIFIED);
             p.setSpacingAfter(20F);
             doc.add(p);
+
+            // T2: quando ha secoes falhadas, destacar em caixa de atencao
+            // para que o operador nao entregue um pacote parcial acreditando
+            // que esta integral.
+            if (warnings != null && !warnings.isEmpty()) {
+                PdfPTable wrap = new PdfPTable(1);
+                wrap.setWidthPercentage(100F);
+                StringBuilder sb = new StringBuilder();
+                sb.append("ATENCAO: este pacote foi gerado parcialmente. ")
+                  .append(warnings.size()).append(" secao(oes) falharam e foram omitidas:\n");
+                for (String w : warnings) {
+                    sb.append("  - ").append(w).append('\n');
+                }
+                PdfPCell cell = new PdfPCell(new Phrase(sb.toString(), ReportV2PdfTheme.AI_FONT));
+                cell.setBackgroundColor(ReportV2PdfTheme.ALERT_BG);
+                cell.setBorderColor(ReportV2PdfTheme.STATUS_REPROVADO);
+                cell.setPadding(10F);
+                wrap.addCell(cell);
+                wrap.setSpacingAfter(14F);
+                doc.add(wrap);
+            }
 
             Paragraph sumTitle = new Paragraph("Indice", ReportV2PdfTheme.SUBSECTION_FONT);
             sumTitle.setSpacingAfter(6F);
@@ -339,10 +371,6 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
     private static String capitalize(String v) {
         if (v == null || v.isEmpty()) return "";
         return v.substring(0, 1).toUpperCase(PT_BR) + v.substring(1);
-    }
-
-    private SectionPdf section(String title, byte[] bytes) {
-        return new SectionPdf(title, bytes);
     }
 
     record SectionPdf(String title, byte[] bytes) {}

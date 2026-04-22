@@ -136,6 +136,14 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
             List<String> areas = rf.areas == null || rf.areas.isEmpty()
                 ? ReportDefinitionRegistry.AREAS
                 : rf.areas;
+            // T5: calcula reagentes criticos/manutencoes pendentes uma unica
+            // vez fora do loop (eram invariantes por area, recalculados seis
+            // vezes). Alem de corrigir o uso abusivo de findAll, garante
+            // coerencia entre a tabela e o card de alertas abaixo.
+            LocalDate today = LocalDate.now();
+            long reagCrit = reagentLotRepository.countExpiredWithStock(today);
+            long manutPend = maintenanceRepository.findOverdue(today).size();
+
             for (String area : areas) {
                 List<QcRecord> recs = qcRecordRepository.findByAreaAndDateRange(area, rf.start, rf.end);
                 int total = recs.size();
@@ -143,14 +151,6 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
                 long alertas = recs.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
                 double taxa = total == 0 ? 0 : (aprovados * 100.0 / total);
                 rateChart.put(area, taxa);
-
-                long reagCrit = reagentLotRepository.findAll().stream()
-                    .filter(l -> l.getExpiryDate() != null && l.getExpiryDate().isBefore(LocalDate.now())
-                        && l.getCurrentStock() != null && l.getCurrentStock() > 0)
-                    .count();
-                long manutPend = maintenanceRepository.findAll().stream()
-                    .filter(m -> m.getNextDate() != null && m.getNextDate().isBefore(LocalDate.now()))
-                    .count();
 
                 ReportV2PdfTheme.bodyRow(t, alt,
                     capitalize(area),
@@ -178,19 +178,16 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
                 }
             }
 
-            // Alertas transversais
+            // Alertas transversais — T5: todas queries janeladas/contadores
             doc.add(ReportV2PdfTheme.section("Alertas transversais"));
-            long rejeicoesGraves = violationRepository.findAll().stream()
+            // Rejeicoes Westgard do periodo, todas areas (area=null). Filtramos
+            // severidade no stream porque o banco tem tanto "REJEICAO" (legado)
+            // quanto "REJECTION" (padrao novo) e nao queremos acoplar isso a query.
+            long rejeicoesGraves = violationRepository.findByAreaAndPeriod(null, rf.start, rf.end).stream()
                 .filter(v -> "REJEICAO".equalsIgnoreCase(v.getSeverity()) || "REJECTION".equalsIgnoreCase(v.getSeverity()))
-                .filter(v -> v.getQcRecord() != null && v.getQcRecord().getDate() != null
-                    && !v.getQcRecord().getDate().isBefore(rf.start)
-                    && !v.getQcRecord().getDate().isAfter(rf.end))
                 .count();
-            long reagVencidos = reagentLotRepository.findAll().stream()
-                .filter(l -> l.getExpiryDate() != null && l.getExpiryDate().isBefore(LocalDate.now())
-                    && l.getCurrentStock() != null && l.getCurrentStock() > 0).count();
-            long manutAtrasadas = maintenanceRepository.findAll().stream()
-                .filter(m -> m.getNextDate() != null && m.getNextDate().isBefore(LocalDate.now())).count();
+            long reagVencidos = reagCrit;           // reaproveita contagem feita acima
+            long manutAtrasadas = manutPend;        // idem
 
             PdfPTable alertTable = ReportV2PdfTheme.table(new float[] {3F, 1F});
             ReportV2PdfTheme.headerRow(alertTable, "Alerta", "Ocorrencias");

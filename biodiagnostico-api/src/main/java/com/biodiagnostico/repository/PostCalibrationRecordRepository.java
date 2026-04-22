@@ -16,9 +16,16 @@ public interface PostCalibrationRecordRepository extends JpaRepository<PostCalib
 
     List<PostCalibrationRecord> findByQcRecord_IdIn(Collection<UUID> qcRecordIds);
 
+    /**
+     * <b>Importante</b>: passe {@code area} ja em lowercase
+     * ({@code String.toLowerCase(Locale.ROOT)}) — evitamos {@code LOWER(:param)}
+     * no JPQL porque PostgreSQL infere tipo {@code bytea} para parametros
+     * nao tipados em {@code LOWER()}, quebrando com {@code function lower(bytea)
+     * does not exist}.
+     */
     @Query("""
         SELECT p FROM PostCalibrationRecord p
-        WHERE LOWER(p.qcRecord.area) = LOWER(:area)
+        WHERE LOWER(p.qcRecord.area) = :area
           AND p.qcRecord.date BETWEEN :startDate AND :endDate
         """)
     List<PostCalibrationRecord> findByQcRecordAreaAndDateRange(

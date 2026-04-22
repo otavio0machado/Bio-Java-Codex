@@ -285,12 +285,10 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
     }
 
     private List<WestgardViolation> loadViolations(Resolved rf) {
-        return violationRepository.findAll().stream()
-            .filter(v -> v.getQcRecord() != null && v.getQcRecord().getDate() != null
-                && !v.getQcRecord().getDate().isBefore(rf.start)
-                && !v.getQcRecord().getDate().isAfter(rf.end)
-                && (rf.area == null || (v.getQcRecord().getArea() != null
-                        && v.getQcRecord().getArea().equalsIgnoreCase(rf.area))))
+        // T5: query janelada com JOIN FETCH — evita findAll()+filter que
+        // carregava o universo inteiro. Area ja vem em lowercase (Resolved.area).
+        List<WestgardViolation> base = violationRepository.findByAreaAndPeriod(rf.area, rf.start, rf.end);
+        return base.stream()
             .filter(v -> rf.rules == null || rf.rules.isEmpty() || rf.rules.contains(v.getRule()))
             .filter(v -> rf.severity == null || rf.severity.isBlank()
                 || (v.getSeverity() != null && v.getSeverity().equalsIgnoreCase(rf.severity)))

@@ -42,12 +42,20 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
     /**
      * Retorna manutencoes no intervalo de datas. Usado pelo generator de
      * MANUTENCAO_KPI.
+     *
+     * <p><b>Importante</b>: os parametros {@code equipment} e {@code type}
+     * devem chegar <em>ja em lowercase</em> (via {@code String.toLowerCase(ROOT)}
+     * no caller). Evitamos {@code LOWER(:param)} no JPQL porque PostgreSQL,
+     * quando o parametro e {@code null}, infere tipo {@code bytea} por default e
+     * lanca {@code function lower(bytea) does not exist}. A query foi simplificada
+     * para comparar diretamente o parametro ja-normalizado contra o lowercase
+     * da coluna.
      */
     @Query("""
         SELECT m FROM MaintenanceRecord m
         WHERE m.date BETWEEN :start AND :end
-          AND (:equipment IS NULL OR LOWER(m.equipment) = LOWER(:equipment))
-          AND (:type IS NULL OR LOWER(m.type) = LOWER(:type))
+          AND (:equipment IS NULL OR LOWER(m.equipment) = :equipment)
+          AND (:type IS NULL OR LOWER(m.type) = :type)
         ORDER BY m.date DESC
         """)
     List<MaintenanceRecord> findInPeriod(
@@ -55,5 +63,36 @@ public interface MaintenanceRecordRepository extends JpaRepository<MaintenanceRe
         @org.springframework.data.repository.query.Param("end") java.time.LocalDate end,
         @org.springframework.data.repository.query.Param("equipment") String equipment,
         @org.springframework.data.repository.query.Param("type") String type
+    );
+
+    /**
+     * T5 — proximas manutencoes agendadas dentro de uma janela, a partir de
+     * {@code today}. Substitui o padrao {@code findAll().stream().filter(...)}
+     * usado pelo generator de Manutencao.
+     */
+    @Query("""
+        SELECT m FROM MaintenanceRecord m
+        WHERE m.nextDate IS NOT NULL
+          AND m.nextDate >= :today
+          AND m.nextDate < :limit
+        ORDER BY m.nextDate ASC
+        """)
+    List<MaintenanceRecord> findUpcoming(
+        @org.springframework.data.repository.query.Param("today") java.time.LocalDate today,
+        @org.springframework.data.repository.query.Param("limit") java.time.LocalDate limit
+    );
+
+    /**
+     * T5 — manutencoes atrasadas (nextDate &lt; today). Usada em alertas do
+     * consolidado multi-area.
+     */
+    @Query("""
+        SELECT m FROM MaintenanceRecord m
+        WHERE m.nextDate IS NOT NULL
+          AND m.nextDate < :today
+        ORDER BY m.nextDate ASC
+        """)
+    List<MaintenanceRecord> findOverdue(
+        @org.springframework.data.repository.query.Param("today") java.time.LocalDate today
     );
 }

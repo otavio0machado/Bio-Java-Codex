@@ -43,6 +43,15 @@ public final class ReportV2Mapper {
     }
 
     public static ReportExecutionResponse toResponse(ReportRun run, String publicBaseUrl) {
+        return toResponse(run, publicBaseUrl, List.of());
+    }
+
+    /**
+     * Variante que aceita warnings gerados no momento da execucao (nao
+     * persistidos em ReportRun). Usado no retorno de {@code /generate} para
+     * o pacote regulatorio informar quais secoes subordinadas falharam.
+     */
+    public static ReportExecutionResponse toResponse(ReportRun run, String publicBaseUrl, List<String> warnings) {
         String downloadUrl = "/api/reports/v2/executions/" + run.getId() + "/download";
         String verifyUrl = null;
         if (run.getSha256() != null && publicBaseUrl != null && !publicBaseUrl.isBlank()) {
@@ -71,7 +80,8 @@ public final class ReportV2Mapper {
             downloadUrl,
             verifyUrl,
             periodLabel,
-            parseLabels(run.getLabels())
+            parseLabels(run.getLabels()),
+            warnings == null ? List.of() : List.copyOf(warnings)
         );
     }
 

@@ -7,7 +7,16 @@
          Profile: local (default) - Human-readable colored console
          ============================================================ -->
     <springProfile name="local | default">
-        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <!--
+          Appender local humano-legivel. Inclui correlationId do MDC entre
+          colchetes quando presente (cai para "-" quando nao houver).
+          Fonte: preenchido por CorrelationIdFilter em cada request HTTP.
+        -->
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-}] %logger{36} - %msg%n</pattern>
+            </encoder>
+        </appender>
 
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>

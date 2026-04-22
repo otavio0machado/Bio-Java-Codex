@@ -39,9 +39,40 @@ public record ReportExecutionResponse(
     String downloadUrl,
     String verifyUrl,
     String periodLabel,
-    List<String> labels
+    List<String> labels,
+    List<String> warnings
 ) {
     public ReportExecutionResponse {
         if (labels == null) labels = List.of();
+        if (warnings == null) warnings = List.of();
+    }
+
+    /**
+     * Ctor-compat: clientes/mappers pre-existentes que ainda nao passam
+     * warnings. Mantido para nao quebrar chamadas de V1/testes historicos.
+     */
+    public ReportExecutionResponse(
+        UUID id,
+        String reportCode,
+        String format,
+        String status,
+        String reportNumber,
+        String sha256,
+        String signatureHash,
+        String signedSha256,
+        Long sizeBytes,
+        Integer pageCount,
+        String username,
+        Instant createdAt,
+        Instant signedAt,
+        Instant expiresAt,
+        String downloadUrl,
+        String verifyUrl,
+        String periodLabel,
+        List<String> labels
+    ) {
+        this(id, reportCode, format, status, reportNumber, sha256, signatureHash,
+            signedSha256, sizeBytes, pageCount, username, createdAt, signedAt,
+            expiresAt, downloadUrl, verifyUrl, periodLabel, labels, List.of());
     }
 }

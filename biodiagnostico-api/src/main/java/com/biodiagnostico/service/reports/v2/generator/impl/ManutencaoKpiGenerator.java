@@ -166,14 +166,9 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
                 doc.add(t);
             }
 
-            // Proximas manutencoes
+            // Proximas manutencoes — T5: query janelada (substitui findAll+filter)
             LocalDate today = LocalDate.now();
-            List<MaintenanceRecord> upcoming = repository.findAll().stream()
-                .filter(r -> r.getNextDate() != null
-                    && !r.getNextDate().isBefore(today)
-                    && r.getNextDate().isBefore(today.plusDays(90)))
-                .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
-                .collect(Collectors.toList());
+            List<MaintenanceRecord> upcoming = repository.findUpcoming(today, today.plusDays(90));
             if (!upcoming.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("Proximas manutencoes (90 dias)"));
                 PdfPTable t = ReportV2PdfTheme.table(new float[] {3F, 1.6F, 1.5F, 1.5F});
@@ -191,11 +186,8 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
                 doc.add(t);
             }
 
-            // Atrasadas
-            List<MaintenanceRecord> overdue = repository.findAll().stream()
-                .filter(r -> r.getNextDate() != null && r.getNextDate().isBefore(today))
-                .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
-                .collect(Collectors.toList());
+            // Atrasadas — T5: query janelada
+            List<MaintenanceRecord> overdue = repository.findOverdue(today);
             if (!overdue.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("ATENCAO: Manutencoes atrasadas"));
                 PdfPTable wrap = new PdfPTable(1);
@@ -246,8 +238,16 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
 
     private Resolved resolve(ReportFilters filters) {
         Resolved r = new Resolved();
-        r.equipment = filters.getString("equipment").orElse(null);
-        r.type = filters.getString("maintenanceType").orElse(null);
+        // Normalizar p/ lowercase — repository evita LOWER(:param) pra nao cair
+        // no bug PostgreSQL (infere bytea para param null em LOWER).
+        r.equipment = filters.getString("equipment")
+            .map(s -> s.trim().toLowerCase(Locale.ROOT))
+            .filter(s -> !s.isEmpty())
+            .orElse(null);
+        r.type = filters.getString("maintenanceType")
+            .map(s -> s.trim().toLowerCase(Locale.ROOT))
+            .filter(s -> !s.isEmpty())
+            .orElse(null);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
         String periodType = filters.getString("periodType")
             .map(s -> s.trim().toLowerCase(Locale.ROOT)).orElse("current-month");

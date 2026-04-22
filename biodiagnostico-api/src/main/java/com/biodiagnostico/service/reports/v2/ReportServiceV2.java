@@ -165,7 +165,10 @@ public class ReportServiceV2 {
             ReportRun run = reportRunService.recordSuccessV2(
                 artifact, definition, storageKey, ctx, rawFilters, format
             );
-            return ReportV2Mapper.toResponse(run, properties.getPublicBaseUrl());
+            // warnings sao transientes do request atual. Persistir em ReportRun
+            // exigiria migration; como sao apenas metadata de UX (frontend
+            // mostra toast e banner), ficam expostos apenas na resposta imediata.
+            return ReportV2Mapper.toResponse(run, properties.getPublicBaseUrl(), artifact.warnings());
         } catch (InvalidFilterException | ReportCodeNotFoundException | AccessDeniedException ex) {
             reportRunService.recordFailureV2(definition, ctx, rawFilters, format, ex.getMessage());
             throw ex;
@@ -525,6 +528,13 @@ public class ReportServiceV2 {
         String username = auth == null ? null : auth.getName();
         Set<String> roles = extractRoles(auth);
         LabSettings settings = labSettingsService.getOrCreateSingleton();
+        // T4: reaproveita correlationId do MDC (preenchido por
+        // CorrelationIdFilter). Fallback: UUID novo se nao houver MDC
+        // (execucoes de teste, chamadas fora de HTTP).
+        String correlationId = org.slf4j.MDC.get("correlationId");
+        if (correlationId == null || correlationId.isBlank()) {
+            correlationId = UUID.randomUUID().toString().substring(0, 8);
+        }
         return new GenerationContext(
             userId,
             username,
@@ -532,7 +542,7 @@ public class ReportServiceV2 {
             Instant.now(),
             DEFAULT_ZONE,
             settings,
-            UUID.randomUUID().toString(),
+            correlationId,
             UUID.randomUUID().toString()
         );
     }

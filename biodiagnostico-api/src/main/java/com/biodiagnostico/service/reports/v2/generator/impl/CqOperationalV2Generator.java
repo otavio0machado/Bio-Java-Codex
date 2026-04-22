@@ -348,11 +348,18 @@ public class CqOperationalV2Generator implements ReportGenerator {
             String exam = parts.length > 0 ? parts[0] : "-";
             String level = parts.length > 1 ? parts[1] : "-";
             String lot = parts.length > 2 ? parts[2] : "-";
-            DoubleSummaryStatistics stats = group.stream().mapToDouble(QcRecord::getValue).summaryStatistics();
-            double mean = stats.getAverage();
-            double sd = stddev(group, mean);
+            // T6: usa Statistics (BigDecimal interno) — estabilidade numerica
+            // em series longas. Apresentacao final continua em double/%.2f.
+            List<Double> values = group.stream()
+                .map(QcRecord::getValue)
+                .collect(Collectors.toList());
+            double mean = com.biodiagnostico.service.reports.v2.util.Statistics
+                .mean(values).doubleValue();
+            double sd = com.biodiagnostico.service.reports.v2.util.Statistics
+                .stdDev(values).doubleValue();
+            double cv = com.biodiagnostico.service.reports.v2.util.Statistics
+                .cv(values).doubleValue();
             double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
-            double cv = mean == 0 ? 0 : (sd / mean) * 100.0;
             long reprovados = group.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
             long alertas = group.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
             String status = reprovados > 0 ? "REPROVADO" : (alertas > 0 ? "ALERTA" : "APROVADO");
@@ -464,8 +471,14 @@ public class CqOperationalV2Generator implements ReportGenerator {
         for (Map.Entry<String, List<QcRecord>> entry : top) {
             List<QcRecord> group = entry.getValue();
             double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
+            // T6: quando targetSd nao e informado, usa stdDev do grupo via
+            // Statistics (BigDecimal). Minimo de 0.0001 para nao quebrar
+            // traces L-J (divisao por zero em limites +/-nSD).
+            double groupSd = com.biodiagnostico.service.reports.v2.util.Statistics
+                .stdDev(group.stream().map(QcRecord::getValue).collect(Collectors.toList()))
+                .doubleValue();
             double sd = group.get(0).getTargetSd() == null || group.get(0).getTargetSd() == 0
-                ? Math.max(stddev(group, mean(group)), 0.0001)
+                ? Math.max(groupSd, 0.0001)
                 : group.get(0).getTargetSd();
             List<ChartRenderer.LjPoint> points = group.stream()
                 .sorted(Comparator.comparing(QcRecord::getDate))
@@ -486,15 +499,9 @@ public class CqOperationalV2Generator implements ReportGenerator {
     }
 
     private void renderWestgardSection(Document document, ResolvedFilters rf) throws DocumentException {
-        List<WestgardViolation> all = westgardViolationRepository.findAll().stream()
-            .filter(v -> v.getQcRecord() != null
-                && v.getQcRecord().getDate() != null
-                && !v.getQcRecord().getDate().isBefore(rf.start)
-                && !v.getQcRecord().getDate().isAfter(rf.end)
-                && v.getQcRecord().getArea() != null
-                && v.getQcRecord().getArea().equalsIgnoreCase(rf.area))
-            .sorted(Comparator.comparing((WestgardViolation v) -> v.getQcRecord().getDate()).reversed())
-            .collect(Collectors.toList());
+        // T5: query janelada (area ja em lowercase em rf.area)
+        List<WestgardViolation> all = westgardViolationRepository
+            .findByAreaAndPeriod(rf.area, rf.start, rf.end);
         if (all.isEmpty()) {
             // Omitimos secao silenciosamente — ausencia de violacoes e bom sinal
             return;

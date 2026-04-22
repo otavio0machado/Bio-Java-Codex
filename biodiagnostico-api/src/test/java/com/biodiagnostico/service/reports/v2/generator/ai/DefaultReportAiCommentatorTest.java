@@ -2,6 +2,7 @@ package com.biodiagnostico.service.reports.v2.generator.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.service.GeminiAiService;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
@@ -11,6 +12,7 @@ import java.time.ZoneId;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -74,6 +76,68 @@ class DefaultReportAiCommentatorTest {
             gemini, prompts, Executors.newSingleThreadExecutor(), Duration.ofSeconds(5));
         String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
         assertThat(result).isEqualTo(ReportAiCommentator.FALLBACK_COMMENTARY);
+    }
+
+    // ---------- T3: retry + circuit breaker ----------
+
+    @Test
+    @DisplayName("T3 — retenta ate 3x em timeout/erro transiente e retorna sucesso se 3a tentativa OK")
+    void retriesThreeTimesOnTimeout() {
+        AtomicInteger attempts = new AtomicInteger();
+        GeminiAiService gemini = stubAnalyze((p, c) -> {
+            int n = attempts.incrementAndGet();
+            if (n < 3) {
+                throw new RuntimeException("temporary-network-glitch");
+            }
+            return "Comentario apos retries.";
+        });
+        DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
+            gemini, prompts, Executors.newSingleThreadExecutor(),
+            Duration.ofSeconds(5), 3, Duration.ofMillis(1));
+        String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
+        assertThat(result).isEqualTo("Comentario apos retries.");
+        assertThat(attempts.get()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("T3 — NAO retenta em falha deterministica (BusinessException / API key)")
+    void giveUpOnInvalidApiKeyImmediately() {
+        AtomicInteger attempts = new AtomicInteger();
+        GeminiAiService gemini = stubAnalyze((p, c) -> {
+            attempts.incrementAndGet();
+            throw new BusinessException("GEMINI_API_KEY nao configurada");
+        });
+        DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
+            gemini, prompts, Executors.newSingleThreadExecutor(),
+            Duration.ofSeconds(5), 3, Duration.ofMillis(1));
+        String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
+        assertThat(result).isEqualTo(ReportAiCommentator.FALLBACK_COMMENTARY);
+        // Como e deterministico, apenas 1 tentativa.
+        assertThat(attempts.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("T3 — circuit breaker abre apos threshold e retorna fallback direto")
+    void circuitBreakerOpensAfterThreshold() {
+        AtomicInteger attempts = new AtomicInteger();
+        GeminiAiService gemini = stubAnalyze((p, c) -> {
+            attempts.incrementAndGet();
+            throw new RuntimeException("always-fails");
+        });
+        DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
+            gemini, prompts, Executors.newSingleThreadExecutor(),
+            Duration.ofMillis(200), 1, Duration.ofMillis(1));
+        // Dispara 12 chamadas falhadas para passar do threshold de 10 com 60% falha
+        for (int i = 0; i < 12; i++) {
+            commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
+        }
+        int afterOpen = attempts.get();
+        // Proxima chamada deve bater no circuit aberto: nao chama mais gemini.
+        String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
+        assertThat(result).isEqualTo(ReportAiCommentator.FALLBACK_COMMENTARY);
+        assertThat(attempts.get())
+            .as("nao deve chamar Gemini quando circuit esta aberto")
+            .isEqualTo(afterOpen);
     }
 
     private GeminiAiService stubAnalyze(java.util.function.BiFunction<String, String, String> fn) {

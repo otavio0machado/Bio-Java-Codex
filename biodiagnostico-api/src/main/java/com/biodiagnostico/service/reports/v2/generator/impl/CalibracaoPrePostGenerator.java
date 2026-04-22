@@ -191,8 +191,15 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
 
     private Resolved resolve(ReportFilters filters) {
         Resolved r = new Resolved();
-        r.area = filters.getString("area").orElse("bioquimica");
-        r.equipment = filters.getString("equipment").orElse(null);
+        // Normalizar area p/ lowercase — repository evita LOWER(:area) (PG infere bytea em null).
+        r.area = filters.getString("area")
+            .map(s -> s.trim().toLowerCase(java.util.Locale.ROOT))
+            .filter(s -> !s.isEmpty())
+            .orElse("bioquimica");
+        r.equipment = filters.getString("equipment")
+            .map(s -> s.trim().toLowerCase(java.util.Locale.ROOT))
+            .filter(s -> !s.isEmpty())
+            .orElse(null);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
         String periodType = filters.getString("periodType")
             .map(s -> s.trim().toLowerCase(Locale.ROOT)).orElse("current-month");

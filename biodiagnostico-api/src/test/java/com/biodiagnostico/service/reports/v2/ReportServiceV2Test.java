@@ -429,6 +429,49 @@ class ReportServiceV2Test {
         assertThat(res.originalSha256()).isNull();
     }
 
+    // ---------- T8: expired download -> 410 ----------
+
+    @Test
+    @DisplayName("T8 — download de execucao expirada lanca ReportExpiredException (mapeada em 410)")
+    void downloadExpiredExecutionThrowsExpired() {
+        UUID id = UUID.randomUUID();
+        ReportRun run = ReportRun.builder()
+            .id(id)
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000001")
+            .storageKey("orig-key")
+            .sha256("a".repeat(64))
+            .format("PDF")
+            .status("SUCCESS")
+            // Expirou 1h atras
+            .expiresAt(Instant.now().minusSeconds(3600))
+            .build();
+        when(runRepository.findById(id)).thenReturn(Optional.of(run));
+
+        assertThatThrownBy(() -> service.download(id, authWithRole("ADMIN")))
+            .isInstanceOf(ReportExpiredException.class);
+    }
+
+    @Test
+    @DisplayName("T8 — sign em execucao expirada tambem lanca ReportExpiredException")
+    void signExpiredExecutionThrowsExpired() {
+        UUID id = UUID.randomUUID();
+        ReportRun run = ReportRun.builder()
+            .id(id)
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000001")
+            .storageKey("orig-key")
+            .sha256("a".repeat(64))
+            .format("PDF")
+            .status("SUCCESS")
+            .expiresAt(Instant.now().minusSeconds(60))
+            .build();
+        when(runRepository.findById(id)).thenReturn(Optional.of(run));
+
+        assertThatThrownBy(() -> service.sign(id, null, authWithRole("ADMIN")))
+            .isInstanceOf(ReportExpiredException.class);
+    }
+
     // ---------- helpers ----------
 
     private ReportRun buildUnsignedRun() {
