@@ -73,6 +73,9 @@ public class FilterValidator {
         // Cross-field: examIds so em area=bioquimica (Ressalva 4 do F1)
         validateExamIdsOnlyForBioquimica(values, declaredKeys, violations);
 
+        // Cross-field: periodo deve carregar os campos exigidos pelo tipo.
+        validatePeriodDependencies(values, declaredKeys, violations);
+
         // Cross-field: REGULATORIO_PACOTE nao aceita comentario IA
         if (reportCode == ReportCode.REGULATORIO_PACOTE) {
             Object aiRaw = values.get("includeAiCommentary");
@@ -113,6 +116,41 @@ public class FilterValidator {
                 "Filtro 'examIds' so e suportado para area=bioquimica (recebido area="
                 + (area == null ? "null" : area) + ")"
             );
+        }
+    }
+
+    private void validatePeriodDependencies(
+        Map<String, Object> values, Set<String> declaredKeys, List<String> violations
+    ) {
+        if (!declaredKeys.contains("periodType")) {
+            return;
+        }
+        Object periodRaw = values.get("periodType");
+        if (periodRaw == null || periodRaw.toString().isBlank()) {
+            return;
+        }
+        String periodType = periodRaw.toString();
+        if ("specific-month".equals(periodType)) {
+            requirePresent(values, "month", violations);
+            requirePresent(values, "year", violations);
+        } else if ("year".equals(periodType)) {
+            requirePresent(values, "year", violations);
+        } else if ("date-range".equals(periodType)) {
+            requirePresent(values, "dateFrom", violations);
+            requirePresent(values, "dateTo", violations);
+            LocalDate from = coerceDate(values.get("dateFrom"));
+            LocalDate to = coerceDate(values.get("dateTo"));
+            if (from != null && to != null && from.isAfter(to)) {
+                violations.add("Filtro 'dateFrom' deve ser anterior ou igual a 'dateTo'");
+            }
+        }
+    }
+
+    private void requirePresent(Map<String, Object> values, String key, List<String> violations) {
+        Object raw = values.get(key);
+        boolean present = raw != null && !(raw instanceof String s && s.isBlank());
+        if (!present) {
+            violations.add("Filtro '" + key + "' e obrigatorio para o periodType selecionado");
         }
     }
 

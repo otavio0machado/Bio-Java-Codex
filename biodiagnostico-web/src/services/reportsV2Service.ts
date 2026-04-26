@@ -44,6 +44,14 @@ function normalizeDefinition(raw: ReportDefinitionRawResponse): ReportDefinition
   }
 }
 
+function normalizeExecution(raw: ReportExecutionResponse): ReportExecutionResponse {
+  return {
+    ...raw,
+    labels: raw.labels ?? [],
+    warnings: raw.warnings ?? [],
+  }
+}
+
 /**
  * Util para detectar especificamente 404 (feature flag off em
  * {@code /catalog}). Evita erros de rede/500 serem tratados como "flag off".
@@ -87,7 +95,7 @@ export const reportsV2Service = {
       format: req.format ?? 'PDF',
       filters: req.filters ?? {},
     })
-    return data
+    return normalizeExecution(data)
   },
 
   async preview(req: PreviewRequest): Promise<PreviewResponse> {
@@ -107,7 +115,7 @@ export const reportsV2Service = {
       `/reports/v2/executions/${id}/sign`,
       payload,
     )
-    return data
+    return normalizeExecution(data)
   },
 
   async verify(hash: string): Promise<VerifyReportResponse> {
@@ -131,12 +139,15 @@ export const reportsV2Service = {
     const { data } = await api.get<PageResponse<ReportExecutionResponse>>('/reports/v2/executions', {
       params,
     })
-    return data
+    return {
+      ...data,
+      content: (data.content ?? []).map(normalizeExecution),
+    }
   },
 
   async getExecution(id: string): Promise<ReportExecutionResponse> {
     const { data } = await api.get<ReportExecutionResponse>(`/reports/v2/executions/${id}`)
-    return data
+    return normalizeExecution(data)
   },
 
   /**
@@ -152,7 +163,7 @@ export const reportsV2Service = {
       `/reports/v2/executions/${id}/labels`,
       payload,
     )
-    return data
+    return normalizeExecution(data)
   },
 
   /**

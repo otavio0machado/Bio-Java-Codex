@@ -102,14 +102,14 @@ export interface ReportDefinition {
  *     contratos novos que querem discriminar sem ambiguidade.</li>
  * </ul>
  *
- * <p>{@code labels} e sempre nao-nula (vazia quando ausente).
+ * <p>{@code labels} e {@code warnings} sao sempre nao-nulos.
  */
 export interface ReportExecutionResponse {
   id: string
   reportCode: ReportCode
   format: ReportFormat
-  /** SUCCESS | FAILURE | SIGNED (string aberta para evolucao). */
-  status: 'SUCCESS' | 'FAILURE' | 'SIGNED' | (string & {})
+  /** SUCCESS | WITH_WARNINGS | FAILURE | SIGNED (string aberta para evolucao). */
+  status: 'SUCCESS' | 'WITH_WARNINGS' | 'FAILURE' | 'SIGNED' | (string & {})
   reportNumber: string | null
   sha256: string | null
   signatureHash: string | null
@@ -125,6 +125,8 @@ export interface ReportExecutionResponse {
   periodLabel: string | null
   /** Rotulos associados (ex.: "oficial_mensal"). Sempre array (pode ser vazio). */
   labels: string[]
+  /** Avisos persistidos da geracao, como pacote parcial ou ausencia de dados. */
+  warnings: string[]
 }
 
 export interface PreviewResponse {

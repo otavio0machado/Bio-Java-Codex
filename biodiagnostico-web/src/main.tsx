@@ -7,6 +7,7 @@ import { ApiToastBridge } from './components/ApiToastBridge'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ToastProvider } from './components/ui'
 import { AuthProvider } from './contexts/AuthContext'
+import { enforceCanonicalSiteUrl } from './services/runtimeConfig'
 import './styles/globals.css'
 
 const queryClient = new QueryClient({
@@ -18,19 +19,21 @@ const queryClient = new QueryClient({
   },
 })
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <AuthProvider>
-            <ToastProvider>
-              <ApiToastBridge />
-              <App />
-            </ToastProvider>
-          </AuthProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-)
+if (!enforceCanonicalSiteUrl()) {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <AuthProvider>
+              <ToastProvider>
+                <ApiToastBridge />
+                <App />
+              </ToastProvider>
+            </AuthProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  )
+}

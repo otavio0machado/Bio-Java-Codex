@@ -132,6 +132,14 @@ public class ReportRun {
     @Column(name = "labels", columnDefinition = "TEXT")
     private String labels;
 
+    /**
+     * Avisos estruturados da geracao V2, serializados como JSON string.
+     * Usado para preservar pacote parcial, ausencia de dados e ressalvas que
+     * nao devem sumir apos o response imediato de /generate.
+     */
+    @Column(name = "warnings", columnDefinition = "TEXT")
+    private String warnings;
+
     @Column(name = "page_count")
     private Integer pageCount;
 

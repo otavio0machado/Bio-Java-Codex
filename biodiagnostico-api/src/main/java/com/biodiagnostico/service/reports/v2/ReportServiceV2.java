@@ -34,13 +34,16 @@ import com.biodiagnostico.service.reports.v2.generator.ReportGeneratorRegistry;
 import com.biodiagnostico.service.reports.v2.generator.ReportPreview;
 import com.biodiagnostico.service.reports.v2.storage.ReportStorage;
 import com.biodiagnostico.util.ReportV2Mapper;
+import jakarta.persistence.criteria.Predicate;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -50,6 +53,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -487,8 +491,9 @@ public class ReportServiceV2 {
         String usernameFilter = roles.contains("ADMIN") || roles.contains("VIGILANCIA_SANITARIA")
             ? null
             : (auth == null ? null : auth.getName());
-        Page<ReportRun> runs = reportRunRepository.findByV2Filters(
-            codeFilter, status, usernameFilter, from, to, pageable
+        Page<ReportRun> runs = reportRunRepository.findAll(
+            executionsSpecification(codeFilter, status, usernameFilter, from, to),
+            pageable
         );
         return runs.map(r -> ReportV2Mapper.toResponse(r, properties.getPublicBaseUrl()));
     }
@@ -583,6 +588,9 @@ public class ReportServiceV2 {
             uaTrimmed,
             correlationId
         );
+        if (downloadLogRepository == null) {
+            return;
+        }
         try {
             downloadLogRepository.save(log);
         } catch (RuntimeException ex) {
@@ -608,11 +616,39 @@ public class ReportServiceV2 {
         Set<String> roles = extractRoles(auth);
         if (!roles.contains("ADMIN") && !roles.contains("VIGILANCIA_SANITARIA")) {
             String authName = auth == null ? null : auth.getName();
-            if (run.getUsername() != null && !run.getUsername().equals(authName)) {
+            if (authName == null || run.getUsername() == null || !run.getUsername().equals(authName)) {
                 throw new AccessDeniedException("Execucao pertence a outro usuario");
             }
         }
         return run;
+    }
+
+    private Specification<ReportRun> executionsSpecification(
+        String code, String status, String username, Instant from, Instant to
+    ) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isNotNull(root.get("reportCode")));
+            if (code != null && !code.isBlank()) {
+                predicates.add(cb.equal(root.get("reportCode"), code));
+            }
+            if (status != null && !status.isBlank()) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (username != null && !username.isBlank()) {
+                predicates.add(cb.equal(
+                    cb.lower(root.get("username")),
+                    username.toLowerCase(Locale.ROOT)
+                ));
+            }
+            if (from != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), from));
+            }
+            if (to != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), to));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
     }
 
     private GenerationContext buildContext(Authentication auth) {

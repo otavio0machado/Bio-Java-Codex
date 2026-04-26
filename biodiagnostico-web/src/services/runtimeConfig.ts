@@ -70,3 +70,32 @@ export function resolveApiUrl() {
 
   return '/api'
 }
+
+export function canonicalRedirectUrlForHref(
+  currentHref: string,
+  configuredSiteUrl?: string | null,
+  isDev = import.meta.env.DEV,
+) {
+  if (isDev || !configuredSiteUrl) return null
+
+  try {
+    const current = new URL(currentHref)
+    const canonical = new URL(configuredSiteUrl)
+    if (isLocalHost(current.hostname) || current.origin === canonical.origin) {
+      return null
+    }
+    canonical.pathname = current.pathname
+    canonical.search = current.search
+    canonical.hash = current.hash
+    return canonical.toString()
+  } catch {
+    return null
+  }
+}
+
+export function enforceCanonicalSiteUrl() {
+  const target = canonicalRedirectUrlForHref(window.location.href, window.__APP_CONFIG__?.siteUrl)
+  if (!target) return false
+  window.location.replace(target)
+  return true
+}

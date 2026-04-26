@@ -144,6 +144,7 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
           >
             <option value="">Todos</option>
             <option value="SUCCESS">Sucesso</option>
+            <option value="WITH_WARNINGS">Com avisos</option>
             <option value="SIGNED">Assinado</option>
             <option value="FAILURE">Falha</option>
           </Select>
@@ -177,6 +178,24 @@ export function ExecutionsTable({ definitions }: ExecutionsTableProps) {
       <Card>
         {query.isLoading ? (
           <Skeleton height="12rem" />
+        ) : query.isError ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-10 text-center text-red-900">
+            <AlertTriangle className="h-8 w-8" />
+            <div>
+              <p className="font-semibold">Nao foi possivel carregar o historico V2</p>
+              <p className="mt-1 text-sm text-red-800/80">
+                {extractErrorMessage(query.error)}
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void query.refetch()}
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+            >
+              Tentar novamente
+            </Button>
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={<FileSignature className="h-8 w-8" />}
@@ -375,6 +394,13 @@ function renderStatus(execution: ReportExecutionResponse) {
       </span>
     )
   }
+  if (execution.status === 'WITH_WARNINGS') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+        <AlertTriangle className="h-3 w-3" /> Com avisos
+      </span>
+    )
+  }
   if (execution.status === 'FAILURE') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
@@ -454,6 +480,15 @@ function ExecutionDrawer({ execution, onClose }: ExecutionDrawerProps) {
               <code className="break-all text-xs text-neutral-700">{execution.signatureHash}</code>
             </DrawerItem>
           ) : null}
+          {execution.warnings?.length ? (
+            <DrawerItem label="Avisos">
+              <ul className="list-disc space-y-1 pl-5 text-amber-900">
+                {execution.warnings.map((warning, idx) => (
+                  <li key={idx}>{warning}</li>
+                ))}
+              </ul>
+            </DrawerItem>
+          ) : null}
           {execution.verifyUrl ? (
             <DrawerItem label="Link publico">
               <div className="flex items-center gap-2">
@@ -487,6 +522,11 @@ function ExecutionDrawer({ execution, onClose }: ExecutionDrawerProps) {
       </aside>
     </div>
   )
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return 'Erro interno inesperado.'
 }
 
 function DrawerItem({ label, children }: { label: string; children: React.ReactNode }) {

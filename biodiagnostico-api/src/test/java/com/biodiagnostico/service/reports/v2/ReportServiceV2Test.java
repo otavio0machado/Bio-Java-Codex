@@ -44,9 +44,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -157,6 +161,57 @@ class ReportServiceV2Test {
         assertThat(res.verifyUrl()).startsWith("http://localhost:5173/r/verify/");
         verify(storage).save(any(byte[].class), any(ReportStorage.StorageKeyHint.class));
         verify(runRepository).save(any(ReportRun.class));
+    }
+
+    @Test
+    @DisplayName("generate: warnings ficam persistidos e status vira WITH_WARNINGS")
+    void generateWithWarningsPersistsWarnings() throws Exception {
+        stubGenerator.warnings = List.of("Secao 'KPIs de Manutencao' falhou — conteudo omitido");
+        when(storage.save(any(byte[].class), any(ReportStorage.StorageKeyHint.class)))
+            .thenReturn("reports/v2/202604/CQ_OPERATIONAL_V2/BIO-202604-000001.pdf");
+
+        GenerateReportV2Request req = new GenerateReportV2Request(
+            ReportCode.CQ_OPERATIONAL_V2, ReportFormat.PDF,
+            Map.of("area", "bioquimica", "periodType", "current-month")
+        );
+        ReportExecutionResponse res = service.generate(req, authWithRole("FUNCIONARIO"));
+
+        assertThat(res.status()).isEqualTo(ReportRunService.STATUS_WITH_WARNINGS);
+        assertThat(res.warnings()).containsExactly("Secao 'KPIs de Manutencao' falhou — conteudo omitido");
+        ArgumentCaptor<ReportRun> captor = ArgumentCaptor.forClass(ReportRun.class);
+        verify(runRepository).save(captor.capture());
+        assertThat(captor.getValue().getStatus()).isEqualTo(ReportRunService.STATUS_WITH_WARNINGS);
+        assertThat(captor.getValue().getWarnings()).contains("KPIs de Manutencao");
+    }
+
+    @Test
+    @DisplayName("listExecutions usa Specification V2-only e retorna warnings persistidos")
+    void listExecutionsUsesSpecificationAndMapsWarnings() {
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .type("V2")
+            .reportCode("CQ_OPERATIONAL_V2")
+            .format("PDF")
+            .status(ReportRunService.STATUS_WITH_WARNINGS)
+            .reportNumber("BIO-202604-000001")
+            .sha256("a".repeat(64))
+            .username("tester")
+            .createdAt(Instant.now())
+            .warnings("[\"Pacote parcial\"]")
+            .build();
+        when(runRepository.findAll(
+            ArgumentMatchers.<Specification<ReportRun>>any(),
+            any(org.springframework.data.domain.Pageable.class)
+        )).thenReturn(new PageImpl<>(List.of(run), PageRequest.of(0, 20), 1));
+
+        var page = service.listExecutions(null, null, null, null, authWithRole("ADMIN"), PageRequest.of(0, 20));
+
+        assertThat(page.getContent()).hasSize(1);
+        assertThat(page.getContent().get(0).warnings()).containsExactly("Pacote parcial");
+        verify(runRepository).findAll(
+            ArgumentMatchers.<Specification<ReportRun>>any(),
+            any(org.springframework.data.domain.Pageable.class)
+        );
     }
 
     @Test
@@ -521,6 +576,8 @@ class ReportServiceV2Test {
 
     // Stub generator que nao depende de repositorios
     static class StubGenerator implements ReportGenerator {
+        List<String> warnings = List.of();
+
         @Override
         public com.biodiagnostico.service.reports.v2.catalog.ReportDefinition definition() {
             return ReportDefinitionRegistry.CQ_OPERATIONAL_V2_DEFINITION;
@@ -532,7 +589,7 @@ class ReportServiceV2Test {
             return new ReportArtifact(
                 fakePdf, "application/pdf", "BIO-202604-000001.pdf",
                 1, fakePdf.length, "BIO-202604-000001",
-                "a".repeat(64), "Abril/2026"
+                "a".repeat(64), "Abril/2026", warnings
             );
         }
 

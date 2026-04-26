@@ -212,6 +212,29 @@ class FilterValidatorTest {
     }
 
     @Test
+    @DisplayName("periodType=specific-month exige month e year")
+    void specificMonthRequiresMonthAndYear() {
+        ReportFilterSpec spec = periodSpec();
+        assertThatThrownBy(() -> validator.validate(spec, Map.of("periodType", "specific-month")))
+            .isInstanceOf(InvalidFilterException.class)
+            .hasMessageContaining("month")
+            .hasMessageContaining("year");
+    }
+
+    @Test
+    @DisplayName("periodType=date-range exige datas coerentes")
+    void dateRangeRequiresOrderedDates() {
+        ReportFilterSpec spec = periodSpec();
+        assertThatThrownBy(() -> validator.validate(spec, Map.of(
+            "periodType", "date-range",
+            "dateFrom", "2026-04-30",
+            "dateTo", "2026-04-01"
+        )))
+            .isInstanceOf(InvalidFilterException.class)
+            .hasMessageContaining("dateFrom");
+    }
+
+    @Test
     @DisplayName("agrega varias violacoes em uma unica excecao")
     void aggregatesViolations() {
         ReportFilterSpec spec = new ReportFilterSpec(List.of(
@@ -226,5 +249,16 @@ class FilterValidatorTest {
             return;
         }
         throw new AssertionError("Esperava InvalidFilterException");
+    }
+
+    private ReportFilterSpec periodSpec() {
+        return new ReportFilterSpec(List.of(
+            new ReportFilterField("periodType", ReportFilterFieldType.STRING_ENUM, true,
+                List.of("current-month", "specific-month", "year", "date-range"), "Periodo", null),
+            new ReportFilterField("month", ReportFilterFieldType.INTEGER, false, null, "Mes", null),
+            new ReportFilterField("year", ReportFilterFieldType.INTEGER, false, null, "Ano", null),
+            new ReportFilterField("dateFrom", ReportFilterFieldType.DATE, false, null, "De", null),
+            new ReportFilterField("dateTo", ReportFilterFieldType.DATE, false, null, "Ate", null)
+        ));
     }
 }

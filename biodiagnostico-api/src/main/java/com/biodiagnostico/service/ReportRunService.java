@@ -39,6 +39,7 @@ public class ReportRunService {
     public static final String TYPE_V2 = "V2";
     public static final String STATUS_SUCCESS = "SUCCESS";
     public static final String STATUS_FAILURE = "FAILURE";
+    public static final String STATUS_WITH_WARNINGS = "WITH_WARNINGS";
     public static final String STATUS_SIGNED = "SIGNED";
 
     private final ReportRunRepository repository;
@@ -124,7 +125,9 @@ public class ReportRunService {
         ReportFormat format
     ) {
         String filtersJson = serializeFilters(filters);
+        String warningsJson = serializeWarnings(artifact.warnings());
         Instant expiresAt = ctx.now().plus(definition.retentionDays(), ChronoUnit.DAYS);
+        String status = artifact.warnings().isEmpty() ? STATUS_SUCCESS : STATUS_WITH_WARNINGS;
 
         ReportRun run = ReportRun.builder()
             .id(UUID.randomUUID())
@@ -137,7 +140,8 @@ public class ReportRunService {
             .sha256(artifact.sha256())
             .sizeBytes(artifact.sizeBytes())
             .pageCount(artifact.pageCount() > 0 ? artifact.pageCount() : null)
-            .status(STATUS_SUCCESS)
+            .status(status)
+            .warnings(warningsJson)
             .userId(ctx.userId())
             .username(ctx.username())
             .expiresAt(expiresAt)
@@ -216,6 +220,16 @@ public class ReportRunService {
             return objectMapper.writeValueAsString(filters);
         } catch (JsonProcessingException ex) {
             LOG.warn("Falha ao serializar filtros V2 para JSON — gravando null", ex);
+            return null;
+        }
+    }
+
+    private String serializeWarnings(List<String> warnings) {
+        if (warnings == null || warnings.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(warnings);
+        } catch (JsonProcessingException ex) {
+            LOG.warn("Falha ao serializar warnings V2 para JSON — gravando null", ex);
             return null;
         }
     }

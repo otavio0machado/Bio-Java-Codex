@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  canonicalRedirectUrlForHref,
   normalizeConfiguredApiUrl,
   normalizeConfiguredApiUrlForHostname,
   resolveApiUrl,
@@ -33,5 +34,25 @@ describe('runtimeConfig', () => {
     }
 
     expect(resolveApiUrl()).toBe('https://api.labbio.app/api')
+  })
+
+  it('monta redirect canonico preservando path, busca e hash', () => {
+    expect(
+      canonicalRedirectUrlForHref(
+        'https://labbio.app/relatorios?tab=history#top',
+        'https://www.labbio.app',
+        false,
+      ),
+    ).toBe('https://www.labbio.app/relatorios?tab=history#top')
+  })
+
+  it('nao redireciona quando ja esta no host canonico', () => {
+    expect(
+      canonicalRedirectUrlForHref(
+        'https://www.labbio.app/relatorios',
+        'https://www.labbio.app',
+        false,
+      ),
+    ).toBeNull()
   })
 })

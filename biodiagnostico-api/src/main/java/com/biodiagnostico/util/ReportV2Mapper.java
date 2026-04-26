@@ -6,6 +6,9 @@ import com.biodiagnostico.entity.ReportRun;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFilterField;
 import com.biodiagnostico.service.reports.v2.catalog.ReportFormat;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -16,6 +19,9 @@ import java.util.stream.Collectors;
  * {@link ResponseMapper} — que segue cuidando do V1.
  */
 public final class ReportV2Mapper {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {};
 
     private ReportV2Mapper() {}
 
@@ -81,7 +87,7 @@ public final class ReportV2Mapper {
             verifyUrl,
             periodLabel,
             parseLabels(run.getLabels()),
-            warnings == null ? List.of() : List.copyOf(warnings)
+            mergeWarnings(run.getWarnings(), warnings)
         );
     }
 
@@ -143,5 +149,32 @@ public final class ReportV2Mapper {
             }
             default -> null;
         };
+    }
+
+    private static List<String> mergeWarnings(String persistedWarnings, List<String> transientWarnings) {
+        java.util.LinkedHashSet<String> merged = new java.util.LinkedHashSet<>();
+        merged.addAll(parseWarnings(persistedWarnings));
+        if (transientWarnings != null) {
+            for (String warning : transientWarnings) {
+                if (warning != null && !warning.isBlank()) {
+                    merged.add(warning.trim());
+                }
+            }
+        }
+        return List.copyOf(merged);
+    }
+
+    private static List<String> parseWarnings(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            List<String> parsed = OBJECT_MAPPER.readValue(json, STRING_LIST);
+            List<String> warnings = new ArrayList<>();
+            for (String item : parsed) {
+                if (item != null && !item.isBlank()) warnings.add(item.trim());
+            }
+            return List.copyOf(warnings);
+        } catch (IOException ex) {
+            return List.of(json);
+        }
     }
 }

@@ -11,7 +11,9 @@ import {
 import { reportsV2Service } from '../../services/reportsV2Service'
 import type {
   ReportCode,
+  ReportDefinition,
   ReportExecutionResponse,
+  ReportFilterField,
   ReportFormat,
 } from '../../types/reportsV2'
 import { Button, Card, LoadingSpinner, Select, useToast } from '../ui'
@@ -50,6 +52,7 @@ export function ReportBuilder() {
   const [lastExecution, setLastExecution] = useState<ReportExecutionResponse | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [isDownloading, setIsDownloading] = useState(false)
+  const defaultsInitializedRef = useRef<ReportCode | null>(null)
 
   // Pre-selecao de format compativel quando definition carregar.
   useEffect(() => {
@@ -59,17 +62,33 @@ export function ReportBuilder() {
     }
   }, [definitionQuery.data, format])
 
+  useEffect(() => {
+    setFilters({})
+    setLastExecution(null)
+    setGenerateError(null)
+    setSignImmediately(false)
+    defaultsInitializedRef.current = null
+  }, [reportCode])
+
+  useEffect(() => {
+    const def = definitionQuery.data
+    if (!def || !reportCode || defaultsInitializedRef.current === reportCode) return
+    defaultsInitializedRef.current = reportCode
+    setFilters(buildDefaultFilters(def))
+  }, [definitionQuery.data, reportCode])
+
   // Preview debounced. Re-dispara a cada mudanca em filtros, code, ou formato,
   // mas aguarda 500ms sem alteracao para evitar spam. Cancelado pelo cleanup.
   const previewMutateRef = useRef(previewMutation.mutate)
   previewMutateRef.current = previewMutation.mutate
   useEffect(() => {
-    if (!reportCode || !definitionQuery.data?.previewSupported) return
+    const def = definitionQuery.data
+    if (!reportCode || !def?.previewSupported || !hasRequiredFilters(def, filters)) return
     const handle = window.setTimeout(() => {
       previewMutateRef.current({ code: reportCode, filters })
     }, 500)
     return () => window.clearTimeout(handle)
-  }, [reportCode, filters, definitionQuery.data?.previewSupported])
+  }, [reportCode, filters, definitionQuery.data])
 
   const previewError = useMemo(() => {
     if (!previewMutation.isError) return null
@@ -92,7 +111,7 @@ export function ReportBuilder() {
         try {
           const signed = await signMutation.mutateAsync({ id: execution.id })
           setLastExecution(signed)
-          toast.success(`Relatorio ${signed.reportNumber ?? ''} gerado e assinado.`)
+          notifyGenerated(toast, signed, true)
         } catch (signError) {
           setLastExecution(execution)
           toast.warning(
@@ -101,7 +120,7 @@ export function ReportBuilder() {
         }
       } else {
         setLastExecution(execution)
-        toast.success(`Relatorio ${execution.reportNumber ?? ''} gerado.`)
+        notifyGenerated(toast, execution, false)
       }
     } catch (error) {
       setGenerateError(extractErrorMessage(error))
@@ -165,6 +184,8 @@ export function ReportBuilder() {
 
   const definition = definitionQuery.data
   const previewData = previewMutation.data
+  const canGenerate = hasRequiredFilters(definition, filters)
+  const lastExecutionHasWarnings = (lastExecution?.warnings ?? []).length > 0
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -218,6 +239,7 @@ export function ReportBuilder() {
           <Button
             onClick={() => void handleGenerate()}
             loading={generateMutation.isPending || signMutation.isPending}
+            disabled={!canGenerate}
             icon={<PlayCircle className="h-4 w-4" />}
           >
             Gerar {format}
@@ -258,18 +280,33 @@ export function ReportBuilder() {
           ) : null}
 
           {lastExecution ? (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+            <div className={
+              'flex items-center justify-between gap-3 rounded-2xl border p-4 text-sm ' +
+              (lastExecutionHasWarnings
+                ? 'border-amber-200 bg-amber-50 text-amber-950'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-900')
+            }>
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4" />
+                {lastExecutionHasWarnings
+                  ? <AlertTriangle className="h-4 w-4 shrink-0" />
+                  : <CheckCircle2 className="h-4 w-4 shrink-0" />}
                 <div>
                   <p className="font-semibold">
                     {lastExecution.reportNumber ?? 'Relatorio'} {' '}
                     {lastExecution.status === 'SIGNED' ? '(assinado)' : ''}
+                    {lastExecutionHasWarnings ? '(com avisos)' : ''}
                   </p>
-                  <p className="text-xs text-emerald-800/80">
+                  <p className="text-xs opacity-80">
                     Periodo: {lastExecution.periodLabel ?? '-'}
                     {lastExecution.createdAt ? ` · Gerado em ${new Date(lastExecution.createdAt).toLocaleString('pt-BR')}` : ''}
                   </p>
+                  {lastExecutionHasWarnings ? (
+                    <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs">
+                      {lastExecution.warnings.map((warning, idx) => (
+                        <li key={idx}>{warning}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               </div>
               <Button
@@ -326,7 +363,11 @@ export function ReportBuilder() {
             ) : !previewMutation.isPending ? (
               <div className="flex min-h-56 flex-col items-center justify-center gap-2 text-center text-neutral-500">
                 <FileText className="h-8 w-8" />
-                <p className="text-sm">Preencha os filtros obrigatorios para visualizar o preview.</p>
+                <p className="text-sm">
+                  {canGenerate
+                    ? 'Preview sera atualizado automaticamente.'
+                    : 'Preencha os filtros obrigatorios para visualizar o preview.'}
+                </p>
               </div>
             ) : null}
           </Card>
@@ -334,6 +375,58 @@ export function ReportBuilder() {
       </div>
     </div>
   )
+}
+
+function buildDefaultFilters(definition: ReportDefinition): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {}
+  for (const field of definition.filterSpec.fields) {
+    if (field.key === 'periodType' && field.allowedValues?.includes('current-month')) {
+      defaults[field.key] = 'current-month'
+    } else if (field.key === 'area' && field.allowedValues?.includes('bioquimica')) {
+      defaults[field.key] = 'bioquimica'
+    } else if (field.key === 'areas' && field.required && field.allowedValues?.length) {
+      defaults[field.key] = field.allowedValues
+    } else if (field.required && field.type === 'STRING_ENUM' && field.allowedValues?.length === 1) {
+      defaults[field.key] = field.allowedValues[0]
+    }
+  }
+  return defaults
+}
+
+function hasRequiredFilters(definition: ReportDefinition, values: Record<string, unknown>): boolean {
+  for (const field of definition.filterSpec.fields) {
+    if (field.required && !hasValue(values[field.key], field)) return false
+  }
+
+  const periodType = values.periodType
+  if (periodType === 'specific-month') {
+    return hasValue(values.month) && hasValue(values.year)
+  }
+  if (periodType === 'year') {
+    return hasValue(values.year)
+  }
+  if (periodType === 'date-range') {
+    return hasValue(values.dateFrom) && hasValue(values.dateTo)
+  }
+  return true
+}
+
+function hasValue(value: unknown, field?: ReportFilterField): boolean {
+  if (Array.isArray(value)) return field?.required ? value.length > 0 : true
+  return value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '')
+}
+
+function notifyGenerated(
+  toast: ReturnType<typeof useToast>['toast'],
+  execution: ReportExecutionResponse,
+  signed: boolean,
+) {
+  const reportNumber = execution.reportNumber ?? ''
+  if ((execution.warnings ?? []).length > 0 || execution.status === 'WITH_WARNINGS') {
+    toast.warning(`Relatorio ${reportNumber} gerado com avisos.`)
+    return
+  }
+  toast.success(`Relatorio ${reportNumber} gerado${signed ? ' e assinado' : ''}.`)
 }
 
 function extractErrorMessage(error: unknown): string {
