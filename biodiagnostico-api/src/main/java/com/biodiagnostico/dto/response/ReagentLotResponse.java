@@ -5,29 +5,28 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Schema do contrato HTTP do lote de reagente apos refator v2.
+ *
+ * <p>{@code label} substitui o antigo {@code name}. Saem do response: {@code quantityValue},
+ * {@code stockUnit}, {@code estimatedConsumption}, {@code startDate}, {@code endDate},
+ * {@code alertThresholdDays}, {@code stockPct}, {@code daysToRupture} (campos derivados
+ * que perdiam sentido sem {@code quantityValue}/{@code estimatedConsumption}).</p>
+ */
 public record ReagentLotResponse(
     UUID id,
-    String name,
+    String label,
     String lotNumber,
     String manufacturer,
     String category,
     LocalDate expiryDate,
-    Double quantityValue,
-    String stockUnit,
     Double currentStock,
-    Double estimatedConsumption,
     String storageTemp,
-    LocalDate startDate,
-    LocalDate endDate,
     String status,
-    Integer alertThresholdDays,
     Instant createdAt,
     Instant updatedAt,
     long daysLeft,
-    Double stockPct,
-    Double daysToRupture,
     boolean nearExpiry,
-    // ===== Fase 3: rastreabilidade forte =====
     String location,
     String supplier,
     LocalDate receivedDate,
@@ -39,15 +38,15 @@ public record ReagentLotResponse(
      */
     boolean usedInQcRecently,
     /**
-     * Diagnostico operacional derivado pelo backend. Campos de rastreabilidade forte
-     * ainda nao sao obrigatorios no contrato de entrada, mas devem ser visiveis para
-     * fila de saneamento cadastral.
+     * Diagnostico operacional derivado pelo backend. Alimenta a fila de saneamento
+     * cadastral. Campos chave (ASCII): manufacturer, location, supplier, receivedDate.
      */
     boolean traceabilityComplete,
     List<String> traceabilityIssues,
     /**
-     * Politica de movimentacao derivada do estado do lote. Lote inativo nao aceita
-     * ENTRADA; o frontend deve usar estes campos para refletir a regra canonica.
+     * Politica de movimentacao derivada do estado do lote. Lote {@code vencido} nao
+     * aceita {@code ENTRADA}. Os demais aceitam — {@code fora_de_estoque} retorna a
+     * {@code em_uso} via derivacao apos a entrada.
      */
     boolean canReceiveEntry,
     List<String> allowedMovementTypes,

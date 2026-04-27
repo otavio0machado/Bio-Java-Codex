@@ -1,24 +1,26 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext, type AuthContextValue } from '../../contexts/auth-context'
-import type { ReagentLot, ReagentTagSummary } from '../../types'
+import type { ReagentLabelSummary, ReagentLot, ReagentLotRequest } from '../../types'
 import { ToastProvider } from '../ui'
 import { ReagentesTab } from './ReagentesTab'
 
 const mockUseReagentLots = vi.fn()
+const mockUseReagentLabels = vi.fn()
 const mockUseCreateReagentLot = vi.fn()
 const mockUseUpdateReagentLot = vi.fn()
 const mockUseDeleteReagentLot = vi.fn()
 const mockUseCreateStockMovement = vi.fn()
 const mockUseReagentMovements = vi.fn()
 
-const mockGetTagSummaries = vi.fn()
+const mockGetLabelSummaries = vi.fn()
 const mockExportCsv = vi.fn()
 const mockGetReagentsPdf = vi.fn()
 
 vi.mock('../../hooks/useReagents', () => ({
   useReagentLots: (...args: unknown[]) => mockUseReagentLots(...args),
+  useReagentLabels: (...args: unknown[]) => mockUseReagentLabels(...args),
   useCreateReagentLot: () => mockUseCreateReagentLot(),
   useUpdateReagentLot: () => mockUseUpdateReagentLot(),
   useDeleteReagentLot: () => mockUseDeleteReagentLot(),
@@ -28,7 +30,7 @@ vi.mock('../../hooks/useReagents', () => ({
 
 vi.mock('../../services/reagentService', () => ({
   reagentService: {
-    getTagSummaries: (...args: unknown[]) => mockGetTagSummaries(...args),
+    getLabelSummaries: (...args: unknown[]) => mockGetLabelSummaries(...args),
     exportCsv: (...args: unknown[]) => mockExportCsv(...args),
   },
 }))
@@ -65,8 +67,8 @@ const createMovementMutation = {
   isPending: false,
 }
 
-const tagSummaries: ReagentTagSummary[] = [
-  { name: 'ALT', total: 2, ativos: 1, emUso: 1, inativos: 0, vencidos: 0 },
+const labelSummaries: ReagentLabelSummary[] = [
+  { label: 'ALT', total: 2, emEstoque: 1, emUso: 1, foraDeEstoque: 0, vencidos: 0 },
 ]
 
 const authValue: AuthContextValue = {
@@ -90,30 +92,22 @@ const authValue: AuthContextValue = {
 function buildLot(overrides: Partial<ReagentLot> = {}): ReagentLot {
   return {
     id: crypto.randomUUID(),
-    name: 'ALT',
+    label: 'ALT',
     lotNumber: 'L123',
     manufacturer: 'BioLab',
     category: 'Bioquímica',
     expiryDate: '2026-06-30',
-    quantityValue: 100,
-    stockUnit: 'frascos',
     currentStock: 80,
-    estimatedConsumption: 4,
     storageTemp: '2-8°C',
-    startDate: '2026-04-01',
-    endDate: '',
-    status: 'ativo',
-    alertThresholdDays: 7,
+    status: 'em_estoque',
     createdAt: '2026-04-16T12:00:00Z',
     updatedAt: '2026-04-16T12:00:00Z',
     daysLeft: 20,
-    stockPct: 80,
-    daysToRupture: 20,
     nearExpiry: false,
     location: 'Geladeira 1',
     supplier: 'Fornecedor X',
     receivedDate: '2026-03-01',
-    openedDate: '2026-04-01',
+    openedDate: null,
     usedInQcRecently: true,
     traceabilityComplete: true,
     traceabilityIssues: [],
@@ -141,12 +135,13 @@ beforeEach(() => {
   createMovementMutation.mutateAsync.mockReset()
 
   mockUseReagentLots.mockReset()
+  mockUseReagentLabels.mockReset()
   mockUseCreateReagentLot.mockReset()
   mockUseUpdateReagentLot.mockReset()
   mockUseDeleteReagentLot.mockReset()
   mockUseCreateStockMovement.mockReset()
   mockUseReagentMovements.mockReset()
-  mockGetTagSummaries.mockReset()
+  mockGetLabelSummaries.mockReset()
   mockExportCsv.mockReset()
   mockGetReagentsPdf.mockReset()
 
@@ -155,25 +150,43 @@ beforeEach(() => {
   mockUseDeleteReagentLot.mockReturnValue(deleteLotMutation)
   mockUseCreateStockMovement.mockReturnValue(createMovementMutation)
   mockUseReagentMovements.mockReturnValue({ data: [] })
-  mockGetTagSummaries.mockResolvedValue(tagSummaries)
+  mockUseReagentLabels.mockReturnValue({ data: labelSummaries })
+  mockGetLabelSummaries.mockResolvedValue(labelSummaries)
   mockExportCsv.mockResolvedValue(new Blob(['csv']))
   mockGetReagentsPdf.mockResolvedValue(new Blob(['pdf']))
   vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 
 describe('ReagentesTab', () => {
-  it('renderiza a lista e aplica busca por reagente ou lote', async () => {
+  it('inicia em viewMode "tags" e exibe etiquetas com contagens novas', async () => {
     mockUseReagentLots.mockReturnValue({
       data: [
-        buildLot({ name: 'ALT', lotNumber: 'ALT-001' }),
-        buildLot({ name: 'AST', lotNumber: 'AST-002', manufacturer: 'OutroFab' }),
+        buildLot({ label: 'ALT', lotNumber: 'ALT-001' }),
+        buildLot({ label: 'ALT', lotNumber: 'ALT-002', status: 'em_uso' }),
       ],
     })
 
     renderTab()
 
     expect(screen.getByText('Gestão de Reagentes')).toBeInTheDocument()
-    expect(screen.getByText('ALT')).toBeInTheDocument()
+    // Card da etiqueta deve aparecer no modo padrao 'tags'
+    expect(await screen.findByText('ALT')).toBeInTheDocument()
+    expect(screen.getByText('2 lotes')).toBeInTheDocument()
+  })
+
+  it('alterna para lista e aplica busca por etiqueta ou lote', async () => {
+    mockUseReagentLots.mockReturnValue({
+      data: [
+        buildLot({ label: 'ALT', lotNumber: 'ALT-001' }),
+        buildLot({ label: 'AST', lotNumber: 'AST-002', manufacturer: 'OutroFab' }),
+      ],
+    })
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+
+    expect(await screen.findByText('ALT')).toBeInTheDocument()
     expect(screen.getByText('AST')).toBeInTheDocument()
 
     await userEvent.type(screen.getByPlaceholderText('Buscar reagente ou lote...'), 'AST-002')
@@ -182,30 +195,122 @@ describe('ReagentesTab', () => {
     expect(screen.getByText('AST')).toBeInTheDocument()
   })
 
-  it('valida fabricante antes de cadastrar lote novo', async () => {
+  it('valida etiqueta antes de cadastrar lote novo (bloqueante audit 4.2.1)', async () => {
     mockUseReagentLots.mockReturnValue({ data: [buildLot()] })
 
     renderTab()
 
     await userEvent.click(screen.getByRole('button', { name: 'Novo Lote' }))
-    await userEvent.type(screen.getByLabelText('Nome / Etiqueta'), 'TSH')
-    await userEvent.type(screen.getByLabelText('Nº do Lote'), 'TSH-100')
-    await userEvent.clear(screen.getByLabelText('Fabricante *'))
+    // Etiqueta vazia deve bloquear
     await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
 
-    expect(await screen.findByText('Informe o fabricante do lote.')).toBeInTheDocument()
+    expect(await screen.findByText('Informe a etiqueta do lote.')).toBeInTheDocument()
     expect(createLotMutation.mutateAsync).not.toHaveBeenCalled()
   })
 
-  it('exige motivo em saída que zera o estoque', async () => {
+  it('cria lote a partir do botao "+ Criar nova etiqueta" do combobox', async () => {
+    mockUseReagentLots.mockReturnValue({ data: [buildLot()] })
+    createLotMutation.mutateAsync.mockResolvedValue(buildLot({ label: 'NovaEt' }))
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Novo Lote' }))
+
+    // 1) Etiqueta — digitar nova e clicar no item "+ Criar nova etiqueta".
+    // O combobox dentro do modal e identificavel por aria-controls que termina
+    // em "-listbox" e por estar associado ao label "Etiqueta *". Usamos
+    // findByLabelText para nao colidir com o combobox de filtros (manufacturer).
+    const labelCombobox = screen.getByLabelText('Etiqueta *')
+    await userEvent.click(labelCombobox)
+    await userEvent.type(labelCombobox, 'NovaEt')
+    await userEvent.click(screen.getByText(/\+ Criar nova etiqueta/i))
+
+    // 2) Demais campos obrigatorios
+    await userEvent.type(screen.getByLabelText('Nº do Lote *'), 'NEW-100')
+    await userEvent.type(screen.getByLabelText('Fabricante *'), 'BioLab')
+    await userEvent.selectOptions(screen.getByLabelText('Categoria *'), 'Bioquímica')
+    await userEvent.clear(screen.getByLabelText('Quantidade atual *'))
+    await userEvent.type(screen.getByLabelText('Quantidade atual *'), '20')
+    // Status default = em_estoque
+    await userEvent.type(screen.getByLabelText('Validade *'), '2027-01-01')
+    await userEvent.type(screen.getByLabelText('Localização *'), 'Geladeira 3')
+    await userEvent.selectOptions(screen.getByLabelText('Temperatura *'), '2-8°C')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
+
+    await waitFor(() => {
+      expect(createLotMutation.mutateAsync).toHaveBeenCalledTimes(1)
+    })
+    const sentRequest = createLotMutation.mutateAsync.mock.calls[0][0] as ReagentLotRequest
+    expect(sentRequest.label).toBe('NovaEt')
+    expect(sentRequest.lotNumber).toBe('NEW-100')
+    expect(sentRequest.location).toBe('Geladeira 3')
+    expect(sentRequest.storageTemp).toBe('2-8°C')
+  })
+
+  it('aplica trim defensivo no label antes do submit (bloqueante audit 4.2.1)', async () => {
+    mockUseReagentLots.mockReturnValue({ data: [buildLot()] })
+    createLotMutation.mutateAsync.mockResolvedValue(buildLot())
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Novo Lote' }))
+
+    const labelCombobox = screen.getByLabelText('Etiqueta *')
+    await userEvent.click(labelCombobox)
+    // Combobox ja faz trim em onChange, mas tambem testamos a 1a linha de defesa no service.
+    await userEvent.type(labelCombobox, '  Glicose ')
+    await userEvent.click(screen.getByText(/\+ Criar nova etiqueta/i))
+
+    await userEvent.type(screen.getByLabelText('Nº do Lote *'), 'L-100')
+    await userEvent.type(screen.getByLabelText('Fabricante *'), '  Wama  ')
+    await userEvent.selectOptions(screen.getByLabelText('Categoria *'), 'Bioquímica')
+    await userEvent.type(screen.getByLabelText('Validade *'), '2027-01-01')
+    await userEvent.type(screen.getByLabelText('Localização *'), '  Geladeira 1  ')
+    await userEvent.selectOptions(screen.getByLabelText('Temperatura *'), '2-8°C')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
+
+    await waitFor(() => {
+      expect(createLotMutation.mutateAsync).toHaveBeenCalledTimes(1)
+    })
+    const sentRequest = createLotMutation.mutateAsync.mock.calls[0][0] as ReagentLotRequest
+    expect(sentRequest.label).toBe('Glicose')
+    expect(sentRequest.manufacturer).toBe('Wama')
+    expect(sentRequest.location).toBe('Geladeira 1')
+  })
+
+  it('exibe banner amarelo quando expiryDate < hoje (status sera vencido pelo servidor)', async () => {
+    mockUseReagentLots.mockReturnValue({ data: [buildLot()] })
+
+    renderTab()
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Novo Lote' }))
+    const expiryInput = screen.getByLabelText('Validade *') as HTMLInputElement
+    fireEvent.change(expiryInput, { target: { value: '2020-01-01' } })
+
+    // Ao setar uma data passada, expiryWillForceVencido vira true e o banner
+    // amarelo aparece. O <strong>Vencido</strong> e o pivot estavel dentro
+    // do banner para localizar o aviso operacional.
+    await waitFor(() => {
+      const strongs = Array.from(document.querySelectorAll('strong'))
+      const found = strongs.some((node) => node.textContent === 'Vencido')
+      expect(found).toBe(true)
+    })
+  })
+
+  it('exige motivo em saida que zera o estoque', async () => {
     mockUseReagentLots.mockReturnValue({
-      data: [buildLot({ currentStock: 10, quantityValue: 10, stockPct: 100 })],
+      data: [buildLot({ currentStock: 10 })],
     })
 
     renderTab()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Movimentar' }))
-    await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'SAIDA')
+    // Modo lista — abre o card e clica em Remover
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getAllByRole('button', { name: /Remover/i })[0])
+
     await userEvent.clear(screen.getByLabelText('Quantidade'))
     await userEvent.type(screen.getByLabelText('Quantidade'), '10')
     await userEvent.click(screen.getByRole('button', { name: 'Registrar' }))
@@ -218,72 +323,39 @@ describe('ReagentesTab', () => {
     expect(createMovementMutation.mutateAsync).not.toHaveBeenCalled()
   })
 
-  it('bloqueia saída acima do estoque antes de enviar ao backend', async () => {
-    mockUseReagentLots.mockReturnValue({
-      data: [buildLot({ currentStock: 5, quantityValue: 10, stockPct: 50 })],
-    })
-
-    renderTab()
-
-    await userEvent.click(screen.getByRole('button', { name: 'Movimentar' }))
-    await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'SAIDA')
-    await userEvent.clear(screen.getByLabelText('Quantidade'))
-    await userEvent.type(screen.getByLabelText('Quantidade'), '6')
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar' }))
-
-    expect(await screen.findByText('Estoque insuficiente para esta saída. Estoque atual: 5.')).toBeInTheDocument()
-    expect(createMovementMutation.mutateAsync).not.toHaveBeenCalled()
-  })
-
-  it('abre lote inativo em modo ajuste para não permitir nova entrada', async () => {
+  it('bloqueia ENTRADA em lote vencido e mostra aviso', async () => {
     mockUseReagentLots.mockReturnValue({
       data: [
         buildLot({
-          status: 'inativo',
-          currentStock: 0,
-          stockPct: 0,
+          status: 'vencido',
+          currentStock: 5,
           canReceiveEntry: false,
           allowedMovementTypes: ['SAIDA', 'AJUSTE'],
-          movementWarning: 'Lote inativo não aceita nova entrada. Crie um novo lote.',
+          movementWarning: 'Lote vencido não aceita nova entrada. Crie um novo lote.',
         }),
       ],
     })
 
     renderTab()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Movimentar' }))
-
-    expect(screen.getByLabelText('Tipo')).toHaveValue('AJUSTE')
-    expect(screen.getByText('Lote inativo não aceita nova entrada. Crie um novo lote.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    // Botao "Adicionar" precisa estar desabilitado em lote vencido
+    const addButton = screen.getByRole('button', { name: /Adicionar/i })
+    expect(addButton).toBeDisabled()
   })
 
-  it('arquiva lote pela ação operacional da lista', async () => {
+  it('arquiva lote nao terminal (status != fora_de_estoque) com mensagem nova', async () => {
     const lot = buildLot({ id: 'lot-archive', lotNumber: 'ARCH-001' })
     mockUseReagentLots.mockReturnValue({ data: [lot] })
 
     renderTab()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Arquivar' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getByRole('button', { name: /Arquivar/i }))
 
     expect(window.confirm).toHaveBeenCalledWith(
-      'Arquivar o lote ARCH-001? Lotes com histórico serão preservados como inativos.',
+      'Arquivar o lote ARCH-001? Lotes com histórico serão preservados como Fora de estoque.',
     )
     expect(deleteLotMutation.mutateAsync).toHaveBeenCalledWith('lot-archive')
-  })
-
-  it('carrega a visão de etiquetas ao alternar o modo', async () => {
-    mockUseReagentLots.mockReturnValue({
-      data: [buildLot({ name: 'ALT' }), buildLot({ name: 'ALT', lotNumber: 'ALT-002', status: 'em_uso' })],
-    })
-
-    renderTab()
-
-    await userEvent.click(screen.getByRole('button', { name: 'Ver etiquetas' }))
-
-    await waitFor(() => {
-      expect(mockGetTagSummaries).toHaveBeenCalledTimes(1)
-    })
-
-    expect(await screen.findByText('2 lotes')).toBeInTheDocument()
   })
 })

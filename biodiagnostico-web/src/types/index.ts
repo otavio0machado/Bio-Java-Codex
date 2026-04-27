@@ -203,29 +203,30 @@ export interface PostCalibrationRecord {
   notes?: string
 }
 
+/**
+ * Conjunto canonico do status de lote pos refator v2.
+ *
+ * Backend forca {@code vencido} quando expiry < hoje. {@code fora_de_estoque}
+ * absorve a antiga semantica de {@code inativo} (terminal sem estoque).
+ */
+export type ReagentStatus = 'em_estoque' | 'em_uso' | 'fora_de_estoque' | 'vencido'
+
 export interface ReagentLot {
   id: string
-  name: string
+  /** Substitui o antigo {@code name} no contrato HTTP (backend mantem coluna {@code name}). */
+  label: string
   lotNumber: string
-  manufacturer?: string
+  manufacturer: string
   category?: string
-  expiryDate?: string
-  quantityValue: number
-  stockUnit: string
+  expiryDate: string
   currentStock: number
-  estimatedConsumption: number
   storageTemp?: string
-  startDate?: string
-  endDate?: string
-  status: 'ativo' | 'em_uso' | 'inativo' | 'vencido' | 'quarentena' | string
-  alertThresholdDays: number
+  status: ReagentStatus | string
   createdAt: string
   updatedAt: string
   daysLeft: number
-  stockPct: number
-  daysToRupture: number | null
   nearExpiry: boolean
-  // Fase 3: rastreabilidade forte
+  // Rastreabilidade
   location?: string | null
   supplier?: string | null
   receivedDate?: string | null
@@ -239,22 +240,17 @@ export interface ReagentLot {
 }
 
 export interface ReagentLotRequest {
-  name: string
+  // 9 obrigatorios canonicos
+  label: string
   lotNumber: string
   manufacturer: string
-  category?: string
+  category: string
+  currentStock: number
+  status: ReagentStatus | string
   expiryDate: string
-  quantityValue?: number
-  stockUnit?: string
-  currentStock?: number
-  estimatedConsumption?: number
-  storageTemp?: string
-  startDate?: string
-  endDate?: string
-  alertThresholdDays?: number
-  status?: string
-  // Fase 3
-  location?: string
+  location: string
+  storageTemp: string
+  // 3 opcionais (Detalhes adicionais)
   supplier?: string
   receivedDate?: string
   openedDate?: string
@@ -334,6 +330,24 @@ export interface StockMovementRequest {
   reason?: MovementReason | null
 }
 
+/**
+ * Resumo agregado de lotes por etiqueta. Substitui {@link ReagentTagSummary}
+ * no contrato vigente. Endpoint: {@code GET /api/reagents/labels}.
+ */
+export interface ReagentLabelSummary {
+  label: string
+  total: number
+  emEstoque: number
+  emUso: number
+  foraDeEstoque: number
+  vencidos: number
+}
+
+/**
+ * @deprecated Use {@link ReagentLabelSummary}. Mantido apenas para compatibilidade
+ * com clientes externos que ainda consomem {@code /api/reagents/tags}. Sera removido
+ * em PR-4 do refator de Reagentes.
+ */
 export interface ReagentTagSummary {
   name: string
   total: number

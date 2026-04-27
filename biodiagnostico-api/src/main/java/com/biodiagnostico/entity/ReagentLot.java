@@ -9,7 +9,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -36,49 +35,39 @@ public class ReagentLot {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    /**
+     * Coluna {@code name} no banco; semanticamente representa a etiqueta agrupadora
+     * exposta no contrato externo como {@code label} (refator-reagentes-v2). A coluna
+     * permanece com o nome historico para preservar audit_log e indices.
+     */
     @Column(nullable = false)
     private String name;
 
     @Column(name = "lot_number", nullable = false)
     private String lotNumber;
 
+    /** Promovido a NOT NULL pela migracao V13. */
+    @Column(nullable = false)
     private String manufacturer;
 
     private String category;
 
-    @Column(name = "expiry_date")
+    /** Promovido a NOT NULL pela migracao V13. */
+    @Column(name = "expiry_date", nullable = false)
     private LocalDate expiryDate;
-
-    @Builder.Default
-    @Column(name = "quantity_value")
-    private Double quantityValue = 0D;
-
-    @Builder.Default
-    @Column(name = "stock_unit")
-    private String stockUnit = "unidades";
 
     @Builder.Default
     @Column(name = "current_stock")
     private Double currentStock = 0D;
 
-    @Builder.Default
-    @Column(name = "estimated_consumption")
-    private Double estimatedConsumption = 0D;
-
     @Column(name = "storage_temp")
     private String storageTemp;
 
-    @Column(name = "start_date")
-    private LocalDate startDate;
-
-    @Column(name = "end_date")
-    private LocalDate endDate;
-
     @Builder.Default
     @Column(nullable = false)
-    private String status = "ativo";
+    private String status = ReagentStatus.EM_ESTOQUE;
 
-    // ===== Fase 3: rastreabilidade forte =====
+    // ===== Rastreabilidade forte (RDC 302 / ISO 15189) =====
 
     /** Localizacao fisica do lote (ex: "Geladeira 2, Prateleira B"). */
     @Column(length = 128)
@@ -92,13 +81,14 @@ public class ReagentLot {
     @Column(name = "received_date")
     private LocalDate receivedDate;
 
-    /** Data em que o lote foi aberto para uso (diferente de startDate). */
+    /**
+     * Data em que o lote foi aberto para uso.
+     *
+     * <p>Setada automaticamente quando o status final do lote for {@code em_uso} e o
+     * campo estiver nulo (ver {@code ReagentService#applyOpenedDateOnUseTransition}).</p>
+     */
     @Column(name = "opened_date")
     private LocalDate openedDate;
-
-    @Builder.Default
-    @Column(name = "alert_threshold_days")
-    private Integer alertThresholdDays = 7;
 
     @Builder.Default
     @OneToMany(mappedBy = "reagentLot", cascade = CascadeType.ALL, orphanRemoval = true)

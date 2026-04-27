@@ -9,6 +9,19 @@ export function useReagentLots(category?: string, status?: string) {
   })
 }
 
+/**
+ * Carrega o agregado de etiquetas para alimentar:
+ * - O combobox de etiqueta no {@code ReagentLotModal}
+ * - A visao "tags" da {@code ReagentesTab}
+ */
+export function useReagentLabels(enabled = true) {
+  return useQuery({
+    queryKey: ['reagent-labels'],
+    queryFn: () => reagentService.getLabelSummaries(),
+    enabled,
+  })
+}
+
 export function useCreateReagentLot() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -18,6 +31,7 @@ export function useCreateReagentLot() {
     retry: false,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reagents'] })
+      void queryClient.invalidateQueries({ queryKey: ['reagent-labels'] })
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
@@ -31,6 +45,7 @@ export function useUpdateReagentLot() {
     retry: false,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reagents'] })
+      void queryClient.invalidateQueries({ queryKey: ['reagent-labels'] })
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
@@ -43,6 +58,7 @@ export function useDeleteReagentLot() {
     retry: false,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reagents'] })
+      void queryClient.invalidateQueries({ queryKey: ['reagent-labels'] })
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
@@ -63,6 +79,7 @@ export function useCreateStockMovement(lotId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['reagents'] })
       void queryClient.invalidateQueries({ queryKey: ['reagent-movements', lotId] })
+      void queryClient.invalidateQueries({ queryKey: ['reagent-labels'] })
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })

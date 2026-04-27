@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react'
 import type { ComboboxOption } from '../../ui'
 import { Card, Combobox, Input, Select } from '../../ui'
-import { CATEGORIES, TEMPS } from './constants'
+import { CATEGORIES, REAGENT_STATUS_OPTIONS, TEMPS } from './constants'
 import type { ReagentSortMode, ReagentViewMode } from './utils'
 
 interface ReagentsFiltersProps {
@@ -88,14 +88,14 @@ export function ReagentsFilters({
         <Select
           value={status}
           onChange={(event) => onStatusChange(event.target.value)}
-          title="Vencido: passou da validade e ainda tem estoque (requer descarte). Inativo: vencido e sem estoque (histórico)."
+          title="Em estoque: cadastrado e ainda nao aberto. Em uso: aberto. Fora de estoque: estoque zerado dentro da validade. Vencido: validade ultrapassada."
         >
           <option value="">Todos status</option>
-          <option value="ativo">Ativo</option>
-          <option value="em_uso">Em uso</option>
-          <option value="quarentena">Quarentena</option>
-          <option value="vencido">Vencido (com estoque)</option>
-          <option value="inativo">Inativo (arquivo)</option>
+          {REAGENT_STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </Select>
         <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700">
           <input

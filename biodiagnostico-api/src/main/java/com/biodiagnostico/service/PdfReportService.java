@@ -139,7 +139,8 @@ public class PdfReportService {
                     safe(lot.getManufacturer()),
                     safe(lot.getStatus()),
                     formatDate(lot.getExpiryDate()),
-                    formatDecimal(lot.getCurrentStock()) + " " + safe(lot.getStockUnit()),
+                    // Refator-v2: stockUnit foi removido. Estoque renderizado como decimal puro.
+                    formatDecimal(lot.getCurrentStock()),
                     daysLeft >= 0 ? String.valueOf(daysLeft) : "—"
                 );
                 alternate = !alternate;

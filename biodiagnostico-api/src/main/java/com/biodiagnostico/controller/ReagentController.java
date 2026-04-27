@@ -2,6 +2,7 @@ package com.biodiagnostico.controller;
 
 import com.biodiagnostico.dto.request.ReagentLotRequest;
 import com.biodiagnostico.dto.request.StockMovementRequest;
+import com.biodiagnostico.dto.response.ReagentLabelSummary;
 import com.biodiagnostico.dto.response.ReagentLotResponse;
 import com.biodiagnostico.dto.response.ReagentTagSummary;
 import com.biodiagnostico.dto.response.StockMovementResponse;
@@ -10,6 +11,7 @@ import com.biodiagnostico.util.ResponseMapper;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -101,9 +103,26 @@ public class ReagentController {
         return ResponseEntity.ok(reagentService.getExpiringLots(days).stream().map(ResponseMapper::toReagentLotResponse).toList());
     }
 
+    /**
+     * Endpoint canonico do refator-v2: resumo agregado por etiqueta. Substitui
+     * {@code /api/reagents/tags} no contrato externo.
+     */
+    @GetMapping("/labels")
+    public ResponseEntity<List<ReagentLabelSummary>> getLabelSummaries() {
+        return ResponseEntity.ok(reagentService.getLabelSummaries());
+    }
+
+    /**
+     * Alias deprecated do endpoint canonico {@code /api/reagents/labels}. Mantido por
+     * uma janela curta para nao quebrar integradores externos. Frontend ja consome
+     * {@code /labels}. Removido em PR-4.
+     */
     @GetMapping("/tags")
     public ResponseEntity<List<ReagentTagSummary>> getTagSummaries() {
-        return ResponseEntity.ok(reagentService.getTagSummaries());
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Deprecation", "true");
+        headers.add("Link", "</api/reagents/labels>; rel=\"successor-version\"");
+        return ResponseEntity.ok().headers(headers).body(reagentService.getTagSummaries());
     }
 
     @GetMapping("/export/csv")
@@ -113,19 +132,20 @@ public class ReagentController {
     ) {
         List<ReagentLotResponse> lots = reagentService.getLots(category, status);
         StringBuilder csv = new StringBuilder();
-        csv.append("Nome,Lote,Categoria,Fabricante,Validade,Dias Restantes,Estoque Atual,Unidade,Consumo/Dia,Temperatura,Status\n");
+        // Header canonico refator-v2 (decisao 1.5):
+        // Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Estoque Atual,Status,Localizacao,Temperatura
+        csv.append("Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Estoque Atual,Status,Localizacao,Temperatura\n");
         for (ReagentLotResponse lot : lots) {
-            csv.append(escapeCsv(lot.name())).append(",");
+            csv.append(escapeCsv(lot.label())).append(",");
             csv.append(escapeCsv(lot.lotNumber())).append(",");
-            csv.append(escapeCsv(lot.category())).append(",");
             csv.append(escapeCsv(lot.manufacturer())).append(",");
+            csv.append(escapeCsv(lot.category())).append(",");
             csv.append(lot.expiryDate() != null ? lot.expiryDate() : "").append(",");
             csv.append(lot.daysLeft()).append(",");
             csv.append(lot.currentStock() != null ? lot.currentStock() : 0).append(",");
-            csv.append(escapeCsv(lot.stockUnit())).append(",");
-            csv.append(lot.estimatedConsumption() != null ? lot.estimatedConsumption() : 0).append(",");
-            csv.append(escapeCsv(lot.storageTemp())).append(",");
-            csv.append(escapeCsv(lot.status())).append("\n");
+            csv.append(escapeCsv(lot.status())).append(",");
+            csv.append(escapeCsv(lot.location())).append(",");
+            csv.append(escapeCsv(lot.storageTemp())).append("\n");
         }
         return ResponseEntity.ok()
             .header("Content-Disposition", "attachment; filename=reagentes.csv")

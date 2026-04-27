@@ -25,11 +25,26 @@ import org.springframework.stereotype.Component;
 @Component
 public class ReportDefinitionRegistry {
 
-    /** Categorias de reagente aceitas em filtros STRING_ENUM_MULTI. Frozen pela orquestracao. */
+    /**
+     * Categorias de reagente aceitas em filtros STRING_ENUM_MULTI dos relatorios v2.
+     *
+     * <p>MUST mirror {@code biodiagnostico-web/src/components/proin/reagentes/constants.ts}
+     * (CATEGORIES) e {@link com.biodiagnostico.service.ReagentService#ALLOWED_CATEGORIES}.
+     * Drift gera filtros de relatorio que nao casam com as categorias persistidas (rows
+     * gravadas com "Bioquímica" + acento ficam invisiveis ao filtrar por "Bioquimica" sem
+     * acento). Refator-reagentes-v2 G-01 alinhou as 3 fontes ao formato com acentos.
+     */
     public static final List<String> REAGENT_CATEGORIES = List.of(
-        "Bioquimica", "Hematologia", "Imunologia", "Parasitologia",
-        "Microbiologia", "Uroanalise", "Kit Diagnostico",
-        "Controle CQ", "Calibrador", "Geral"
+        "Bioquímica",
+        "Hematologia",
+        "Imunologia",
+        "Parasitologia",
+        "Microbiologia",
+        "Uroanálise",
+        "Kit Diagnóstico",
+        "Controle CQ",
+        "Calibrador",
+        "Geral"
     );
 
     /** Areas do laboratorio (compartilhado entre varias definitions). */

@@ -177,10 +177,9 @@ class PdfReportServiceTest {
             .name("ALT")
             .lotNumber("L100")
             .manufacturer("BioSystems")
-            .status("ativo")
+            .status("em_estoque")
             .expiryDate(LocalDate.now().plusDays(30))
             .currentStock(50.0)
-            .stockUnit("frascos")
             .build();
 
         when(reagentLotRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(lot));

@@ -31,6 +31,13 @@ import java.util.List;
 
 public final class ResponseMapper {
 
+    /**
+     * Threshold fixo para a flag {@code nearExpiry}. Substituiu a coluna
+     * {@code alert_threshold_days} (dropada na V13). Decisao 1.10 do contrato:
+     * sem configurabilidade — overdesign nao pedido.
+     */
+    private static final int ALERT_THRESHOLD_DAYS = 7;
+
     private ResponseMapper() {
     }
 
@@ -159,40 +166,29 @@ public final class ResponseMapper {
         long daysLeft = lot.getExpiryDate() == null
             ? -1
             : ChronoUnit.DAYS.between(LocalDate.now(), lot.getExpiryDate());
-        double quantityValue = NumericUtils.defaultIfNull(lot.getQuantityValue());
-        double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
-        double estimatedConsumption = NumericUtils.defaultIfNull(lot.getEstimatedConsumption());
-        double stockPct = quantityValue <= 0 ? 0D : (currentStock / quantityValue) * 100D;
-        Double daysToRupture = estimatedConsumption > 0 ? currentStock / estimatedConsumption : null;
-        int alertThresholdDays = lot.getAlertThresholdDays() == null ? 7 : lot.getAlertThresholdDays();
-        boolean nearExpiry = daysLeft >= 0 && daysLeft <= alertThresholdDays;
+        boolean nearExpiry = daysLeft >= 0 && daysLeft <= ALERT_THRESHOLD_DAYS;
         List<String> traceabilityIssues = reagentTraceabilityIssues(lot);
-        boolean canReceiveEntry = !ReagentStatus.INATIVO.equals(lot.getStatus());
+        // Politica refator-v2 (decisao 1.8): apenas 'vencido' bloqueia ENTRADA. Os demais
+        // status (em_estoque, em_uso, fora_de_estoque) aceitam entrada — fora_de_estoque
+        // retorna a em_uso via derivacao apos a entrada.
+        boolean canReceiveEntry = !ReagentStatus.VENCIDO.equals(lot.getStatus());
         List<String> allowedMovementTypes = canReceiveEntry
             ? List.of(MovementType.ENTRADA, MovementType.SAIDA, MovementType.AJUSTE)
             : List.of(MovementType.SAIDA, MovementType.AJUSTE);
 
         return new ReagentLotResponse(
             lot.getId(),
-            lot.getName(),
+            lot.getName(), // semantica: label
             lot.getLotNumber(),
             lot.getManufacturer(),
             lot.getCategory(),
             lot.getExpiryDate(),
-            lot.getQuantityValue(),
-            lot.getStockUnit(),
             lot.getCurrentStock(),
-            lot.getEstimatedConsumption(),
             lot.getStorageTemp(),
-            lot.getStartDate(),
-            lot.getEndDate(),
             lot.getStatus(),
-            lot.getAlertThresholdDays(),
             lot.getCreatedAt(),
             lot.getUpdatedAt(),
             daysLeft,
-            stockPct,
-            daysToRupture,
             nearExpiry,
             lot.getLocation(),
             lot.getSupplier(),
@@ -203,7 +199,7 @@ public final class ResponseMapper {
             traceabilityIssues,
             canReceiveEntry,
             allowedMovementTypes,
-            canReceiveEntry ? null : "Lote inativo não aceita nova entrada. Crie um novo lote."
+            canReceiveEntry ? null : "Lote vencido nao aceita nova entrada. Crie um novo lote."
         );
     }
 

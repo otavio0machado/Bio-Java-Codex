@@ -1,28 +1,90 @@
-import { ArrowDownLeft, ArrowUpRight, Pencil } from 'lucide-react'
-import type { Dispatch, SetStateAction } from 'react'
-import type { ReagentLot, ReagentLotRequest, StockMovement, StockMovementRequest } from '../../../types'
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
+import { useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import type {
+  ReagentLabelSummary,
+  ReagentLot,
+  ReagentLotRequest,
+  StockMovement,
+  StockMovementRequest,
+} from '../../../types'
 import { cn } from '../../../utils/cn'
-import { Button, Input, Modal, Select } from '../../ui'
-import { CATEGORIES, MOVEMENT_REASONS, TEMPS, UNITS } from './constants'
+import { todayLocal } from '../../../utils/date'
+import { Button, Combobox, Input, Modal, Select, type ComboboxOption } from '../../ui'
+import {
+  CATEGORIES,
+  MOVEMENT_REASONS,
+  REAGENT_STATUS_OPTIONS,
+  TEMPS,
+} from './constants'
 import { canReceiveEntry } from './utils'
 
+interface ReagentLotModalProps {
+  form: ReagentLotRequest
+  isOpen: boolean
+  isEditing: boolean
+  isSaving: boolean
+  labels: ReagentLabelSummary[]
+  onClose: () => void
+  onSave: () => void
+  setForm: Dispatch<SetStateAction<ReagentLotRequest>>
+}
+
+/**
+ * Modal de cadastro/edicao de lote pos-refator v2.
+ *
+ * Layout canonico (contrato 6.1):
+ * - Secao 1 (Identificacao): Etiqueta (combobox), Lote, Fabricante, Categoria.
+ * - Secao 2 (Estoque & Status): Quantidade, Status, Validade.
+ * - Secao 3 (Armazenamento): Localizacao, Temperatura.
+ * - Secao 4 (Detalhes adicionais — colapsavel): Fornecedor, Recebimento, Abertura.
+ *
+ * Comportamentos chave:
+ * - Etiqueta usa {@code Combobox} com {@code allowCustom=true} e
+ *   {@code createLabel="+ Criar nova etiqueta"}. Backend cria via POST /api/reagents.
+ * - Banner amarelo quando {@code expiryDate < hoje}: o backend forca status='vencido'.
+ * - Trim defensivo no submit (bloqueante audit 4.2.1) — feito via service tambem.
+ */
 export function ReagentLotModal({
   form,
   isOpen,
   isEditing,
   isSaving,
+  labels,
   onClose,
   onSave,
   setForm,
-}: {
-  form: ReagentLotRequest
-  isOpen: boolean
-  isEditing: boolean
-  isSaving: boolean
-  onClose: () => void
-  onSave: () => void
-  setForm: Dispatch<SetStateAction<ReagentLotRequest>>
-}) {
+}: ReagentLotModalProps) {
+  const [showAdditional, setShowAdditional] = useState(false)
+  const today = todayLocal()
+  const expiryWillForceVencido = Boolean(form.expiryDate) && form.expiryDate < today
+
+  const labelOptions = useMemo<ComboboxOption[]>(
+    () =>
+      labels
+        .map((summary) => ({
+          value: summary.label,
+          label: summary.label,
+          description:
+            summary.total > 1 ? `${summary.total} lotes cadastrados` : '1 lote cadastrado',
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [labels],
+  )
+
+  const handleSave = () => {
+    // Bloqueante audit 4.2.1: garante trim no submit, mesmo que o usuario tenha
+    // digitado whitespace antes/depois. Service tambem sanitiza antes do POST.
+    setForm((current) => ({
+      ...current,
+      label: current.label?.trim() ?? '',
+      lotNumber: current.lotNumber?.trim() ?? '',
+      manufacturer: current.manufacturer?.trim() ?? '',
+      location: current.location?.trim() ?? '',
+      supplier: current.supplier?.trim() || undefined,
+    }))
+    onSave()
+  }
+
   return (
     <Modal
       isOpen={isOpen}
@@ -34,7 +96,7 @@ export function ReagentLotModal({
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={onSave} loading={isSaving}>
+          <Button onClick={handleSave} loading={isSaving}>
             {isEditing ? 'Atualizar' : 'Cadastrar'}
           </Button>
         </div>
@@ -43,34 +105,40 @@ export function ReagentLotModal({
       <div className="space-y-5">
         <FormSection title="Identificação">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Input
-              label="Nome / Etiqueta"
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              placeholder="Ex: Glicose, HIV, TSH..."
+            <Combobox
+              id="reagent-label-input"
+              label="Etiqueta *"
+              placeholder="Buscar ou criar etiqueta..."
+              value={form.label ?? ''}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, label: value }))
+              }
+              options={labelOptions}
+              allowCustom
+              createLabel="+ Criar nova etiqueta"
+              emptyText="Nenhuma etiqueta cadastrada"
             />
             <Input
-              label="Nº do Lote"
+              label="Nº do Lote *"
               value={form.lotNumber}
-              onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, lotNumber: event.target.value }))
+              }
             />
-            <div>
-              <Input
-                label="Fabricante *"
-                value={form.manufacturer}
-                onChange={(event) => setForm((current) => ({ ...current, manufacturer: event.target.value }))}
-                placeholder="Ex: Wama, Abon..."
-              />
-              {!form.manufacturer?.trim() ? (
-                <p className="mt-1 text-xs text-amber-600">
-                  Obrigatório: fabricante é exigido para rastreabilidade.
-                </p>
-              ) : null}
-            </div>
+            <Input
+              label="Fabricante *"
+              value={form.manufacturer}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, manufacturer: event.target.value }))
+              }
+              placeholder="Ex: Wama, Abon..."
+            />
             <Select
-              label="Categoria"
-              value={form.category}
-              onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
+              label="Categoria *"
+              value={form.category ?? ''}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, category: event.target.value }))
+              }
             >
               <option value="">Selecione...</option>
               {CATEGORIES.map((category) => (
@@ -82,89 +150,69 @@ export function ReagentLotModal({
           </div>
         </FormSection>
 
-        <FormSection title="Estoque">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <FormSection title="Estoque & Status">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Input
-              label="Estoque Atual"
+              label="Quantidade atual *"
               type="number"
+              min="0"
               value={String(form.currentStock ?? 0)}
               onChange={(event) =>
-                setForm((current) => ({ ...current, currentStock: Number(event.target.value) }))
+                setForm((current) => ({
+                  ...current,
+                  currentStock: Number(event.target.value || 0),
+                }))
               }
             />
             <Select
-              label="Unidade"
-              value={form.stockUnit}
-              onChange={(event) => setForm((current) => ({ ...current, stockUnit: event.target.value }))}
+              label="Status *"
+              value={form.status ?? 'em_estoque'}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, status: event.target.value }))
+              }
             >
-              {UNITS.map((unit) => (
-                <option key={unit} value={unit}>
-                  {unit}
+              {REAGENT_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </Select>
             <Input
-              label="Consumo/Dia"
-              type="number"
-              value={String(form.estimatedConsumption ?? 0)}
+              label="Validade *"
+              type="date"
+              value={form.expiryDate}
               onChange={(event) =>
-                setForm((current) => ({ ...current, estimatedConsumption: Number(event.target.value) }))
-              }
-            />
-            <Input
-              label="Qtde Inicial"
-              type="number"
-              value={String(form.quantityValue ?? 0)}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, quantityValue: Number(event.target.value) }))
+                setForm((current) => ({ ...current, expiryDate: event.target.value }))
               }
             />
           </div>
+          {expiryWillForceVencido ? (
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Este lote será salvo como <strong>Vencido</strong> automaticamente porque a validade já
+                passou. O servidor sobrescreve o status enviado.
+              </span>
+            </div>
+          ) : null}
         </FormSection>
 
-        <FormSection title="Validade e Datas">
+        <FormSection title="Armazenamento">
           <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Input
-                label="Validade *"
-                type="date"
-                value={form.expiryDate}
-                onChange={(event) => setForm((current) => ({ ...current, expiryDate: event.target.value }))}
-              />
-              {!form.expiryDate ? (
-                <p className="mt-1 text-xs text-amber-600">
-                  Obrigatório: validade é exigida para alertas e rastreabilidade.
-                </p>
-              ) : null}
-            </div>
             <Input
-              label="Alerta (dias antes)"
-              type="number"
-              value={String(form.alertThresholdDays ?? 7)}
+              label="Localização *"
+              value={form.location}
               onChange={(event) =>
-                setForm((current) => ({ ...current, alertThresholdDays: Number(event.target.value) }))
+                setForm((current) => ({ ...current, location: event.target.value }))
               }
-            />
-            <Input
-              label="Início de Uso"
-              type="date"
-              value={form.startDate ?? ''}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, startDate: event.target.value || undefined }))
-              }
-            />
-            <Input
-              label="Data Fim de Uso"
-              type="date"
-              value={form.endDate ?? ''}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, endDate: event.target.value || undefined }))
-              }
+              placeholder="Ex: Geladeira 2, Prateleira B"
             />
             <Select
-              label="Temperatura"
-              value={form.storageTemp}
-              onChange={(event) => setForm((current) => ({ ...current, storageTemp: event.target.value }))}
+              label="Temperatura *"
+              value={form.storageTemp ?? ''}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, storageTemp: event.target.value }))
+              }
             >
               <option value="">Selecione...</option>
               {TEMPS.map((temp) => (
@@ -176,41 +224,82 @@ export function ReagentLotModal({
           </div>
         </FormSection>
 
-        <FormSection title="Rastreabilidade">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Input
-              label="Localização física"
-              value={form.location ?? ''}
-              onChange={(event) => setForm((current) => ({ ...current, location: event.target.value }))}
-              placeholder="Ex: Geladeira 2, Prateleira B"
-            />
-            <Input
-              label="Fornecedor"
-              value={form.supplier ?? ''}
-              onChange={(event) => setForm((current) => ({ ...current, supplier: event.target.value }))}
-              placeholder="Distribuidor / revendedor"
-            />
-            <Input
-              label="Data de recebimento"
-              type="date"
-              value={form.receivedDate ?? ''}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, receivedDate: event.target.value || undefined }))
-              }
-            />
-            <Input
-              label="Data de abertura"
-              type="date"
-              value={form.openedDate ?? ''}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, openedDate: event.target.value || undefined }))
-              }
-            />
-          </div>
-        </FormSection>
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowAdditional((current) => !current)}
+            className={cn(
+              'flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-medium text-neutral-700 transition hover:border-green-300',
+              showAdditional ? 'border-green-300 bg-green-50/40 text-green-900' : '',
+            )}
+            aria-expanded={showAdditional}
+          >
+            <span className="flex items-center gap-2">
+              {showAdditional ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              Detalhes adicionais (opcional)
+            </span>
+            <span className="text-xs text-neutral-500">
+              Fornecedor, recebimento e abertura
+            </span>
+          </button>
+          {showAdditional ? (
+            <div className="mt-3 grid gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 sm:grid-cols-2">
+              <Input
+                label="Fornecedor"
+                value={form.supplier ?? ''}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, supplier: event.target.value || undefined }))
+                }
+                placeholder="Distribuidor / revendedor"
+              />
+              <Input
+                label="Data de recebimento"
+                type="date"
+                value={form.receivedDate ?? ''}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    receivedDate: event.target.value || undefined,
+                  }))
+                }
+              />
+              <Input
+                label="Data de abertura"
+                type="date"
+                value={form.openedDate ?? ''}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    openedDate: event.target.value || undefined,
+                  }))
+                }
+              />
+            </div>
+          ) : null}
+        </div>
       </div>
     </Modal>
   )
+}
+
+interface ReagentMovementModalProps {
+  form: StockMovementRequest
+  isOpen: boolean
+  isSaving: boolean
+  lot: ReagentLot | null
+  onClose: () => void
+  onSave: () => void
+  setForm: Dispatch<SetStateAction<StockMovementRequest>>
+  movements: StockMovement[]
+  /**
+   * Quando {@code true}, o usuario abriu o modal explicitamente para uma operacao
+   * de ENTRADA — o select de tipo fica fixado e a UI deixa claro o contexto.
+   */
+  lockType?: boolean
 }
 
 export function ReagentMovementModal({
@@ -222,23 +311,17 @@ export function ReagentMovementModal({
   onSave,
   setForm,
   movements,
-}: {
-  form: StockMovementRequest
-  isOpen: boolean
-  isSaving: boolean
-  lot: ReagentLot | null
-  onClose: () => void
-  onSave: () => void
-  setForm: Dispatch<SetStateAction<StockMovementRequest>>
-  movements: StockMovement[]
-}) {
+  lockType = false,
+}: ReagentMovementModalProps) {
   const canUseEntrada = lot ? canReceiveEntry(lot) : true
+
+  const titleSuffix = lot ? ` · Lote ${lot.lotNumber}` : ''
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Movimentação${lot ? ` · ${lot.name}` : ''}`}
+      title={`Movimentação${titleSuffix}`}
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>
@@ -254,6 +337,7 @@ export function ReagentMovementModal({
         <Select
           label="Tipo"
           value={form.type}
+          disabled={lockType}
           onChange={(event) =>
             setForm((current) => ({
               ...current,
@@ -271,12 +355,16 @@ export function ReagentMovementModal({
           label="Quantidade"
           type="number"
           value={String(form.quantity)}
-          onChange={(event) => setForm((current) => ({ ...current, quantity: Number(event.target.value) }))}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, quantity: Number(event.target.value) }))
+          }
         />
         <Input
           label="Responsável *"
           value={form.responsible}
-          onChange={(event) => setForm((current) => ({ ...current, responsible: event.target.value }))}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, responsible: event.target.value }))
+          }
         />
         <Select
           label={form.type === 'AJUSTE' ? 'Motivo *' : 'Motivo (opcional)'}
@@ -297,8 +385,10 @@ export function ReagentMovementModal({
         </Select>
         <Input
           label="Observações"
-          value={form.notes}
-          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+          value={form.notes ?? ''}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, notes: event.target.value }))
+          }
         />
       </div>
 
@@ -310,7 +400,7 @@ export function ReagentMovementModal({
 
       {!canUseEntrada ? (
         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-          {lot?.movementWarning ?? 'Lote não aceita entrada. Use ajuste apenas para correção operacional registrada.'}
+          {lot?.movementWarning ?? 'Lote vencido não aceita nova entrada. Crie um novo lote.'}
         </p>
       ) : null}
 

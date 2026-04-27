@@ -1,27 +1,38 @@
 import type { ComboboxOption } from '../../ui'
 import type { ReagentLot, ReagentLotRequest, StockMovementRequest, User } from '../../../types'
-import { todayLocal } from '../../../utils/date'
 
 export type ReagentSortMode = 'urgency' | 'name' | 'stock'
 export type ReagentViewMode = 'list' | 'tags'
+/**
+ * Filtros operacionais aplicados pelo dashboard. Pos-refator v2 saem
+ * {@code lowStock}, {@code ruptureRisk} e {@code expired} (este renomeado
+ * para {@code vencidos}). Adicionados {@code emEstoque, emUso, foraDeEstoque}
+ * para alinhar com os 5 cards de status canonicos.
+ */
 export type DashFilter =
+  | 'emEstoque'
+  | 'emUso'
+  | 'foraDeEstoque'
+  | 'vencidos'
   | 'expiring7d'
   | 'expiring30d'
-  | 'ruptureRisk'
-  | 'expired'
   | 'noTraceability'
   | 'noValidity'
-  | 'lowStock'
 
+/**
+ * Stats consumidos pelo {@code ReagentsDashboard}. Cinco contagens principais
+ * (status canonicos) + alertas operacionais.
+ */
 export interface ReagentStats {
   total: number
+  emEstoque: number
+  emUso: number
+  foraDeEstoque: number
+  vencidos: number
   expiring7d: number
   expiring30d: number
-  ruptureRisk: number
-  expired: number
   noTraceability: number
   noValidity: number
-  lowStock: number
 }
 
 export interface ReagentFilters {
@@ -37,24 +48,23 @@ export function getResponsibleName(user: User | null | undefined) {
   return user?.name ?? user?.username ?? ''
 }
 
+/**
+ * Form vazio para o {@code ReagentLotModal}. Reflete os 9 obrigatorios canonicos
+ * + 3 opcionais (Detalhes adicionais). Status default = 'em_estoque' alinha com
+ * o backend ({@code ReagentLot.status} default).
+ */
 export function createEmptyLotForm(): ReagentLotRequest {
   return {
-    name: '',
+    label: '',
     lotNumber: '',
     manufacturer: '',
     category: '',
     expiryDate: '',
-    quantityValue: 0,
-    stockUnit: 'unidades',
     currentStock: 0,
-    estimatedConsumption: 0,
-    storageTemp: '',
-    startDate: todayLocal(),
-    endDate: undefined,
-    alertThresholdDays: 7,
-    status: 'ativo',
+    status: 'em_estoque',
     location: '',
-    supplier: '',
+    storageTemp: '',
+    supplier: undefined,
     receivedDate: undefined,
     openedDate: undefined,
   }
@@ -73,6 +83,11 @@ export function createMovementForm(
   }
 }
 
+/**
+ * Lista as chaves ASCII de campos de rastreabilidade pendentes. Quando o backend
+ * envia {@code traceabilityIssues} no DTO, prevalece esse valor. Fallback recalcula
+ * client-side para defesa em profundidade.
+ */
 export function getTraceabilityIssues(lot: ReagentLot) {
   if (Array.isArray(lot.traceabilityIssues)) {
     return lot.traceabilityIssues
@@ -99,25 +114,42 @@ export function getTraceabilityIssueLabels(lot: ReagentLot) {
   return getTraceabilityIssues(lot).map((issue) => labels[issue] ?? issue)
 }
 
+/**
+ * Politica canonica de aceitacao de ENTRADA pos-refator v2: somente
+ * {@code vencido} bloqueia. Demais status ({@code em_estoque, em_uso,
+ * fora_de_estoque}) aceitam ENTRADA — em particular {@code fora_de_estoque}
+ * volta a {@code em_uso} via derivacao no backend.
+ *
+ * Bloqueante audit 4.2.2: fallback alinhado com a politica nova; usa
+ * {@code lot.canReceiveEntry} sempre que o backend manda; senao testa
+ * {@code status !== 'vencido'}.
+ */
 export function canReceiveEntry(lot: ReagentLot) {
-  return lot.canReceiveEntry ?? lot.status !== 'inativo'
+  if (typeof lot.canReceiveEntry === 'boolean') {
+    return lot.canReceiveEntry
+  }
+  return lot.status !== 'vencido'
 }
 
+/**
+ * Constroi os 9 indicadores do dashboard. Cinco principais sao contagens
+ * por status canonico; quatro de alerta operacional.
+ */
 export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
   return {
     total: lots.length,
-    expiring7d: lots.filter((lot) => lot.status !== 'inativo' && lot.daysLeft >= 0 && lot.daysLeft <= 7).length,
-    expiring30d: lots.filter((lot) => lot.status !== 'inativo' && lot.daysLeft > 7 && lot.daysLeft <= 30).length,
-    ruptureRisk: lots.filter((lot) => lot.status !== 'inativo' && lot.daysToRupture != null && lot.daysToRupture <= 5).length,
-    expired: lots.filter((lot) => lot.status === 'vencido').length,
+    emEstoque: lots.filter((lot) => lot.status === 'em_estoque').length,
+    emUso: lots.filter((lot) => lot.status === 'em_uso').length,
+    foraDeEstoque: lots.filter((lot) => lot.status === 'fora_de_estoque').length,
+    vencidos: lots.filter((lot) => lot.status === 'vencido').length,
+    expiring7d: lots.filter(
+      (lot) => lot.status !== 'vencido' && lot.daysLeft >= 0 && lot.daysLeft <= 7,
+    ).length,
+    expiring30d: lots.filter(
+      (lot) => lot.status !== 'vencido' && lot.daysLeft > 7 && lot.daysLeft <= 30,
+    ).length,
     noTraceability: lots.filter((lot) => getTraceabilityIssues(lot).length > 0).length,
     noValidity: lots.filter((lot) => !lot.expiryDate).length,
-    lowStock: lots.filter((lot) => {
-      if (lot.status === 'inativo') return false
-      const max = lot.quantityValue || 0
-      if (max <= 0) return false
-      return lot.currentStock / max <= 0.2
-    }).length,
   }
 }
 
@@ -139,6 +171,10 @@ export function buildManufacturerOptions(lots: ReagentLot[]): ComboboxOption[] {
     }))
 }
 
+/**
+ * Aplica busca, filtros operacionais e ordenacao na lista de lotes.
+ * Search consome agora {@code label} (e nao mais {@code name}).
+ */
 export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   let result = lots
 
@@ -146,7 +182,7 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
     const normalizedTerm = filters.searchTerm.toLowerCase()
     result = result.filter(
       (lot) =>
-        lot.name.toLowerCase().includes(normalizedTerm) ||
+        (lot.label ?? '').toLowerCase().includes(normalizedTerm) ||
         lot.lotNumber.toLowerCase().includes(normalizedTerm),
     )
   }
@@ -165,31 +201,31 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
         lot.status === 'vencido' ||
         lot.daysLeft < 0 ||
         (lot.daysLeft >= 0 && lot.daysLeft <= 7) ||
-        (lot.daysToRupture != null && lot.daysToRupture <= 5) ||
         getTraceabilityIssues(lot).length > 0 ||
         !lot.expiryDate,
     )
   }
 
-  if (filters.dashFilter === 'expiring7d') {
-    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysLeft >= 0 && lot.daysLeft <= 7)
-  } else if (filters.dashFilter === 'expiring30d') {
-    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysLeft > 7 && lot.daysLeft <= 30)
-  } else if (filters.dashFilter === 'ruptureRisk') {
-    result = result.filter((lot) => lot.status !== 'inativo' && lot.daysToRupture != null && lot.daysToRupture <= 5)
-  } else if (filters.dashFilter === 'expired') {
+  if (filters.dashFilter === 'emEstoque') {
+    result = result.filter((lot) => lot.status === 'em_estoque')
+  } else if (filters.dashFilter === 'emUso') {
+    result = result.filter((lot) => lot.status === 'em_uso')
+  } else if (filters.dashFilter === 'foraDeEstoque') {
+    result = result.filter((lot) => lot.status === 'fora_de_estoque')
+  } else if (filters.dashFilter === 'vencidos') {
     result = result.filter((lot) => lot.status === 'vencido')
+  } else if (filters.dashFilter === 'expiring7d') {
+    result = result.filter(
+      (lot) => lot.status !== 'vencido' && lot.daysLeft >= 0 && lot.daysLeft <= 7,
+    )
+  } else if (filters.dashFilter === 'expiring30d') {
+    result = result.filter(
+      (lot) => lot.status !== 'vencido' && lot.daysLeft > 7 && lot.daysLeft <= 30,
+    )
   } else if (filters.dashFilter === 'noTraceability') {
     result = result.filter((lot) => getTraceabilityIssues(lot).length > 0)
   } else if (filters.dashFilter === 'noValidity') {
     result = result.filter((lot) => !lot.expiryDate)
-  } else if (filters.dashFilter === 'lowStock') {
-    result = result.filter((lot) => {
-      if (lot.status === 'inativo') return false
-      const max = lot.quantityValue || 0
-      if (max <= 0) return false
-      return lot.currentStock / max <= 0.2
-    })
   }
 
   const sorted = [...result]
@@ -202,14 +238,10 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
 
       const aDays = a.daysLeft ?? Number.MAX_SAFE_INTEGER
       const bDays = b.daysLeft ?? Number.MAX_SAFE_INTEGER
-      if (aDays !== bDays) return aDays - bDays
-
-      const aRupture = a.daysToRupture ?? Number.MAX_SAFE_INTEGER
-      const bRupture = b.daysToRupture ?? Number.MAX_SAFE_INTEGER
-      return aRupture - bRupture
+      return aDays - bDays
     })
   } else if (filters.sortMode === 'name') {
-    sorted.sort((a, b) => a.name.localeCompare(b.name))
+    sorted.sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''))
   } else if (filters.sortMode === 'stock') {
     sorted.sort((a, b) => a.currentStock - b.currentStock)
   }
@@ -217,13 +249,16 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   return sorted
 }
 
+/**
+ * Estado visual derivado por lote para colorir cards (vencido, urgente, alerta).
+ * Sem {@code stockPct}/{@code daysToRupture} pos refator v2.
+ */
 export function getLotVisualState(lot: ReagentLot) {
   const daysLeft = lot.daysLeft ?? 999
-  const archived = lot.status === 'inativo'
-  const expired = !archived && lot.status === 'vencido'
-  const urgent = !archived && daysLeft >= 0 && daysLeft <= 7
-  const warning = !archived && daysLeft > 7 && daysLeft <= 30
-  const stockPct = lot.stockPct ?? 0
+  const expired = lot.status === 'vencido'
+  const archived = lot.status === 'fora_de_estoque'
+  const urgent = !expired && daysLeft >= 0 && daysLeft <= 7
+  const warning = !expired && daysLeft > 7 && daysLeft <= 30
 
   return {
     daysLeft,
@@ -231,6 +266,5 @@ export function getLotVisualState(lot: ReagentLot) {
     archived,
     urgent,
     warning,
-    stockPct,
   }
 }

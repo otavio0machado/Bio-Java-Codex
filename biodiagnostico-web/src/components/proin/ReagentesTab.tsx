@@ -4,6 +4,7 @@ import {
   useCreateReagentLot,
   useCreateStockMovement,
   useDeleteReagentLot,
+  useReagentLabels,
   useReagentLots,
   useReagentMovements,
   useUpdateReagentLot,
@@ -11,7 +12,12 @@ import {
 import { useAuth } from '../../hooks/useAuth'
 import { reagentService } from '../../services/reagentService'
 import { reportService } from '../../services/reportService'
-import type { ReagentLot, ReagentLotRequest, ReagentTagSummary, StockMovementRequest } from '../../types'
+import type {
+  ReagentLabelSummary,
+  ReagentLot,
+  ReagentLotRequest,
+  StockMovementRequest,
+} from '../../types'
 import { Button, useToast } from '../ui'
 import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ReagentLotModal, ReagentMovementModal } from './reagentes/ReagentModals'
@@ -27,10 +33,22 @@ import {
   createMovementForm,
   filterReagentLots,
   getResponsibleName,
+  type DashFilter,
   type ReagentSortMode,
   type ReagentViewMode,
 } from './reagentes/utils'
 
+/**
+ * Aba de Reagentes pos refator v2.
+ *
+ * Modos de visualizacao: {@code 'tags'} (default — agrupado por etiqueta) e
+ * {@code 'list'} (lista plana). O contrato 6.3 fixou {@code 'tags'} como
+ * default novo.
+ *
+ * Botoes operacionais separados: ENTRADA e SAIDA abrem o mesmo modal mas com
+ * o tipo pre-selecionado e o select bloqueado, dando affordance imediata sem
+ * perder a opcao de AJUSTE.
+ */
 export function ReagentesTab() {
   const { toast } = useToast()
   const { user } = useAuth()
@@ -42,25 +60,17 @@ export function ReagentesTab() {
   const [expandedLot, setExpandedLot] = useState<ReagentLot | null>(null)
   const [isLotModalOpen, setIsLotModalOpen] = useState(false)
   const [isMovementModalOpen, setIsMovementModalOpen] = useState(false)
+  const [movementLockType, setMovementLockType] = useState(false)
   const [editingLot, setEditingLot] = useState<ReagentLot | null>(null)
   const [lotForm, setLotForm] = useState<ReagentLotRequest>(createEmptyLotForm())
   const [movementForm, setMovementForm] = useState<StockMovementRequest>(createMovementForm())
-  const [dashFilter, setDashFilter] = useState<
-    | 'expiring7d'
-    | 'expiring30d'
-    | 'ruptureRisk'
-    | 'expired'
-    | 'noTraceability'
-    | 'noValidity'
-    | 'lowStock'
-    | null
-  >(null)
+  const [dashFilter, setDashFilter] = useState<DashFilter | null>(null)
   const [manufacturerFilter, setManufacturerFilter] = useState('')
   const [tempFilter, setTempFilter] = useState('')
   const [alertsOnly, setAlertsOnly] = useState(false)
   const [sortMode, setSortMode] = useState<ReagentSortMode>('urgency')
-  const [viewMode, setViewMode] = useState<ReagentViewMode>('list')
-  const [tags, setTags] = useState<ReagentTagSummary[]>([])
+  const [viewMode, setViewMode] = useState<ReagentViewMode>('tags')
+  const [labels, setLabels] = useState<ReagentLabelSummary[]>([])
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [tagStatusTab, setTagStatusTab] = useState('todos')
 
@@ -70,20 +80,20 @@ export function ReagentesTab() {
     isError: hasLotsError = false,
     refetch: refetchLots,
   } = useReagentLots(category || undefined, status || undefined)
+  const { data: labelSummaries } = useReagentLabels(true)
   const createLot = useCreateReagentLot()
   const updateLot = useUpdateReagentLot()
   const deleteLot = useDeleteReagentLot()
   const createMovement = useCreateStockMovement(expandedLot?.id ?? '')
   const { data: movements = [] } = useReagentMovements(expandedLot?.id)
 
+  // Mantem snapshot local sincronizado com a query para o conteudo de "tags"
+  // continuar consistente mesmo se a query estiver entre ciclos.
   useEffect(() => {
-    if (viewMode !== 'tags') return
-
-    reagentService
-      .getTagSummaries()
-      .then(setTags)
-      .catch(() => {})
-  }, [viewMode, lots])
+    if (Array.isArray(labelSummaries)) {
+      setLabels(labelSummaries)
+    }
+  }, [labelSummaries])
 
   const stats = useMemo(() => buildReagentStats(lots), [lots])
   const manufacturerOptions = useMemo(() => buildManufacturerOptions(lots), [lots])
@@ -108,6 +118,7 @@ export function ReagentesTab() {
 
   const resetMovementModal = () => {
     setIsMovementModalOpen(false)
+    setMovementLockType(false)
     setMovementForm(createMovementForm())
   }
 
@@ -120,36 +131,57 @@ export function ReagentesTab() {
   const handleOpenEdit = (lot: ReagentLot) => {
     setEditingLot(lot)
     setLotForm({
-      name: lot.name,
+      label: lot.label,
       lotNumber: lot.lotNumber,
       manufacturer: lot.manufacturer ?? '',
       category: lot.category ?? '',
-      expiryDate: lot.expiryDate ?? '',
-      quantityValue: lot.quantityValue,
-      stockUnit: lot.stockUnit,
-      currentStock: lot.currentStock,
-      estimatedConsumption: lot.estimatedConsumption,
-      storageTemp: lot.storageTemp ?? '',
-      startDate: lot.startDate ?? undefined,
-      endDate: lot.endDate ?? undefined,
-      alertThresholdDays: lot.alertThresholdDays,
+      currentStock: lot.currentStock ?? 0,
       status: lot.status,
+      expiryDate: lot.expiryDate ?? '',
       location: lot.location ?? '',
-      supplier: lot.supplier ?? '',
+      storageTemp: lot.storageTemp ?? '',
+      supplier: lot.supplier ?? undefined,
       receivedDate: lot.receivedDate ?? undefined,
       openedDate: lot.openedDate ?? undefined,
     })
     setIsLotModalOpen(true)
   }
 
-  const handleOpenMovement = (lot: ReagentLot) => {
+  const openMovementForLot = (lot: ReagentLot, type: StockMovementRequest['type']) => {
     setExpandedLot(lot)
-    setMovementForm(createMovementForm(responsibleName, canReceiveEntry(lot) ? 'ENTRADA' : 'AJUSTE'))
+    setMovementForm(createMovementForm(responsibleName, type))
+    setMovementLockType(true)
     setIsMovementModalOpen(true)
   }
 
+  const handleOpenEntry = (lot: ReagentLot) => {
+    if (!canReceiveEntry(lot)) {
+      toast.warning(lot.movementWarning ?? 'Lote vencido não aceita nova entrada.')
+      return
+    }
+    openMovementForLot(lot, 'ENTRADA')
+  }
+
+  const handleOpenExit = (lot: ReagentLot) => {
+    if ((lot.currentStock ?? 0) <= 0) {
+      toast.warning('Sem estoque para registrar saída.')
+      return
+    }
+    openMovementForLot(lot, 'SAIDA')
+  }
+
   const handleSaveLot = async () => {
-    const validation = validateLotForm(lotForm)
+    // Bloqueante audit 4.2.1: trim defensivo no submit antes do service tambem trimar.
+    const sanitized: ReagentLotRequest = {
+      ...lotForm,
+      label: lotForm.label?.trim() ?? '',
+      lotNumber: lotForm.lotNumber?.trim() ?? '',
+      manufacturer: lotForm.manufacturer?.trim() ?? '',
+      location: lotForm.location?.trim() ?? '',
+      supplier: lotForm.supplier?.trim() || undefined,
+    }
+
+    const validation = validateLotForm(sanitized)
     if (validation) {
       toast.warning(validation.message)
       return
@@ -157,10 +189,10 @@ export function ReagentesTab() {
 
     try {
       if (editingLot) {
-        await updateLot.mutateAsync({ id: editingLot.id, request: lotForm })
+        await updateLot.mutateAsync({ id: editingLot.id, request: sanitized })
         toast.success('Lote atualizado.')
       } else {
-        await createLot.mutateAsync(lotForm)
+        await createLot.mutateAsync(sanitized)
         toast.success('Lote cadastrado.')
       }
       resetLotModal()
@@ -186,10 +218,7 @@ export function ReagentesTab() {
     try {
       await createMovement.mutateAsync(movementForm)
       toast.success('Movimentação registrada.')
-      setMovementForm(
-        createMovementForm(responsibleName, canReceiveEntry(expandedLot) ? 'ENTRADA' : 'AJUSTE'),
-      )
-      setIsMovementModalOpen(false)
+      resetMovementModal()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao registrar movimentação.'
       toast.error(message)
@@ -197,22 +226,23 @@ export function ReagentesTab() {
   }
 
   const handleArchiveLot = async (lot: ReagentLot) => {
-    const actionLabel = lot.status === 'inativo' ? 'remover' : 'arquivar'
+    const isArchivable = lot.status === 'fora_de_estoque'
     const confirmed = window.confirm(
-      lot.status === 'inativo'
-        ? `Remover o lote ${lot.lotNumber}? Esta ação só será concluída se não houver histórico operacional.`
-        : `Arquivar o lote ${lot.lotNumber}? Lotes com histórico serão preservados como inativos.`,
+      isArchivable
+        ? `Excluir o lote ${lot.lotNumber}? Esta ação só será concluída se não houver histórico operacional.`
+        : `Arquivar o lote ${lot.lotNumber}? Lotes com histórico serão preservados como Fora de estoque.`,
     )
     if (!confirmed) return
 
     try {
       await deleteLot.mutateAsync(lot.id)
-      toast.success(lot.status === 'inativo' ? 'Lote removido.' : 'Lote arquivado.')
+      toast.success(isArchivable ? 'Lote excluído.' : 'Lote arquivado.')
       if (expandedLot?.id === lot.id) {
         setExpandedLot(null)
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Não foi possível ${actionLabel} o lote.`
+      const message =
+        error instanceof Error ? error.message : `Não foi possível ${isArchivable ? 'excluir' : 'arquivar'} o lote.`
       toast.error(message)
     }
   }
@@ -262,9 +292,18 @@ export function ReagentesTab() {
             onApply={(data) => {
               setLotForm((current) => ({
                 ...current,
-                name: typeof data.name === 'string' ? data.name : current.name,
-                lotNumber: typeof data.lot_number === 'string' ? data.lot_number : current.lotNumber,
-                expiryDate: typeof data.expiry_date === 'string' ? data.expiry_date : current.expiryDate,
+                // Aceita {@code label} (novo) e {@code name} (legado de prompt antigo)
+                // sem auto-criar etiqueta — usuario decide via combobox.
+                label:
+                  typeof data.label === 'string'
+                    ? data.label
+                    : typeof data.name === 'string'
+                      ? data.name
+                      : current.label,
+                lotNumber:
+                  typeof data.lot_number === 'string' ? data.lot_number : current.lotNumber,
+                expiryDate:
+                  typeof data.expiry_date === 'string' ? data.expiry_date : current.expiryDate,
                 manufacturer:
                   typeof data.manufacturer === 'string' ? data.manufacturer : current.manufacturer,
               }))
@@ -318,7 +357,7 @@ export function ReagentesTab() {
         isLoading={isLoadingLots}
         isError={hasLotsError}
         searchTerm={searchTerm}
-        tags={tags}
+        labels={labels}
         lots={lots}
         filteredLots={filteredLots}
         expandedTag={expandedTag}
@@ -328,7 +367,8 @@ export function ReagentesTab() {
         onExpandedTagChange={setExpandedTag}
         onTagStatusTabChange={setTagStatusTab}
         onExpandedLotChange={setExpandedLot}
-        onOpenMovement={handleOpenMovement}
+        onOpenEntry={handleOpenEntry}
+        onOpenExit={handleOpenExit}
         onOpenEdit={handleOpenEdit}
         onArchiveLot={(lot) => void handleArchiveLot(lot)}
         onOpenCreate={handleOpenCreate}
@@ -340,6 +380,7 @@ export function ReagentesTab() {
         isOpen={isLotModalOpen}
         isEditing={Boolean(editingLot)}
         isSaving={editingLot ? updateLot.isPending : createLot.isPending}
+        labels={labels}
         onClose={resetLotModal}
         onSave={handleSaveLot}
         setForm={setLotForm}
@@ -353,6 +394,7 @@ export function ReagentesTab() {
         onSave={handleMovement}
         setForm={setMovementForm}
         movements={movements}
+        lockType={movementLockType}
       />
     </div>
   )

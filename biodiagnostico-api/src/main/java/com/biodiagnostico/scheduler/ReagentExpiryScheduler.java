@@ -31,14 +31,16 @@ public class ReagentExpiryScheduler {
     /**
      * Reclassifica diariamente os lotes vencidos.
      *
-     * Regra de derivacao (ver {@link ReagentService#deriveStatus}):
-     *  - expiryDate &lt; hoje e estoque &gt; 0 → {@code vencido} (risco operacional, descartar)
-     *  - expiryDate &lt; hoje e estoque &lt;= 0 → {@code inativo} (historico/arquivo)
-     *  - {@code quarentena} preserva (estado manual de excecao)
+     * Regra de derivacao (refator-v2 — ver {@link ReagentService#deriveStatus}):
+     *  - expiryDate &lt; hoje (qualquer estoque) → {@code vencido} (terminal de validade)
+     *  - estoque = 0 e expiry futura → {@code fora_de_estoque}
+     *  - openedDate setado e expiry futura → {@code em_uso}
+     *  - caso contrario → {@code em_estoque}
      *
-     * Query {@code findExpiredNeedingReclassification} ja filtra {@code inativo} e
-     * {@code quarentena}, entao o loop so precisa checar se o status derivado difere
-     * do atual — evita saves desnecessarios.
+     * <p>Apos refator-v2, {@code vencido} e o unico estado terminal de validade. A query
+     * {@code findExpiredNeedingReclassification} filtra {@code vencido} para evitar
+     * saves desnecessarios; o loop chama {@link ReagentService#applyDerivedStatusFromScheduler}
+     * que emite audit_log com {@code trigger="scheduler"} a cada transicao efetiva.</p>
      */
     @Scheduled(cron = "0 0 1 * * *")
     @Transactional
@@ -53,9 +55,6 @@ public class ReagentExpiryScheduler {
 
         List<ReagentLot> updated = new ArrayList<>();
         for (ReagentLot lot : candidates) {
-            // Delega a ReagentService para unificar regra + trilha de auditoria:
-            // cada transicao efetiva e gravada em audit_log com trigger="scheduler"
-            // (ANVISA RDC 302 / ISO 15189 — rastreabilidade da reclassificacao automatica).
             if (reagentService.applyDerivedStatusFromScheduler(lot, today)) {
                 updated.add(lot);
             }
@@ -67,7 +66,7 @@ public class ReagentExpiryScheduler {
         }
 
         reagentLotRepository.saveAll(updated);
-        log.info("Auto-vencimento: {} lote(s) reclassificado(s) (vencido/inativo) entre {} candidato(s).",
+        log.info("Auto-vencimento: {} lote(s) reclassificado(s) para 'vencido' entre {} candidato(s).",
             updated.size(), candidates.size());
     }
 }

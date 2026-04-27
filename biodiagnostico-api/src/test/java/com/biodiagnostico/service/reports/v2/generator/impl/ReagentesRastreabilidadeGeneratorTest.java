@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.entity.ReagentLot;
+import com.biodiagnostico.entity.ReagentStatus;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.ReportArtifact;
@@ -41,11 +42,11 @@ class ReagentesRastreabilidadeGeneratorTest {
         l.setId(UUID.randomUUID());
         l.setName(name);
         l.setLotNumber("L-" + name);
+        l.setManufacturer("Bio");
         l.setCategory(category);
         l.setStatus(status);
         l.setExpiryDate(expiry);
         l.setCurrentStock(stock);
-        l.setEstimatedConsumption(10.0);
         return l;
     }
 
@@ -56,13 +57,14 @@ class ReagentesRastreabilidadeGeneratorTest {
     }
 
     @Test
-    @DisplayName("generate produz PDF valido com lotes ativos/vencidos/proximos ao vencimento")
+    @DisplayName("generate produz PDF valido com lotes em status novo")
     void generateProducesPdf() {
         LocalDate today = LocalDate.now();
         List<ReagentLot> fixtures = List.of(
-            lot("Reagente Glicose", "ativo", today.plusDays(30), 50D, "Bioquimica"),
-            lot("Reagente Ureia", "vencido", today.minusDays(5), 10D, "Bioquimica"),
-            lot("Reagente Hemoglobina", "ativo", today.plusDays(180), 100D, "Hematologia")
+            lot("Reagente Glicose", ReagentStatus.EM_ESTOQUE, today.plusDays(30), 50D, "Bioquimica"),
+            lot("Reagente Ureia", ReagentStatus.VENCIDO, today.minusDays(5), 10D, "Bioquimica"),
+            lot("Reagente Hemoglobina", ReagentStatus.EM_USO, today.plusDays(180), 100D, "Hematologia"),
+            lot("Reagente Microbiologia", ReagentStatus.FORA_DE_ESTOQUE, today.plusDays(60), 0D, "Microbiologia")
         );
         when(lotRepository.findAll()).thenReturn(fixtures);
 
@@ -77,7 +79,33 @@ class ReagentesRastreabilidadeGeneratorTest {
         assertThat(artifact.sizeBytes()).isGreaterThan(0);
 
         String text = GeneratorTestSupport.extractPdfText(artifact.bytes());
+        // Cards de resumo apos refator-v2: Em estoque, Em uso, Fora de estoque, Vencidos.
         assertThat(text).containsIgnoringCase("Resumo");
+        assertThat(text).contains("Em estoque");
+        assertThat(text).contains("Em uso");
+        assertThat(text).contains("Fora de estoque");
+        // Nao deve mais ter o card "Ativos" nem "Inativos".
+        assertThat(text).doesNotContain("Ativos");
+        assertThat(text).doesNotContain("Inativos");
+        // Nao deve ter secao de consumo (removida em refator-v2 §1.11).
+        assertThat(text).doesNotContain("Consumo estimado por categoria");
+    }
+
+    @Test
+    @DisplayName("PDF mantem secao 'Vencidos com estoque' quando ha lote nessa condicao")
+    void generateMantemVencidosComEstoque() {
+        LocalDate today = LocalDate.now();
+        when(lotRepository.findAll()).thenReturn(List.of(
+            lot("Reagente Vencido", ReagentStatus.VENCIDO, today.minusDays(3), 20D, "Bioquimica")
+        ));
+
+        ReportArtifact artifact = generator().generate(
+            new ReportFilters(Map.of()),
+            GeneratorTestSupport.ctx()
+        );
+
+        String text = GeneratorTestSupport.extractPdfText(artifact.bytes());
+        assertThat(text).containsIgnoringCase("Vencidos com estoque");
     }
 
     @Test
@@ -85,7 +113,7 @@ class ReagentesRastreabilidadeGeneratorTest {
     void generateWithAiCommentary() {
         LocalDate today = LocalDate.now();
         when(lotRepository.findAll()).thenReturn(List.of(
-            lot("Reagente A", "ativo", today.plusDays(30), 50D, "Bioquimica")
+            lot("Reagente A", ReagentStatus.EM_ESTOQUE, today.plusDays(30), 50D, "Bioquimica")
         ));
         ReportArtifact artifact = generator().generate(
             new ReportFilters(Map.of("includeAiCommentary", true)),

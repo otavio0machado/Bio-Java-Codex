@@ -21,7 +21,6 @@ import com.biodiagnostico.service.reports.v2.generator.pdf.ReportV2PdfTheme;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
-import com.lowagie.text.Image;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Phrase;
@@ -31,9 +30,7 @@ import com.lowagie.text.pdf.PdfWriter;
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,15 +38,17 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Rastreabilidade de reagentes — lotes, vencimentos, consumo, movimentos.
- * Secoes:
+ * Rastreabilidade de reagentes — lotes, vencimentos, movimentos.
+ * Secoes pos refator-v2:
  * 1. Capa
- * 2. Resumo (total, ativos, vencidos c/ estoque, inativos)
+ * 2. Resumo (total, em estoque, em uso, fora de estoque, vencidos)
  * 3. Vencimentos proximos (30/60/90 dias)
  * 4. Vencidos com estoque (caixa vermelha)
- * 5. Inativos (opt-in)
- * 6. Consumo por categoria (barChart)
- * 7. Comentario IA
+ * 5. Comentario IA
+ *
+ * <p>Secao "Consumo estimado por categoria" foi removida pelo refator-v2 (audit ressalva 1.11).
+ * Para regenerar consumo, derivar de {@code StockMovement} agregando {@code SAIDA} por
+ * categoria/janela 30/60/90 dias — issue separada.</p>
  */
 @Component
 public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
@@ -126,20 +125,23 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
 
             List<ReagentLot> all = filteredLots(rf);
             LocalDate today = LocalDate.now();
-            long ativos = all.stream().filter(l -> "ativo".equalsIgnoreCase(l.getStatus())).count();
-            long inativos = all.stream().filter(l -> "inativo".equalsIgnoreCase(l.getStatus())).count();
+            long emEstoque = all.stream().filter(l -> "em_estoque".equalsIgnoreCase(l.getStatus())).count();
+            long emUso = all.stream().filter(l -> "em_uso".equalsIgnoreCase(l.getStatus())).count();
+            long foraDeEstoque = all.stream().filter(l -> "fora_de_estoque".equalsIgnoreCase(l.getStatus())).count();
+            long vencidos = all.stream().filter(l -> "vencido".equalsIgnoreCase(l.getStatus())).count();
             long vencidosComEstoque = all.stream()
                 .filter(l -> l.getExpiryDate() != null && l.getExpiryDate().isBefore(today)
                     && l.getCurrentStock() != null && l.getCurrentStock() > 0)
                 .count();
 
             doc.add(ReportV2PdfTheme.section("Resumo"));
-            PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1});
+            PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1, 1});
             cards.setWidthPercentage(100F); cards.setSpacingAfter(6F);
             cards.addCell(summaryCell("Total", String.valueOf(all.size()), ReportV2PdfTheme.BRAND_PRIMARY));
-            cards.addCell(summaryCell("Ativos", String.valueOf(ativos), ReportV2PdfTheme.STATUS_APROVADO));
-            cards.addCell(summaryCell("Vencidos c/ estoque", String.valueOf(vencidosComEstoque), ReportV2PdfTheme.STATUS_REPROVADO));
-            cards.addCell(summaryCell("Inativos", String.valueOf(inativos), ReportV2PdfTheme.MUTED));
+            cards.addCell(summaryCell("Em estoque", String.valueOf(emEstoque), ReportV2PdfTheme.STATUS_APROVADO));
+            cards.addCell(summaryCell("Em uso", String.valueOf(emUso), ReportV2PdfTheme.BRAND_PRIMARY));
+            cards.addCell(summaryCell("Fora de estoque", String.valueOf(foraDeEstoque), ReportV2PdfTheme.MUTED));
+            cards.addCell(summaryCell("Vencidos", String.valueOf(vencidos), ReportV2PdfTheme.STATUS_REPROVADO));
             doc.add(cards);
 
             // Vencimentos proximos
@@ -196,31 +198,18 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
                 doc.add(t);
             }
 
-            // Consumo por categoria (barChart)
-            Map<String, Number> catDs = new LinkedHashMap<>();
-            all.stream()
-                .collect(Collectors.groupingBy(
-                    l -> l.getCategory() == null || l.getCategory().isBlank() ? "Sem categoria" : l.getCategory(),
-                    Collectors.summingDouble(l -> l.getEstimatedConsumption() == null ? 0 : l.getEstimatedConsumption())
-                )).forEach(catDs::put);
-            if (!catDs.isEmpty()) {
-                doc.add(ReportV2PdfTheme.section("Consumo estimado por categoria"));
-                try {
-                    byte[] png = chartRenderer.renderBarChart(catDs, "Consumo por categoria", "Categoria", "Consumo");
-                    Image img = Image.getInstance(png);
-                    img.scaleToFit(500F, 220F);
-                    img.setAlignment(Element.ALIGN_CENTER);
-                    doc.add(img);
-                } catch (Exception ex) {
-                    LOG.warn("Falha ao renderizar barChart reagentes", ex);
-                }
-            }
+            // Secao removida em refator-v2 (audit §1.11). Para regenerar consumo, derivar de
+            // StockMovement agregando SAIDA por categoria/janela 30/60/90 dias — issue separada.
 
             // Comentario IA
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
-                String structured = "Total lotes: " + all.size() + "\nAtivos: " + ativos
-                    + "\nVencidos com estoque: " + vencidosComEstoque + "\nInativos: " + inativos;
+                String structured = "Total lotes: " + all.size()
+                    + "\nEm estoque: " + emEstoque
+                    + "\nEm uso: " + emUso
+                    + "\nFora de estoque: " + foraDeEstoque
+                    + "\nVencidos: " + vencidos
+                    + "\nVencidos com estoque: " + vencidosComEstoque;
                 String commentary = aiCommentator.commentary(ReportCode.REAGENTES_RASTREABILIDADE, structured, ctx);
                 PdfPTable wrap = new PdfPTable(1);
                 wrap.setWidthPercentage(100F);
@@ -240,11 +229,15 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
     }
 
     private List<ReagentLot> filteredLots(Resolved rf) {
+        // Refator-v2: o terminal "inativo" foi substituido por "fora_de_estoque". O filtro
+        // {@code includeInactive} mantem nome historico no contrato do report (aceita tanto
+        // o termo legado quanto a semantica nova): quando false, oculta lotes terminais
+        // (fora_de_estoque) do PDF; quando true, inclui todos.
         List<ReagentLot> all = lotRepository.findAll();
         return all.stream()
             .filter(l -> rf.categories == null || rf.categories.isEmpty()
                 || (l.getCategory() != null && rf.categories.contains(l.getCategory())))
-            .filter(l -> rf.includeInactive || !"inativo".equalsIgnoreCase(l.getStatus()))
+            .filter(l -> rf.includeInactive || !"fora_de_estoque".equalsIgnoreCase(l.getStatus()))
             .collect(Collectors.toList());
     }
 
