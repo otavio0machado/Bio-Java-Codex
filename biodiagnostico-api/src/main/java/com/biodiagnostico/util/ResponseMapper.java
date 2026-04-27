@@ -13,17 +13,20 @@ import com.biodiagnostico.dto.response.ViolationResponse;
 import com.biodiagnostico.entity.HematologyBioRecord;
 import com.biodiagnostico.entity.ImportRun;
 import com.biodiagnostico.entity.MaintenanceRecord;
+import com.biodiagnostico.entity.MovementType;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.QcReferenceValue;
 import com.biodiagnostico.entity.ReagentLot;
+import com.biodiagnostico.entity.ReagentStatus;
 import com.biodiagnostico.entity.ReportRun;
 import com.biodiagnostico.entity.StockMovement;
 import com.biodiagnostico.entity.User;
 import com.biodiagnostico.entity.WestgardViolation;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class ResponseMapper {
@@ -163,6 +166,11 @@ public final class ResponseMapper {
         Double daysToRupture = estimatedConsumption > 0 ? currentStock / estimatedConsumption : null;
         int alertThresholdDays = lot.getAlertThresholdDays() == null ? 7 : lot.getAlertThresholdDays();
         boolean nearExpiry = daysLeft >= 0 && daysLeft <= alertThresholdDays;
+        List<String> traceabilityIssues = reagentTraceabilityIssues(lot);
+        boolean canReceiveEntry = !ReagentStatus.INATIVO.equals(lot.getStatus());
+        List<String> allowedMovementTypes = canReceiveEntry
+            ? List.of(MovementType.ENTRADA, MovementType.SAIDA, MovementType.AJUSTE)
+            : List.of(MovementType.SAIDA, MovementType.AJUSTE);
 
         return new ReagentLotResponse(
             lot.getId(),
@@ -190,8 +198,26 @@ public final class ResponseMapper {
             lot.getSupplier(),
             lot.getReceivedDate(),
             lot.getOpenedDate(),
-            usedInQcRecently
+            usedInQcRecently,
+            traceabilityIssues.isEmpty(),
+            traceabilityIssues,
+            canReceiveEntry,
+            allowedMovementTypes,
+            canReceiveEntry ? null : "Lote inativo não aceita nova entrada. Crie um novo lote."
         );
+    }
+
+    private static List<String> reagentTraceabilityIssues(ReagentLot lot) {
+        List<String> issues = new ArrayList<>();
+        if (isBlank(lot.getManufacturer())) issues.add("manufacturer");
+        if (isBlank(lot.getLocation())) issues.add("location");
+        if (isBlank(lot.getSupplier())) issues.add("supplier");
+        if (lot.getReceivedDate() == null) issues.add("receivedDate");
+        return List.copyOf(issues);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public static HematologyBioRecordResponse toHematologyBioRecordResponse(HematologyBioRecord record) {

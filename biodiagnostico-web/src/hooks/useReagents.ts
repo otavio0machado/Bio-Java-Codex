@@ -36,6 +36,18 @@ export function useUpdateReagentLot() {
   })
 }
 
+export function useDeleteReagentLot() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => reagentService.deleteLot(id),
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['reagents'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+}
+
 export function useReagentMovements(lotId?: string) {
   return useQuery({
     queryKey: ['reagent-movements', lotId],

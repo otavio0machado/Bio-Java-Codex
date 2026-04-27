@@ -2,6 +2,7 @@ package com.biodiagnostico.dto.response;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 public record ReagentLotResponse(
@@ -36,6 +37,20 @@ public record ReagentLotResponse(
      * um registro de CQ nos ultimos 30 dias. Permite que o frontend destaque lotes
      * ativos em CQ e bloqueia decisoes de descarte apressadas.
      */
-    boolean usedInQcRecently
+    boolean usedInQcRecently,
+    /**
+     * Diagnostico operacional derivado pelo backend. Campos de rastreabilidade forte
+     * ainda nao sao obrigatorios no contrato de entrada, mas devem ser visiveis para
+     * fila de saneamento cadastral.
+     */
+    boolean traceabilityComplete,
+    List<String> traceabilityIssues,
+    /**
+     * Politica de movimentacao derivada do estado do lote. Lote inativo nao aceita
+     * ENTRADA; o frontend deve usar estes campos para refletir a regra canonica.
+     */
+    boolean canReceiveEntry,
+    List<String> allowedMovementTypes,
+    String movementWarning
 ) {
 }

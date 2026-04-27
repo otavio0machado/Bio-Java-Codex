@@ -4,6 +4,7 @@ import type { ReagentLot, ReagentLotRequest, StockMovement, StockMovementRequest
 import { cn } from '../../../utils/cn'
 import { Button, Input, Modal, Select } from '../../ui'
 import { CATEGORIES, MOVEMENT_REASONS, TEMPS, UNITS } from './constants'
+import { canReceiveEntry } from './utils'
 
 export function ReagentLotModal({
   form,
@@ -231,6 +232,8 @@ export function ReagentMovementModal({
   setForm: Dispatch<SetStateAction<StockMovementRequest>>
   movements: StockMovement[]
 }) {
+  const canUseEntrada = lot ? canReceiveEntry(lot) : true
+
   return (
     <Modal
       isOpen={isOpen}
@@ -258,7 +261,9 @@ export function ReagentMovementModal({
             }))
           }
         >
-          <option value="ENTRADA">Entrada</option>
+          <option value="ENTRADA" disabled={!canUseEntrada}>
+            Entrada
+          </option>
           <option value="SAIDA">Saída</option>
           <option value="AJUSTE">Ajuste</option>
         </Select>
@@ -300,6 +305,12 @@ export function ReagentMovementModal({
       {form.type === 'AJUSTE' ? (
         <p className="mt-2 text-xs text-amber-700">
           Ajustes manuais exigem um motivo para auditoria.
+        </p>
+      ) : null}
+
+      {!canUseEntrada ? (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+          {lot?.movementWarning ?? 'Lote não aceita entrada. Use ajuste apenas para correção operacional registrada.'}
         </p>
       ) : null}
 

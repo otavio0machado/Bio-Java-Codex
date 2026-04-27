@@ -45,10 +45,19 @@ export function validateLotForm(form: ReagentLotRequest): ValidationResult | nul
 export function validateMovementForm(
   form: StockMovementRequest,
   currentStock: number,
+  canReceiveEntry = true,
 ): ValidationResult | null {
   const result = movementSchema.safeParse(form)
   if (!result.success) {
     return { message: result.error.issues[0]?.message ?? 'Erro ao validar movimentação.' }
+  }
+
+  if (!canReceiveEntry && form.type === 'ENTRADA') {
+    return { message: 'Lote inativo não aceita nova entrada. Crie um novo lote.' }
+  }
+
+  if (form.type === 'SAIDA' && form.quantity > currentStock) {
+    return { message: `Estoque insuficiente para esta saída. Estoque atual: ${currentStock}.` }
   }
 
   const nextStock =

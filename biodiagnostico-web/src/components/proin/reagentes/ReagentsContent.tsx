@@ -1,24 +1,39 @@
 import {
   AlertTriangle,
+  Archive,
   ArrowDownLeft,
   ArrowUpRight,
   CalendarClock,
   ChevronDown,
   ChevronUp,
+  ClipboardList,
+  Clock,
+  MapPin,
   Package,
   PackagePlus,
   Pencil,
+  ShieldCheck,
   Thermometer,
+  Trash2,
+  Truck,
 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { ReagentLot, ReagentTagSummary, StockMovement } from '../../../types'
 import { cn } from '../../../utils/cn'
 import { formatLongBR } from '../../../utils/date'
-import { Button, Card, EmptyState, StatusBadge } from '../../ui'
-import { TAG_STATUS_TABS } from './constants'
-import { getLotVisualState, type ReagentViewMode } from './utils'
+import { Button, Card, EmptyState, Skeleton, StatusBadge } from '../../ui'
+import { MOVEMENT_REASONS, TAG_STATUS_TABS } from './constants'
+import {
+  getLotVisualState,
+  getTraceabilityIssueLabels,
+  getTraceabilityIssues,
+  type ReagentViewMode,
+} from './utils'
 
 interface ReagentsContentProps {
   viewMode: ReagentViewMode
+  isLoading?: boolean
+  isError?: boolean
   searchTerm: string
   tags: ReagentTagSummary[]
   lots: ReagentLot[]
@@ -32,11 +47,15 @@ interface ReagentsContentProps {
   onExpandedLotChange: (lot: ReagentLot | null) => void
   onOpenMovement: (lot: ReagentLot) => void
   onOpenEdit: (lot: ReagentLot) => void
+  onArchiveLot: (lot: ReagentLot) => void
   onOpenCreate: () => void
+  onRetry?: () => void
 }
 
 export function ReagentsContent({
   viewMode,
+  isLoading = false,
+  isError = false,
   searchTerm,
   tags,
   lots,
@@ -50,8 +69,25 @@ export function ReagentsContent({
   onExpandedLotChange,
   onOpenMovement,
   onOpenEdit,
+  onArchiveLot,
   onOpenCreate,
+  onRetry,
 }: ReagentsContentProps) {
+  if (isLoading) {
+    return <ReagentListSkeleton />
+  }
+
+  if (isError) {
+    return (
+      <EmptyState
+        icon={<AlertTriangle className="h-8 w-8" />}
+        title="Não foi possível carregar reagentes"
+        description="Tente novamente antes de registrar novas movimentações."
+        action={onRetry ? { label: 'Tentar novamente', onClick: onRetry } : undefined}
+      />
+    )
+  }
+
   if (viewMode === 'tags') {
     return (
       <ReagentTagsView
@@ -67,6 +103,7 @@ export function ReagentsContent({
         onExpandedLotChange={onExpandedLotChange}
         onOpenMovement={onOpenMovement}
         onOpenEdit={onOpenEdit}
+        onArchiveLot={onArchiveLot}
       />
     )
   }
@@ -93,7 +130,33 @@ export function ReagentsContent({
           onToggleHistory={() => onExpandedLotChange(expandedLot?.id === lot.id ? null : lot)}
           onOpenMovement={() => onOpenMovement(lot)}
           onOpenEdit={() => onOpenEdit(lot)}
+          onArchiveLot={() => onArchiveLot(lot)}
         />
+      ))}
+    </div>
+  )
+}
+
+function ReagentListSkeleton() {
+  return (
+    <div className="space-y-3" aria-label="Carregando lotes de reagentes">
+      {Array.from({ length: 3 }).map((_, index) => (
+        <Card key={index} className="space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-2">
+              <Skeleton width="14rem" height="1.25rem" />
+              <Skeleton width="22rem" height="0.875rem" />
+            </div>
+            <Skeleton width="7rem" height="2rem" />
+          </div>
+          <Skeleton width="100%" height="0.5rem" />
+          <div className="grid gap-2 sm:grid-cols-4">
+            <Skeleton height="3rem" />
+            <Skeleton height="3rem" />
+            <Skeleton height="3rem" />
+            <Skeleton height="3rem" />
+          </div>
+        </Card>
       ))}
     </div>
   )
@@ -112,6 +175,7 @@ function ReagentTagsView({
   onExpandedLotChange,
   onOpenMovement,
   onOpenEdit,
+  onArchiveLot,
 }: Omit<ReagentsContentProps, 'viewMode' | 'filteredLots' | 'onOpenCreate'>) {
   const filteredTags = tags.filter(
     (tag) => !searchTerm || tag.name.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -222,6 +286,7 @@ function ReagentTagsView({
               onToggleHistory={() => onExpandedLotChange(expandedLot?.id === lot.id ? null : lot)}
               onOpenMovement={() => onOpenMovement(lot)}
               onOpenEdit={() => onOpenEdit(lot)}
+              onArchiveLot={() => onArchiveLot(lot)}
             />
           ))}
         </div>
@@ -237,6 +302,7 @@ function ReagentListCard({
   onToggleHistory,
   onOpenMovement,
   onOpenEdit,
+  onArchiveLot,
 }: {
   lot: ReagentLot
   isExpanded: boolean
@@ -244,8 +310,11 @@ function ReagentListCard({
   onToggleHistory: () => void
   onOpenMovement: () => void
   onOpenEdit: () => void
+  onArchiveLot: () => void
 }) {
   const { daysLeft, expired, urgent, warning, stockPct } = getLotVisualState(lot)
+  const traceabilityIssues = getTraceabilityIssues(lot)
+  const traceabilityIssueLabels = getTraceabilityIssueLabels(lot)
 
   return (
     <Card
@@ -287,8 +356,25 @@ function ReagentListCard({
                 {lot.storageTemp}
               </span>
             ) : null}
-            {lot.location ? <span className="text-neutral-500">📍 {lot.location}</span> : null}
+            {lot.location ? (
+              <span className="flex items-center gap-1 text-neutral-500">
+                <MapPin className="h-3 w-3" />
+                {lot.location}
+              </span>
+            ) : null}
             {lot.supplier ? <span className="text-neutral-500">Fornecedor: {lot.supplier}</span> : null}
+            {traceabilityIssues.length > 0 ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                title={`Campos pendentes: ${traceabilityIssueLabels.join(', ')}`}
+              >
+                <ClipboardList className="h-3 w-3" /> Rastreabilidade incompleta
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                <ShieldCheck className="h-3 w-3" /> Rastreado
+              </span>
+            )}
             {lot.usedInQcRecently ? (
               <span
                 className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800"
@@ -351,6 +437,8 @@ function ReagentListCard({
         </div>
       </div>
 
+      <LotOperationalDetails lot={lot} />
+
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" onClick={onOpenMovement}>
           Movimentar
@@ -366,6 +454,14 @@ function ReagentListCard({
         <Button variant="ghost" size="sm" onClick={onOpenEdit} icon={<Pencil className="h-4 w-4" />}>
           Editar
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onArchiveLot}
+          icon={lot.status === 'inativo' ? <Trash2 className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+        >
+          {lot.status === 'inativo' ? 'Remover' : 'Arquivar'}
+        </Button>
       </div>
 
       {isExpanded ? <MovementHistoryPanel movements={movements} /> : null}
@@ -380,6 +476,7 @@ function ReagentTagCard({
   onToggleHistory,
   onOpenMovement,
   onOpenEdit,
+  onArchiveLot,
 }: {
   lot: ReagentLot
   isExpanded: boolean
@@ -387,8 +484,11 @@ function ReagentTagCard({
   onToggleHistory: () => void
   onOpenMovement: () => void
   onOpenEdit: () => void
+  onArchiveLot: () => void
 }) {
   const { daysLeft, expired, urgent, warning, stockPct } = getLotVisualState(lot)
+  const traceabilityIssues = getTraceabilityIssues(lot)
+  const traceabilityIssueLabels = getTraceabilityIssueLabels(lot)
 
   return (
     <Card
@@ -417,6 +517,14 @@ function ReagentTagCard({
               <span className="flex items-center gap-1">
                 <Thermometer className="h-3 w-3" />
                 {lot.storageTemp}
+              </span>
+            ) : null}
+            {traceabilityIssues.length > 0 ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                title={`Campos pendentes: ${traceabilityIssueLabels.join(', ')}`}
+              >
+                <ClipboardList className="h-3 w-3" /> Rastreabilidade incompleta
               </span>
             ) : null}
           </div>
@@ -463,6 +571,8 @@ function ReagentTagCard({
         </div>
       </div>
 
+      <LotOperationalDetails lot={lot} />
+
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" onClick={onOpenMovement}>
           Movimentar
@@ -478,6 +588,14 @@ function ReagentTagCard({
         <Button variant="ghost" size="sm" onClick={onOpenEdit} icon={<Pencil className="h-4 w-4" />}>
           Editar
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onArchiveLot}
+          icon={lot.status === 'inativo' ? <Trash2 className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+        >
+          {lot.status === 'inativo' ? 'Remover' : 'Arquivar'}
+        </Button>
       </div>
 
       {isExpanded ? <MovementHistoryPanel movements={movements} /> : null}
@@ -485,40 +603,147 @@ function ReagentTagCard({
   )
 }
 
+function LotOperationalDetails({ lot }: { lot: ReagentLot }) {
+  const expiryLabel = lot.expiryDate ? formatLongBR(lot.expiryDate) : 'Sem validade'
+  const receivedLabel = lot.receivedDate ? formatLongBR(lot.receivedDate) : 'Recebimento pendente'
+  const openedLabel = lot.openedDate ? formatLongBR(lot.openedDate) : 'Abertura pendente'
+  const consumptionLabel =
+    lot.estimatedConsumption && lot.estimatedConsumption > 0
+      ? `${lot.estimatedConsumption} ${lot.stockUnit}/dia`
+      : 'Sem consumo estimado'
+  const ruptureLabel =
+    lot.daysToRupture != null ? `${lot.daysToRupture}d até ruptura` : 'Ruptura não estimada'
+
+  return (
+    <div className="grid gap-2 rounded-xl bg-neutral-50 p-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      <OperationalDetail
+        icon={<Clock className="h-4 w-4" />}
+        label="Validade"
+        value={expiryLabel}
+        tone={lot.status === 'vencido' ? 'danger' : lot.nearExpiry ? 'warning' : 'default'}
+      />
+      <OperationalDetail
+        icon={<CalendarClock className="h-4 w-4" />}
+        label="Recebimento / abertura"
+        value={`${receivedLabel} · ${openedLabel}`}
+      />
+      <OperationalDetail
+        icon={<Truck className="h-4 w-4" />}
+        label="Fornecedor"
+        value={lot.supplier?.trim() || 'Fornecedor pendente'}
+      />
+      <OperationalDetail
+        icon={<Package className="h-4 w-4" />}
+        label="Consumo"
+        value={`${consumptionLabel} · ${ruptureLabel}`}
+        tone={lot.daysToRupture != null && lot.daysToRupture <= 5 ? 'danger' : 'default'}
+      />
+    </div>
+  )
+}
+
+function OperationalDetail({
+  icon,
+  label,
+  value,
+  tone = 'default',
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  tone?: 'default' | 'warning' | 'danger'
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className={cn(
+          'mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide',
+          tone === 'danger'
+            ? 'text-red-700'
+            : tone === 'warning'
+              ? 'text-amber-700'
+              : 'text-neutral-500',
+        )}
+      >
+        {icon}
+        {label}
+      </div>
+      <div className="break-words text-sm font-medium text-neutral-800">{value}</div>
+    </div>
+  )
+}
+
 function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
   return (
-    <div className="rounded-xl bg-neutral-50 p-3 space-y-2">
+    <div className="space-y-2 rounded-xl bg-neutral-50 p-3">
       <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
         <CalendarClock className="h-4 w-4" /> Movimentações
       </div>
       {movements.length ? (
-        movements.map((movement) => (
-          <div
-            key={movement.id}
-            className="flex items-center justify-between rounded-lg bg-white px-3 py-2 text-sm"
-          >
-            <div className="flex items-center gap-2">
-              {movement.type === 'ENTRADA' ? (
-                <ArrowDownLeft className="h-4 w-4 text-green-600" />
-              ) : (
-                <ArrowUpRight className="h-4 w-4 text-red-600" />
-              )}
-              <span
-                className={cn(
-                  'font-semibold',
-                  movement.type === 'ENTRADA' ? 'text-green-700' : 'text-red-700',
-                )}
-              >
-                {movement.type === 'ENTRADA' ? '+' : '-'}
-                {movement.quantity}
-              </span>
-              {movement.responsible ? <span className="text-neutral-500">por {movement.responsible}</span> : null}
+        movements.map((movement) => {
+          const previousStock =
+            typeof movement.previousStock === 'number' ? movement.previousStock : null
+          let nextStock: number | null = null
+          if (previousStock != null) {
+            if (movement.type === 'ENTRADA') nextStock = previousStock + movement.quantity
+            else if (movement.type === 'SAIDA') nextStock = previousStock - movement.quantity
+            else if (movement.type === 'AJUSTE') nextStock = movement.quantity
+          }
+          const reasonLabel =
+            MOVEMENT_REASONS.find((reason) => reason.value === movement.reason)?.label ??
+            movement.reason
+          const presentation =
+            movement.type === 'ENTRADA'
+              ? {
+                  icon: <ArrowDownLeft className="h-4 w-4 text-green-600" />,
+                  sign: '+',
+                  className: 'text-green-700',
+                }
+              : movement.type === 'SAIDA'
+                ? {
+                    icon: <ArrowUpRight className="h-4 w-4 text-red-600" />,
+                    sign: '-',
+                    className: 'text-red-700',
+                  }
+                : {
+                    icon: <Pencil className="h-4 w-4 text-blue-600" />,
+                    sign: '=',
+                    className: 'text-blue-700',
+                  }
+
+          return (
+            <div key={movement.id} className="rounded-lg bg-white px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {presentation.icon}
+                  <span className={cn('font-semibold', presentation.className)}>
+                    {presentation.sign}
+                    {movement.quantity}
+                  </span>
+                  {previousStock != null && nextStock != null ? (
+                    <span className="font-mono text-xs text-neutral-500">
+                      {previousStock} → {nextStock}
+                    </span>
+                  ) : null}
+                  {movement.responsible ? (
+                    <span className="text-neutral-500">por {movement.responsible}</span>
+                  ) : null}
+                  {reasonLabel ? (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
+                      {reasonLabel}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="text-xs text-neutral-400">
+                  {new Date(movement.createdAt).toLocaleString('pt-BR')}
+                </span>
+              </div>
+              {movement.notes ? (
+                <p className="mt-1 break-words text-xs text-neutral-500">{movement.notes}</p>
+              ) : null}
             </div>
-            <span className="text-xs text-neutral-400">
-              {new Date(movement.createdAt).toLocaleDateString('pt-BR')}
-            </span>
-          </div>
-        ))
+          )
+        })
       ) : (
         <p className="text-sm text-neutral-500">Nenhuma movimentação.</p>
       )}

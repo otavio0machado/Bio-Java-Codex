@@ -9,6 +9,7 @@ import { ReagentesTab } from './ReagentesTab'
 const mockUseReagentLots = vi.fn()
 const mockUseCreateReagentLot = vi.fn()
 const mockUseUpdateReagentLot = vi.fn()
+const mockUseDeleteReagentLot = vi.fn()
 const mockUseCreateStockMovement = vi.fn()
 const mockUseReagentMovements = vi.fn()
 
@@ -20,6 +21,7 @@ vi.mock('../../hooks/useReagents', () => ({
   useReagentLots: (...args: unknown[]) => mockUseReagentLots(...args),
   useCreateReagentLot: () => mockUseCreateReagentLot(),
   useUpdateReagentLot: () => mockUseUpdateReagentLot(),
+  useDeleteReagentLot: () => mockUseDeleteReagentLot(),
   useCreateStockMovement: (...args: unknown[]) => mockUseCreateStockMovement(...args),
   useReagentMovements: (...args: unknown[]) => mockUseReagentMovements(...args),
 }))
@@ -49,6 +51,11 @@ const createLotMutation = {
 }
 
 const updateLotMutation = {
+  mutateAsync: vi.fn(),
+  isPending: false,
+}
+
+const deleteLotMutation = {
   mutateAsync: vi.fn(),
   isPending: false,
 }
@@ -108,6 +115,11 @@ function buildLot(overrides: Partial<ReagentLot> = {}): ReagentLot {
     receivedDate: '2026-03-01',
     openedDate: '2026-04-01',
     usedInQcRecently: true,
+    traceabilityComplete: true,
+    traceabilityIssues: [],
+    canReceiveEntry: true,
+    allowedMovementTypes: ['ENTRADA', 'SAIDA', 'AJUSTE'],
+    movementWarning: null,
     ...overrides,
   }
 }
@@ -125,11 +137,13 @@ function renderTab() {
 beforeEach(() => {
   createLotMutation.mutateAsync.mockReset()
   updateLotMutation.mutateAsync.mockReset()
+  deleteLotMutation.mutateAsync.mockReset()
   createMovementMutation.mutateAsync.mockReset()
 
   mockUseReagentLots.mockReset()
   mockUseCreateReagentLot.mockReset()
   mockUseUpdateReagentLot.mockReset()
+  mockUseDeleteReagentLot.mockReset()
   mockUseCreateStockMovement.mockReset()
   mockUseReagentMovements.mockReset()
   mockGetTagSummaries.mockReset()
@@ -138,11 +152,13 @@ beforeEach(() => {
 
   mockUseCreateReagentLot.mockReturnValue(createLotMutation)
   mockUseUpdateReagentLot.mockReturnValue(updateLotMutation)
+  mockUseDeleteReagentLot.mockReturnValue(deleteLotMutation)
   mockUseCreateStockMovement.mockReturnValue(createMovementMutation)
   mockUseReagentMovements.mockReturnValue({ data: [] })
   mockGetTagSummaries.mockResolvedValue(tagSummaries)
   mockExportCsv.mockResolvedValue(new Blob(['csv']))
   mockGetReagentsPdf.mockResolvedValue(new Blob(['pdf']))
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 
 describe('ReagentesTab', () => {
@@ -200,6 +216,59 @@ describe('ReagentesTab', () => {
       ),
     ).toBeInTheDocument()
     expect(createMovementMutation.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('bloqueia saída acima do estoque antes de enviar ao backend', async () => {
+    mockUseReagentLots.mockReturnValue({
+      data: [buildLot({ currentStock: 5, quantityValue: 10, stockPct: 50 })],
+    })
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Movimentar' }))
+    await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'SAIDA')
+    await userEvent.clear(screen.getByLabelText('Quantidade'))
+    await userEvent.type(screen.getByLabelText('Quantidade'), '6')
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar' }))
+
+    expect(await screen.findByText('Estoque insuficiente para esta saída. Estoque atual: 5.')).toBeInTheDocument()
+    expect(createMovementMutation.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it('abre lote inativo em modo ajuste para não permitir nova entrada', async () => {
+    mockUseReagentLots.mockReturnValue({
+      data: [
+        buildLot({
+          status: 'inativo',
+          currentStock: 0,
+          stockPct: 0,
+          canReceiveEntry: false,
+          allowedMovementTypes: ['SAIDA', 'AJUSTE'],
+          movementWarning: 'Lote inativo não aceita nova entrada. Crie um novo lote.',
+        }),
+      ],
+    })
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Movimentar' }))
+
+    expect(screen.getByLabelText('Tipo')).toHaveValue('AJUSTE')
+    expect(screen.getByText('Lote inativo não aceita nova entrada. Crie um novo lote.')).toBeInTheDocument()
+  })
+
+  it('arquiva lote pela ação operacional da lista', async () => {
+    const lot = buildLot({ id: 'lot-archive', lotNumber: 'ARCH-001' })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Arquivar' }))
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Arquivar o lote ARCH-001? Lotes com histórico serão preservados como inativos.',
+    )
+    expect(deleteLotMutation.mutateAsync).toHaveBeenCalledWith('lot-archive')
   })
 
   it('carrega a visão de etiquetas ao alternar o modo', async () => {

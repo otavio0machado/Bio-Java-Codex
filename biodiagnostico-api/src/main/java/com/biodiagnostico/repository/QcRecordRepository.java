@@ -134,4 +134,12 @@ public interface QcRecordRepository extends JpaRepository<QcRecord, UUID> {
         @Param("lotNumbers") Collection<String> lotNumbers,
         @Param("since") LocalDate since
     );
+
+    @Query("""
+        SELECT CASE WHEN COUNT(q) > 0 THEN true ELSE false END
+        FROM QcRecord q
+        WHERE q.lotNumber IS NOT NULL
+          AND LOWER(TRIM(q.lotNumber)) = LOWER(TRIM(:lotNumber))
+        """)
+    boolean existsByLotNumberOperational(@Param("lotNumber") String lotNumber);
 }

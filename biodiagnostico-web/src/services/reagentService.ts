@@ -20,6 +20,9 @@ export const reagentService = {
     const response = await api.put<ReagentLot>(`/reagents/${id}`, request)
     return response.data
   },
+  async deleteLot(id: string) {
+    await api.delete(`/reagents/${id}`)
+  },
   async getMovements(id: string) {
     const response = await api.get<StockMovement[]>(`/reagents/${id}/movements`)
     return response.data

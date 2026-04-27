@@ -46,9 +46,9 @@ export function ReagentsDashboard({
               onClick={() => onToggleFilter(dashFilter === 'ruptureRisk' ? null : 'ruptureRisk')}
             />
             <ActionQueueCard
-              label="Sem rastreabilidade"
+              label="Rastreabilidade incompleta"
               value={stats.noTraceability}
-              description="Lotes sem fabricante identificado."
+              description="Campos operacionais essenciais ainda pendentes."
               icon={<Package className="h-4 w-4" />}
               tone="amber"
               active={dashFilter === 'noTraceability'}

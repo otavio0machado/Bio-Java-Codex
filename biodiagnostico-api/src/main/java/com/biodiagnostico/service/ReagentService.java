@@ -45,6 +45,8 @@ public class ReagentService {
     // o scheduler registra suas proprias transicoes em trigger="scheduler".
     public static final String AUDIT_ACTION_STATUS_DERIVED = "REAGENT_STATUS_DERIVED";
     public static final String AUDIT_ACTION_MOVEMENT_BLOCKED = "REAGENT_MOVEMENT_BLOCKED";
+    public static final String AUDIT_ACTION_LOT_ARCHIVED = "REAGENT_LOT_ARCHIVED";
+    public static final String AUDIT_ACTION_DELETE_BLOCKED = "REAGENT_DELETE_BLOCKED";
 
     public static final String AUDIT_TRIGGER_CREATE_LOT = "createLot";
     public static final String AUDIT_TRIGGER_UPDATE_LOT = "updateLot";
@@ -231,10 +233,46 @@ public class ReagentService {
 
     @Transactional
     public void deleteLot(UUID id) {
-        if (!reagentLotRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Lote de reagente não encontrado");
+        ReagentLot lot = reagentLotRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
+
+        boolean hasStockMovements = stockMovementRepository.existsByReagentLotId(id);
+        boolean usedInQc = hasOperationalQcUsage(lot);
+        if (!hasStockMovements && !usedInQc) {
+            reagentLotRepository.deleteById(id);
+            return;
         }
-        reagentLotRepository.deleteById(id);
+
+        double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
+        if (currentStock > 0) {
+            Map<String, Object> details = new HashMap<>();
+            details.put("reason", "historico_ou_cq_com_estoque");
+            details.put("currentStock", String.valueOf(currentStock));
+            details.put("hasStockMovements", hasStockMovements);
+            details.put("usedInQc", usedInQc);
+            auditService.log(AUDIT_ACTION_DELETE_BLOCKED, "ReagentLot", lot.getId(), details);
+            throw new BusinessException(
+                "Lote com histórico ou uso em CQ não pode ser removido com estoque atual. Zere o estoque antes de arquivar.");
+        }
+
+        if (!ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            String oldStatus = lot.getStatus();
+            lot.setStatus(ReagentStatus.INATIVO);
+            reagentLotRepository.save(lot);
+            Map<String, Object> details = new HashMap<>();
+            details.put("from", oldStatus);
+            details.put("to", ReagentStatus.INATIVO);
+            details.put("hasStockMovements", hasStockMovements);
+            details.put("usedInQc", usedInQc);
+            auditService.log(AUDIT_ACTION_LOT_ARCHIVED, "ReagentLot", lot.getId(), details);
+        }
+    }
+
+    private boolean hasOperationalQcUsage(ReagentLot lot) {
+        String lotNumber = lot.getLotNumber();
+        return lotNumber != null
+            && !lotNumber.isBlank()
+            && qcRecordRepository.existsByLotNumberOperational(lotNumber);
     }
 
     @Transactional(readOnly = true)

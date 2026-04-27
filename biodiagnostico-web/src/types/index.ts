@@ -231,14 +231,19 @@ export interface ReagentLot {
   receivedDate?: string | null
   openedDate?: string | null
   usedInQcRecently?: boolean
+  traceabilityComplete?: boolean
+  traceabilityIssues?: string[]
+  canReceiveEntry?: boolean
+  allowedMovementTypes?: StockMovementRequest['type'][]
+  movementWarning?: string | null
 }
 
 export interface ReagentLotRequest {
   name: string
   lotNumber: string
-  manufacturer?: string
+  manufacturer: string
   category?: string
-  expiryDate?: string
+  expiryDate: string
   quantityValue?: number
   stockUnit?: string
   currentStock?: number

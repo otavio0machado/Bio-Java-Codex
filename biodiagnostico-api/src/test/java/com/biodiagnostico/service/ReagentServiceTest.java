@@ -261,6 +261,70 @@ class ReagentServiceTest {
     }
 
     @Test
+    @DisplayName("deleteLot remove fisicamente lote sem historico operacional")
+    void deleteLot_semHistorico_deveRemoverFisicamente() {
+        ReagentLot lot = lot(0D);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(false);
+        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
+
+        reagentService.deleteLot(lot.getId());
+
+        verify(reagentLotRepository).deleteById(lot.getId());
+        verify(reagentLotRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("deleteLot arquiva como inativo quando ha movimentacao e estoque zerado")
+    void deleteLot_comMovimentacaoEEstoqueZero_deveArquivar() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("ativo");
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(true);
+        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.deleteLot(lot.getId());
+
+        assertThat(lot.getStatus()).isEqualTo("inativo");
+        verify(reagentLotRepository, never()).deleteById(any());
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_LOT_ARCHIVED)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("deleteLot bloqueia arquivamento com historico e estoque positivo")
+    void deleteLot_comHistoricoEEstoquePositivo_deveBloquear() {
+        ReagentLot lot = lot(5D);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(true);
+        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
+
+        assertThatThrownBy(() -> reagentService.deleteLot(lot.getId()))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Zere o estoque antes de arquivar");
+
+        verify(reagentLotRepository, never()).deleteById(any());
+        verify(reagentLotRepository, never()).save(any());
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_DELETE_BLOCKED)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("deleteLot preserva lote usado em CQ como arquivo quando estoque esta zerado")
+    void deleteLot_usadoEmCqComEstoqueZero_deveArquivar() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("ativo");
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(false);
+        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(true);
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.deleteLot(lot.getId());
+
+        assertThat(lot.getStatus()).isEqualTo("inativo");
+        verify(reagentLotRepository, never()).deleteById(any());
+    }
+
+    @Test
     @DisplayName("deleteMovement ENTRADA com estoque insuficiente deve lançar exception")
     void deleteMovementEntrada_comEstoqueInsuficiente_deveLancarException() {
         // Lote começa com 50, ENTRADA +50 -> 100, SAIDA -80 -> 20
@@ -571,6 +635,50 @@ class ReagentServiceTest {
         assertThat(result).hasSize(2);
         assertThat(result.get(0).usedInQcRecently()).isFalse();
         assertThat(result.get(1).usedInQcRecently()).isFalse();
+    }
+
+    @Test
+    @DisplayName("getLots expõe diagnóstico de rastreabilidade forte")
+    void getLotsExpoeDiagnosticoDeRastreabilidade() {
+        ReagentLot incomplete = lot(100D);
+        incomplete.setManufacturer("Bio");
+        incomplete.setLocation(null);
+        incomplete.setSupplier(null);
+        incomplete.setReceivedDate(null);
+
+        ReagentLot complete = lot(100D);
+        complete.setLotNumber("L-COMPLETE");
+        complete.setManufacturer("Bio");
+        complete.setLocation("Geladeira 2");
+        complete.setSupplier("ForneceX");
+        complete.setReceivedDate(LocalDate.now().minusDays(3));
+
+        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(incomplete, complete));
+        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
+
+        var result = reagentService.getLots(null, null);
+
+        assertThat(result.get(0).traceabilityComplete()).isFalse();
+        assertThat(result.get(0).traceabilityIssues())
+            .containsExactlyInAnyOrder("location", "supplier", "receivedDate");
+        assertThat(result.get(1).traceabilityComplete()).isTrue();
+        assertThat(result.get(1).traceabilityIssues()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("getLots expõe política de movimentação para lote inativo")
+    void getLotsExpoePoliticaMovimentacaoParaInativo() {
+        ReagentLot lot = lot(0D);
+        lot.setStatus("inativo");
+        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(lot));
+        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
+
+        var result = reagentService.getLots(null, null);
+
+        assertThat(result.getFirst().canReceiveEntry()).isFalse();
+        assertThat(result.getFirst().allowedMovementTypes()).containsExactly("SAIDA", "AJUSTE");
+        assertThat(result.getFirst().movementWarning())
+            .isEqualTo("Lote inativo não aceita nova entrada. Crie um novo lote.");
     }
 
     // ===== Derivacao automatica de status (vencido vs inativo) =====

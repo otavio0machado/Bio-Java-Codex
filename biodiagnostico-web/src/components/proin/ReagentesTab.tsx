@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   useCreateReagentLot,
   useCreateStockMovement,
+  useDeleteReagentLot,
   useReagentLots,
   useReagentMovements,
   useUpdateReagentLot,
@@ -21,6 +22,7 @@ import { validateLotForm, validateMovementForm } from './reagentes/schemas'
 import {
   buildManufacturerOptions,
   buildReagentStats,
+  canReceiveEntry,
   createEmptyLotForm,
   createMovementForm,
   filterReagentLots,
@@ -62,9 +64,15 @@ export function ReagentesTab() {
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [tagStatusTab, setTagStatusTab] = useState('todos')
 
-  const { data: lots = [] } = useReagentLots(category || undefined, status || undefined)
+  const {
+    data: lots = [],
+    isLoading: isLoadingLots = false,
+    isError: hasLotsError = false,
+    refetch: refetchLots,
+  } = useReagentLots(category || undefined, status || undefined)
   const createLot = useCreateReagentLot()
   const updateLot = useUpdateReagentLot()
+  const deleteLot = useDeleteReagentLot()
   const createMovement = useCreateStockMovement(expandedLot?.id ?? '')
   const { data: movements = [] } = useReagentMovements(expandedLot?.id)
 
@@ -136,7 +144,7 @@ export function ReagentesTab() {
 
   const handleOpenMovement = (lot: ReagentLot) => {
     setExpandedLot(lot)
-    setMovementForm(createMovementForm(responsibleName))
+    setMovementForm(createMovementForm(responsibleName, canReceiveEntry(lot) ? 'ENTRADA' : 'AJUSTE'))
     setIsMovementModalOpen(true)
   }
 
@@ -165,7 +173,11 @@ export function ReagentesTab() {
   const handleMovement = async () => {
     if (!expandedLot) return
 
-    const validation = validateMovementForm(movementForm, expandedLot.currentStock ?? 0)
+    const validation = validateMovementForm(
+      movementForm,
+      expandedLot.currentStock ?? 0,
+      canReceiveEntry(expandedLot),
+    )
     if (validation) {
       toast.warning(validation.message)
       return
@@ -174,10 +186,33 @@ export function ReagentesTab() {
     try {
       await createMovement.mutateAsync(movementForm)
       toast.success('Movimentação registrada.')
-      setMovementForm(createMovementForm(responsibleName))
+      setMovementForm(
+        createMovementForm(responsibleName, canReceiveEntry(expandedLot) ? 'ENTRADA' : 'AJUSTE'),
+      )
       setIsMovementModalOpen(false)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao registrar movimentação.'
+      toast.error(message)
+    }
+  }
+
+  const handleArchiveLot = async (lot: ReagentLot) => {
+    const actionLabel = lot.status === 'inativo' ? 'remover' : 'arquivar'
+    const confirmed = window.confirm(
+      lot.status === 'inativo'
+        ? `Remover o lote ${lot.lotNumber}? Esta ação só será concluída se não houver histórico operacional.`
+        : `Arquivar o lote ${lot.lotNumber}? Lotes com histórico serão preservados como inativos.`,
+    )
+    if (!confirmed) return
+
+    try {
+      await deleteLot.mutateAsync(lot.id)
+      toast.success(lot.status === 'inativo' ? 'Lote removido.' : 'Lote arquivado.')
+      if (expandedLot?.id === lot.id) {
+        setExpandedLot(null)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Não foi possível ${actionLabel} o lote.`
       toast.error(message)
     }
   }
@@ -280,6 +315,8 @@ export function ReagentesTab() {
 
       <ReagentsContent
         viewMode={viewMode}
+        isLoading={isLoadingLots}
+        isError={hasLotsError}
         searchTerm={searchTerm}
         tags={tags}
         lots={lots}
@@ -293,7 +330,9 @@ export function ReagentesTab() {
         onExpandedLotChange={setExpandedLot}
         onOpenMovement={handleOpenMovement}
         onOpenEdit={handleOpenEdit}
+        onArchiveLot={(lot) => void handleArchiveLot(lot)}
         onOpenCreate={handleOpenCreate}
+        onRetry={() => void refetchLots?.()}
       />
 
       <ReagentLotModal

@@ -60,14 +60,47 @@ export function createEmptyLotForm(): ReagentLotRequest {
   }
 }
 
-export function createMovementForm(responsible = ''): StockMovementRequest {
+export function createMovementForm(
+  responsible = '',
+  type: StockMovementRequest['type'] = 'ENTRADA',
+): StockMovementRequest {
   return {
-    type: 'ENTRADA',
+    type,
     quantity: 0,
     responsible,
     notes: '',
     reason: null,
   }
+}
+
+export function getTraceabilityIssues(lot: ReagentLot) {
+  if (Array.isArray(lot.traceabilityIssues)) {
+    return lot.traceabilityIssues
+  }
+
+  const issues: string[] = []
+
+  if (!lot.manufacturer?.trim()) issues.push('manufacturer')
+  if (!lot.location?.trim()) issues.push('location')
+  if (!lot.supplier?.trim()) issues.push('supplier')
+  if (!lot.receivedDate) issues.push('receivedDate')
+
+  return issues
+}
+
+export function getTraceabilityIssueLabels(lot: ReagentLot) {
+  const labels: Record<string, string> = {
+    manufacturer: 'fabricante',
+    location: 'localização',
+    supplier: 'fornecedor',
+    receivedDate: 'recebimento',
+  }
+
+  return getTraceabilityIssues(lot).map((issue) => labels[issue] ?? issue)
+}
+
+export function canReceiveEntry(lot: ReagentLot) {
+  return lot.canReceiveEntry ?? lot.status !== 'inativo'
 }
 
 export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
@@ -77,7 +110,7 @@ export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
     expiring30d: lots.filter((lot) => lot.status !== 'inativo' && lot.daysLeft > 7 && lot.daysLeft <= 30).length,
     ruptureRisk: lots.filter((lot) => lot.status !== 'inativo' && lot.daysToRupture != null && lot.daysToRupture <= 5).length,
     expired: lots.filter((lot) => lot.status === 'vencido').length,
-    noTraceability: lots.filter((lot) => !lot.manufacturer || !lot.manufacturer.trim()).length,
+    noTraceability: lots.filter((lot) => getTraceabilityIssues(lot).length > 0).length,
     noValidity: lots.filter((lot) => !lot.expiryDate).length,
     lowStock: lots.filter((lot) => {
       if (lot.status === 'inativo') return false
@@ -129,10 +162,11 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   if (filters.alertsOnly) {
     result = result.filter(
       (lot) =>
+        lot.status === 'vencido' ||
         lot.daysLeft < 0 ||
         (lot.daysLeft >= 0 && lot.daysLeft <= 7) ||
         (lot.daysToRupture != null && lot.daysToRupture <= 5) ||
-        !lot.manufacturer ||
+        getTraceabilityIssues(lot).length > 0 ||
         !lot.expiryDate,
     )
   }
@@ -146,7 +180,7 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   } else if (filters.dashFilter === 'expired') {
     result = result.filter((lot) => lot.status === 'vencido')
   } else if (filters.dashFilter === 'noTraceability') {
-    result = result.filter((lot) => !lot.manufacturer || !lot.manufacturer.trim())
+    result = result.filter((lot) => getTraceabilityIssues(lot).length > 0)
   } else if (filters.dashFilter === 'noValidity') {
     result = result.filter((lot) => !lot.expiryDate)
   } else if (filters.dashFilter === 'lowStock') {

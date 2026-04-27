@@ -1,6 +1,7 @@
 package com.biodiagnostico.controller;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -51,6 +52,7 @@ class ReagentControllerTest {
         reagentService.createMovementResponse = null;
         reagentService.createMovementException = null;
         reagentService.byLotNumberResponse = List.of();
+        reagentService.deletedLotId = null;
     }
 
     @Test
@@ -70,7 +72,10 @@ class ReagentControllerTest {
                 .content(body))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.name").value("ALT"))
-            .andExpect(jsonPath("$.lotNumber").value("L123"));
+            .andExpect(jsonPath("$.lotNumber").value("L123"))
+            .andExpect(jsonPath("$.traceabilityComplete").value(false))
+            .andExpect(jsonPath("$.canReceiveEntry").value(true))
+            .andExpect(jsonPath("$.allowedMovementTypes[0]").value("ENTRADA"));
     }
 
     @Test
@@ -132,6 +137,18 @@ class ReagentControllerTest {
             .andExpect(jsonPath("$[0].lotNumber").value("L123"));
     }
 
+    @Test
+    @DisplayName("deleteLot deve retornar 204")
+    void deleteLot_deveRetornar204() throws Exception {
+        UUID lotId = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/reagents/" + lotId)
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isNoContent());
+
+        org.assertj.core.api.Assertions.assertThat(reagentService.deletedLotId).isEqualTo(lotId);
+    }
+
     @TestConfiguration
     static class TestConfig {
         @Bean
@@ -168,6 +185,7 @@ class ReagentControllerTest {
         StockMovement createMovementResponse;
         RuntimeException createMovementException;
         List<ReagentLot> byLotNumberResponse = List.of();
+        UUID deletedLotId;
 
         StubReagentService() {
             super(null, null, null, null);
@@ -189,6 +207,11 @@ class ReagentControllerTest {
         @Override
         public List<ReagentLot> getByLotNumber(String lotNumber) {
             return byLotNumberResponse;
+        }
+
+        @Override
+        public void deleteLot(UUID id) {
+            deletedLotId = id;
         }
     }
 
