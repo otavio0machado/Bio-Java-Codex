@@ -26,7 +26,9 @@ import { ReagentsDashboard } from './reagentes/ReagentsDashboard'
 import { ReagentsFilters } from './reagentes/ReagentsFilters'
 import { validateLotForm, validateMovementForm } from './reagentes/schemas'
 import {
+  buildLocationOptions,
   buildManufacturerOptions,
+  buildSupplierOptions,
   buildReagentStats,
   canReceiveEntry,
   createEmptyLotForm,
@@ -97,6 +99,8 @@ export function ReagentesTab() {
 
   const stats = useMemo(() => buildReagentStats(lots), [lots])
   const manufacturerOptions = useMemo(() => buildManufacturerOptions(lots), [lots])
+  const locationOptions = useMemo(() => buildLocationOptions(lots), [lots])
+  const supplierOptions = useMemo(() => buildSupplierOptions(lots), [lots])
   const filteredLots = useMemo(
     () =>
       filterReagentLots(lots, {
@@ -381,6 +385,9 @@ export function ReagentesTab() {
         isEditing={Boolean(editingLot)}
         isSaving={editingLot ? updateLot.isPending : createLot.isPending}
         labels={labels}
+        manufacturerOptions={manufacturerOptions}
+        locationOptions={locationOptions}
+        supplierOptions={supplierOptions}
         onClose={resetLotModal}
         onSave={handleSaveLot}
         setForm={setLotForm}

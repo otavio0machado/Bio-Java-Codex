@@ -154,12 +154,34 @@ export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
 }
 
 export function buildManufacturerOptions(lots: ReagentLot[]): ComboboxOption[] {
+  return buildLotFieldOptions(lots, (lot) => lot.manufacturer)
+}
+
+export function buildLocationOptions(lots: ReagentLot[]): ComboboxOption[] {
+  return buildLotFieldOptions(lots, (lot) => lot.location)
+}
+
+export function buildSupplierOptions(lots: ReagentLot[]): ComboboxOption[] {
+  return buildLotFieldOptions(lots, (lot) => lot.supplier)
+}
+
+/**
+ * Agrega valores distintos de um campo de lote em opcoes de combobox,
+ * ordenadas por frequencia (descendente) e nome (ascendente). A descricao
+ * mostra "N lotes" quando ha mais de uma ocorrencia. Usado por
+ * Fabricante, Localizacao e Fornecedor para padronizar UX e evitar
+ * variantes acidentais de capitalizacao.
+ */
+function buildLotFieldOptions(
+  lots: ReagentLot[],
+  getter: (lot: ReagentLot) => string | null | undefined,
+): ComboboxOption[] {
   const counts = new Map<string, number>()
 
   for (const lot of lots) {
-    const manufacturer = lot.manufacturer?.trim()
-    if (!manufacturer) continue
-    counts.set(manufacturer, (counts.get(manufacturer) ?? 0) + 1)
+    const value = getter(lot)?.trim()
+    if (!value) continue
+    counts.set(value, (counts.get(value) ?? 0) + 1)
   }
 
   return Array.from(counts.entries())

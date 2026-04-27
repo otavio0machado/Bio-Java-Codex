@@ -24,6 +24,9 @@ interface ReagentLotModalProps {
   isEditing: boolean
   isSaving: boolean
   labels: ReagentLabelSummary[]
+  manufacturerOptions?: ComboboxOption[]
+  locationOptions?: ComboboxOption[]
+  supplierOptions?: ComboboxOption[]
   onClose: () => void
   onSave: () => void
   setForm: Dispatch<SetStateAction<ReagentLotRequest>>
@@ -50,6 +53,9 @@ export function ReagentLotModal({
   isEditing,
   isSaving,
   labels,
+  manufacturerOptions = [],
+  locationOptions = [],
+  supplierOptions = [],
   onClose,
   onSave,
   setForm,
@@ -125,13 +131,18 @@ export function ReagentLotModal({
                 setForm((current) => ({ ...current, lotNumber: event.target.value }))
               }
             />
-            <Input
+            <Combobox
+              id="reagent-manufacturer-input"
               label="Fabricante *"
-              value={form.manufacturer}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, manufacturer: event.target.value }))
+              placeholder="Buscar ou criar fabricante..."
+              value={form.manufacturer ?? ''}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, manufacturer: value }))
               }
-              placeholder="Ex: Wama, Abon..."
+              options={manufacturerOptions}
+              allowCustom
+              createLabel="+ Criar novo fabricante"
+              emptyText="Nenhum fabricante cadastrado"
             />
             <Select
               label="Categoria *"
@@ -199,13 +210,18 @@ export function ReagentLotModal({
 
         <FormSection title="Armazenamento">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Input
+            <Combobox
+              id="reagent-location-input"
               label="Localização *"
-              value={form.location}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, location: event.target.value }))
+              placeholder="Buscar ou criar localização..."
+              value={form.location ?? ''}
+              onChange={(value) =>
+                setForm((current) => ({ ...current, location: value }))
               }
-              placeholder="Ex: Geladeira 2, Prateleira B"
+              options={locationOptions}
+              allowCustom
+              createLabel="+ Criar nova localização"
+              emptyText="Nenhuma localização cadastrada"
             />
             <Select
               label="Temperatura *"
@@ -248,13 +264,18 @@ export function ReagentLotModal({
           </button>
           {showAdditional ? (
             <div className="mt-3 grid gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 sm:grid-cols-2">
-              <Input
+              <Combobox
+                id="reagent-supplier-input"
                 label="Fornecedor"
+                placeholder="Buscar ou criar fornecedor..."
                 value={form.supplier ?? ''}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, supplier: event.target.value || undefined }))
+                onChange={(value) =>
+                  setForm((current) => ({ ...current, supplier: value || undefined }))
                 }
-                placeholder="Distribuidor / revendedor"
+                options={supplierOptions}
+                allowCustom
+                createLabel="+ Criar novo fornecedor"
+                emptyText="Nenhum fornecedor cadastrado"
               />
               <Input
                 label="Data de recebimento"
