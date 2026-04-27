@@ -31,16 +31,17 @@ public class ReagentExpiryScheduler {
     /**
      * Reclassifica diariamente os lotes vencidos.
      *
-     * Regra de derivacao (refator-v2 — ver {@link ReagentService#deriveStatus}):
+     * Regra de derivacao (refator-v3 — ver {@link ReagentService#deriveStatus}):
      *  - expiryDate &lt; hoje (qualquer estoque) → {@code vencido} (terminal de validade)
-     *  - estoque = 0 e expiry futura → {@code fora_de_estoque}
-     *  - openedDate setado e expiry futura → {@code em_uso}
-     *  - caso contrario → {@code em_estoque}
+     *  - unitsInUse &gt; 0 e expiry futura → {@code em_uso}
+     *  - unitsInStock &gt; 0 e expiry futura → {@code em_estoque}
+     *  - zero/zero → preserva status atual (nao ha terminal automatico em v3)
      *
-     * <p>Apos refator-v2, {@code vencido} e o unico estado terminal de validade. A query
-     * {@code findExpiredNeedingReclassification} filtra {@code vencido} para evitar
-     * saves desnecessarios; o loop chama {@link ReagentService#applyDerivedStatusFromScheduler}
-     * que emite audit_log com {@code trigger="scheduler"} a cada transicao efetiva.</p>
+     * <p>v3: scheduler NAO toca lote {@code inativo} (terminal manual — decisao 1.1).
+     * A query {@code findExpiredNeedingReclassification} ja filtra
+     * {@code status NOT IN ('vencido','inativo')}; alem disso o service
+     * {@link ReagentService#applyDerivedStatusFromScheduler} faz early return em
+     * {@code inativo} como defesa em profundidade.</p>
      */
     @Scheduled(cron = "0 0 1 * * *")
     @Transactional

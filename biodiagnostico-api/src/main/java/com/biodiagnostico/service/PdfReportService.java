@@ -126,8 +126,8 @@ public class PdfReportService {
                 return;
             }
 
-            PdfPTable table = createTable(new float[] {4.3F, 2.8F, 3.4F, 2.2F, 2.2F, 2.2F, 2.2F});
-            addHeaderRow(table, "Etiqueta", "Lote", "Fabricante", "Status", "Validade", "Estoque", "Dias");
+            PdfPTable table = createTable(new float[] {3.6F, 2.4F, 3.0F, 1.9F, 1.9F, 1.6F, 1.6F, 1.4F});
+            addHeaderRow(table, "Etiqueta", "Lote", "Fabricante", "Status", "Validade", "Em estoque", "Em uso", "Dias");
             boolean alternate = false;
             for (ReagentLot lot : lots) {
                 long daysLeft = lot.getExpiryDate() == null ? -1 : ChronoUnit.DAYS.between(LocalDate.now(), lot.getExpiryDate());
@@ -139,8 +139,9 @@ public class PdfReportService {
                     safe(lot.getManufacturer()),
                     safe(lot.getStatus()),
                     formatDate(lot.getExpiryDate()),
-                    // Refator-v2: stockUnit foi removido. Estoque renderizado como decimal puro.
-                    formatDecimal(lot.getCurrentStock()),
+                    // Refator-v3: estoque per-unit (units_in_stock + units_in_use).
+                    String.valueOf(lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock()),
+                    String.valueOf(lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse()),
                     daysLeft >= 0 ? String.valueOf(daysLeft) : "—"
                 );
                 alternate = !alternate;

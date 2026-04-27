@@ -1,12 +1,13 @@
 import {
   AlertTriangle,
+  Archive,
   ArrowUpRight,
   CheckCircle2,
   Clock,
   ClipboardList,
   Inbox,
   Package,
-  PauseCircle,
+  Search,
   X,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -20,16 +21,13 @@ interface ReagentsDashboardProps {
 }
 
 /**
- * Dashboard pos refator v2.
+ * Dashboard pos refator v3.
  *
  * Cinco cards principais (status canonicos): Total, Em estoque, Em uso,
- * Fora de estoque, Vencidos.
+ * Vencidos, Inativos. Drop {@code Fora de estoque}.
  *
- * Quatro cards de acao quando ha alertas: Vencem em 7d, Vencem em 30d,
- * Rastreabilidade incompleta, Sem validade.
- *
- * Saem por contrato: Risco de ruptura, Baixo estoque (perdem suporte com
- * a remocao de {@code quantityValue} e {@code estimatedConsumption}).
+ * Cards de acao quando ha alertas: Vencem em 7d, Vencem em 30d,
+ * Rastreabilidade incompleta, Sem validade, Revisar estoque (V14).
  */
 export function ReagentsDashboard({
   stats,
@@ -40,7 +38,8 @@ export function ReagentsDashboard({
     stats.expiring7d > 0 ||
     stats.expiring30d > 0 ||
     stats.noTraceability > 0 ||
-    stats.noValidity > 0
+    stats.noValidity > 0 ||
+    stats.needsReview > 0
 
   return (
     <>
@@ -51,7 +50,7 @@ export function ReagentsDashboard({
             <h4 className="text-base font-semibold text-amber-900">Ação hoje</h4>
             <p className="text-sm text-amber-800/80">Filas que precisam de intervenção imediata.</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <ActionQueueCard
               label="Vencem em 7 dias"
               value={stats.expiring7d}
@@ -88,6 +87,15 @@ export function ReagentsDashboard({
               active={dashFilter === 'noValidity'}
               onClick={() => onToggleFilter(dashFilter === 'noValidity' ? null : 'noValidity')}
             />
+            <ActionQueueCard
+              label="Revisar estoque"
+              value={stats.needsReview}
+              description="Lotes da migração V14 com estoque a confirmar."
+              icon={<Search className="h-4 w-4" />}
+              tone="amber"
+              active={dashFilter === 'needsReview'}
+              onClick={() => onToggleFilter(dashFilter === 'needsReview' ? null : 'needsReview')}
+            />
           </div>
         </div>
       ) : null}
@@ -118,20 +126,20 @@ export function ReagentsDashboard({
           onClick={() => onToggleFilter(dashFilter === 'emUso' ? null : 'emUso')}
         />
         <DashCard
-          label="Fora de estoque"
-          value={stats.foraDeEstoque}
-          icon={<PauseCircle className="h-5 w-5" />}
-          color="neutral"
-          active={dashFilter === 'foraDeEstoque'}
-          onClick={() => onToggleFilter(dashFilter === 'foraDeEstoque' ? null : 'foraDeEstoque')}
-        />
-        <DashCard
           label="Vencidos"
           value={stats.vencidos}
           icon={<X className="h-5 w-5" />}
           color="red"
           active={dashFilter === 'vencidos'}
           onClick={() => onToggleFilter(dashFilter === 'vencidos' ? null : 'vencidos')}
+        />
+        <DashCard
+          label="Inativos"
+          value={stats.inativos}
+          icon={<Archive className="h-5 w-5" />}
+          color="neutral"
+          active={dashFilter === 'inativos'}
+          onClick={() => onToggleFilter(dashFilter === 'inativos' ? null : 'inativos')}
         />
       </div>
     </>

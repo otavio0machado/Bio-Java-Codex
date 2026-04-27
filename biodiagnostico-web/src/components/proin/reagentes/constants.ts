@@ -5,6 +5,7 @@ export const MOVEMENT_REASONS: { value: string; label: string }[] = [
   { value: 'QUEBRA', label: 'Quebra / perda' },
   { value: 'CONTAMINACAO', label: 'Contaminação' },
   { value: 'CORRECAO', label: 'Correção de lançamento' },
+  { value: 'REVERSAO_ABERTURA', label: 'Reversão de abertura por engano' },
   { value: 'VENCIMENTO', label: 'Vencimento' },
   { value: 'OUTRO', label: 'Outro (ver observação)' },
 ]
@@ -33,15 +34,27 @@ export const CATEGORIES = [
 export const TEMPS = ['2-8°C', '15-25°C (Ambiente)', '-20°C', '-80°C']
 
 /**
- * Status canonicos pos-refator v2. Substitui o conjunto antigo
- * {@code ativo/em_uso/inativo/vencido/quarentena}.
+ * Status canonicos pos-refator v3. Drop {@code fora_de_estoque}, add
+ * {@code inativo} (terminal manual via {@code POST /archive}).
+ *
+ * Atencao: o select do modal de cadastro/edicao NAO oferece {@code inativo} —
+ * o operador usa o botao "Arquivar" no card. Por isso o cadastro filtra essa
+ * opcao no UI.
  */
 export const REAGENT_STATUS_OPTIONS: { value: ReagentStatus; label: string }[] = [
   { value: 'em_estoque', label: 'Em estoque' },
   { value: 'em_uso', label: 'Em uso' },
-  { value: 'fora_de_estoque', label: 'Fora de estoque' },
   { value: 'vencido', label: 'Vencido' },
+  { value: 'inativo', label: 'Inativo (arquivado)' },
 ]
+
+/**
+ * Subset oferecido no select de status do {@code ReagentLotModal}. Exclui
+ * {@code inativo} — fluxo correto e via "Arquivar" (decisao audit 1.7).
+ */
+export const REAGENT_STATUS_FORM_OPTIONS = REAGENT_STATUS_OPTIONS.filter(
+  (option) => option.value !== 'inativo',
+)
 
 /**
  * Tabs do drilldown de etiqueta — espelha o conjunto canonico mais "todos".
@@ -50,13 +63,43 @@ export const TAG_STATUS_TABS = [
   'todos',
   'em_estoque',
   'em_uso',
-  'fora_de_estoque',
   'vencido',
+  'inativo',
 ] as const
 
 export const REAGENT_STATUS_LABELS: Record<string, string> = {
   em_estoque: 'Em estoque',
   em_uso: 'Em uso',
-  fora_de_estoque: 'Fora de estoque',
   vencido: 'Vencido',
+  inativo: 'Inativo',
+  // Legados (PDFs/audit_log antigos): mantem labels para nao quebrar exibicao.
+  fora_de_estoque: 'Fora de estoque (legado)',
+  ativo: 'Em estoque (legado)',
+  quarentena: 'Quarentena (legado)',
+}
+
+/**
+ * Tipos de movimento aceitos em escrita pos refator v3. SAIDA aparece apenas
+ * em historico (movimentos pre-V14). UI nunca dispara SAIDA — bloqueante audit
+ * frontend §4.3.3.
+ */
+export const MOVEMENT_TYPE_OPTIONS: {
+  value: 'ENTRADA' | 'ABERTURA' | 'FECHAMENTO' | 'CONSUMO' | 'AJUSTE'
+  label: string
+  hint: string
+}[] = [
+  { value: 'ENTRADA', label: 'Entrada', hint: '+ Em estoque (compra/recebimento)' },
+  { value: 'ABERTURA', label: 'Abrir unidade', hint: '-1 Em estoque, +1 Em uso' },
+  { value: 'FECHAMENTO', label: 'Voltar ao estoque', hint: '-1 Em uso, +1 Em estoque' },
+  { value: 'CONSUMO', label: 'Consumo', hint: '- Em uso (uso real)' },
+  { value: 'AJUSTE', label: 'Ajuste manual', hint: 'Define os dois contadores' },
+]
+
+export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  ENTRADA: 'Entrada',
+  ABERTURA: 'Abertura',
+  FECHAMENTO: 'Fechamento',
+  CONSUMO: 'Consumo',
+  AJUSTE: 'Ajuste',
+  SAIDA: 'Saída (legado)',
 }

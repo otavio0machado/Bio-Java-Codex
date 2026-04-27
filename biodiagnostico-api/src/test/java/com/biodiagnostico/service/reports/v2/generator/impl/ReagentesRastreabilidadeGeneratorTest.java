@@ -46,7 +46,10 @@ class ReagentesRastreabilidadeGeneratorTest {
         l.setCategory(category);
         l.setStatus(status);
         l.setExpiryDate(expiry);
-        l.setCurrentStock(stock);
+        // v3: estoque per-unit. Fixture preserva total via unitsInStock; unitsInUse=0.
+        l.setUnitsInStock(stock == null ? 0 : stock.intValue());
+        l.setUnitsInUse(0);
+        l.setNeedsStockReview(false);
         return l;
     }
 
@@ -64,12 +67,12 @@ class ReagentesRastreabilidadeGeneratorTest {
             lot("Reagente Glicose", ReagentStatus.EM_ESTOQUE, today.plusDays(30), 50D, "Bioquimica"),
             lot("Reagente Ureia", ReagentStatus.VENCIDO, today.minusDays(5), 10D, "Bioquimica"),
             lot("Reagente Hemoglobina", ReagentStatus.EM_USO, today.plusDays(180), 100D, "Hematologia"),
-            lot("Reagente Microbiologia", ReagentStatus.FORA_DE_ESTOQUE, today.plusDays(60), 0D, "Microbiologia")
+            lot("Reagente Microbiologia", ReagentStatus.INATIVO, today.plusDays(60), 0D, "Microbiologia")
         );
         when(lotRepository.findAll()).thenReturn(fixtures);
 
         ReportArtifact artifact = generator().generate(
-            new ReportFilters(Map.of()),
+            new ReportFilters(Map.of("includeInactive", true)),
             GeneratorTestSupport.ctx()
         );
 
@@ -79,14 +82,13 @@ class ReagentesRastreabilidadeGeneratorTest {
         assertThat(artifact.sizeBytes()).isGreaterThan(0);
 
         String text = GeneratorTestSupport.extractPdfText(artifact.bytes());
-        // Cards de resumo apos refator-v2: Em estoque, Em uso, Fora de estoque, Vencidos.
+        // Cards de resumo apos refator-v3: Em estoque, Em uso, Inativos, Vencidos.
         assertThat(text).containsIgnoringCase("Resumo");
         assertThat(text).contains("Em estoque");
         assertThat(text).contains("Em uso");
-        assertThat(text).contains("Fora de estoque");
-        // Nao deve mais ter o card "Ativos" nem "Inativos".
-        assertThat(text).doesNotContain("Ativos");
-        assertThat(text).doesNotContain("Inativos");
+        assertThat(text).contains("Inativos");
+        // v3: card "Fora de estoque" removido (substituido por Inativos).
+        assertThat(text).doesNotContain("Fora de estoque");
         // Nao deve ter secao de consumo (removida em refator-v2 §1.11).
         assertThat(text).doesNotContain("Consumo estimado por categoria");
     }

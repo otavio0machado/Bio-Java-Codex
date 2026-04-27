@@ -13,7 +13,8 @@ import { Button, Combobox, Input, Modal, Select, type ComboboxOption } from '../
 import {
   CATEGORIES,
   MOVEMENT_REASONS,
-  REAGENT_STATUS_OPTIONS,
+  MOVEMENT_TYPE_OPTIONS,
+  REAGENT_STATUS_FORM_OPTIONS,
   TEMPS,
 } from './constants'
 import { canReceiveEntry } from './utils'
@@ -162,19 +163,48 @@ export function ReagentLotModal({
         </FormSection>
 
         <FormSection title="Estoque & Status">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Input
-              label="Quantidade atual *"
-              type="number"
-              min="0"
-              value={String(form.currentStock ?? 0)}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  currentStock: Number(event.target.value || 0),
-                }))
-              }
-            />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Input
+                label="Em estoque *"
+                type="number"
+                min="0"
+                step="1"
+                value={String(form.unitsInStock ?? 0)}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    unitsInStock: Math.max(0, Math.floor(Number(event.target.value || 0))),
+                  }))
+                }
+              />
+              <p className="mt-1 text-xs text-neutral-500">
+                Unidades fechadas, prontas para abrir.
+              </p>
+            </div>
+            <div>
+              <Input
+                label="Em uso *"
+                type="number"
+                min="0"
+                step="1"
+                value={String(form.unitsInUse ?? 0)}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    unitsInUse: Math.max(0, Math.floor(Number(event.target.value || 0))),
+                  }))
+                }
+              />
+              <p className="mt-1 text-xs text-neutral-500">
+                Unidades já abertas, sendo consumidas.
+              </p>
+            </div>
+          </div>
+          <div className="mt-2 text-xs text-neutral-500">
+            Total: <strong>{(form.unitsInStock ?? 0) + (form.unitsInUse ?? 0)}</strong> unidade(s)
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <Select
               label="Status *"
               value={form.status ?? 'em_estoque'}
@@ -182,7 +212,7 @@ export function ReagentLotModal({
                 setForm((current) => ({ ...current, status: event.target.value }))
               }
             >
-              {REAGENT_STATUS_OPTIONS.map((option) => (
+              {REAGENT_STATUS_FORM_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -206,6 +236,10 @@ export function ReagentLotModal({
               </span>
             </div>
           ) : null}
+          <div className="mt-2 text-xs text-neutral-500">
+            Para arquivar como <strong>Inativo</strong>, salve o lote primeiro e use o botão
+            "Arquivar" no card.
+          </div>
         </FormSection>
 
         <FormSection title="Armazenamento">
@@ -366,20 +400,57 @@ export function ReagentMovementModal({
             }))
           }
         >
-          <option value="ENTRADA" disabled={!canUseEntrada}>
-            Entrada
-          </option>
-          <option value="SAIDA">Saída</option>
-          <option value="AJUSTE">Ajuste</option>
+          {MOVEMENT_TYPE_OPTIONS.map((option) => {
+            const disabled = option.value === 'ENTRADA' && !canUseEntrada
+            return (
+              <option key={option.value} value={option.value} disabled={disabled}>
+                {option.label} — {option.hint}
+              </option>
+            )
+          })}
         </Select>
-        <Input
-          label="Quantidade"
-          type="number"
-          value={String(form.quantity)}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, quantity: Number(event.target.value) }))
-          }
-        />
+        {form.type === 'AJUSTE' ? (
+          <div className="grid gap-2 sm:col-span-1">
+            <Input
+              label="Em estoque (alvo) *"
+              type="number"
+              min="0"
+              step="1"
+              value={String(form.targetUnitsInStock ?? 0)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  targetUnitsInStock: Math.max(0, Math.floor(Number(event.target.value || 0))),
+                }))
+              }
+            />
+            <Input
+              label="Em uso (alvo) *"
+              type="number"
+              min="0"
+              step="1"
+              value={String(form.targetUnitsInUse ?? 0)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  targetUnitsInUse: Math.max(0, Math.floor(Number(event.target.value || 0))),
+                }))
+              }
+            />
+          </div>
+        ) : (
+          <Input
+            label="Quantidade *"
+            type="number"
+            min={form.type === 'ABERTURA' || form.type === 'FECHAMENTO' ? 1 : 0}
+            max={form.type === 'ABERTURA' || form.type === 'FECHAMENTO' ? 1 : undefined}
+            value={String(form.quantity)}
+            disabled={form.type === 'ABERTURA' || form.type === 'FECHAMENTO'}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, quantity: Number(event.target.value) }))
+            }
+          />
+        )}
         <Input
           label="Responsável *"
           value={form.responsible}
@@ -388,7 +459,12 @@ export function ReagentMovementModal({
           }
         />
         <Select
-          label={form.type === 'AJUSTE' ? 'Motivo *' : 'Motivo (opcional)'}
+          label={
+            form.type === 'AJUSTE' ||
+            (form.type === 'CONSUMO' && lot?.status === 'vencido')
+              ? 'Motivo *'
+              : 'Motivo (opcional)'
+          }
           value={form.reason ?? ''}
           onChange={(event) =>
             setForm((current) => ({
@@ -397,7 +473,11 @@ export function ReagentMovementModal({
             }))
           }
         >
-          <option value="">{form.type === 'AJUSTE' ? 'Selecione o motivo' : 'Sem motivo específico'}</option>
+          <option value="">
+            {form.type === 'AJUSTE' || (form.type === 'CONSUMO' && lot?.status === 'vencido')
+              ? 'Selecione o motivo'
+              : 'Sem motivo específico'}
+          </option>
           {MOVEMENT_REASONS.map((reason) => (
             <option key={reason.value} value={reason.value}>
               {reason.label}
@@ -413,15 +493,28 @@ export function ReagentMovementModal({
         />
       </div>
 
+      {(form.type === 'ABERTURA' || form.type === 'FECHAMENTO') ? (
+        <p className="mt-2 text-xs text-neutral-500">
+          Operação unitária — uma unidade por movimento.
+        </p>
+      ) : null}
+
       {form.type === 'AJUSTE' ? (
         <p className="mt-2 text-xs text-amber-700">
           Ajustes manuais exigem um motivo para auditoria.
         </p>
       ) : null}
 
+      {form.type === 'CONSUMO' && lot?.status === 'vencido' ? (
+        <p className="mt-2 text-xs text-amber-700">
+          CONSUMO em lote vencido exige um motivo (descarte registrado).
+        </p>
+      ) : null}
+
       {!canUseEntrada ? (
         <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-          {lot?.movementWarning ?? 'Lote vencido não aceita nova entrada. Crie um novo lote.'}
+          {lot?.movementWarning ??
+            'Este lote não aceita ENTRADA (vencido ou inativo). Use AJUSTE ou reative o lote.'}
         </p>
       ) : null}
 
@@ -433,14 +526,56 @@ export function ReagentMovementModal({
           </div>
           <div className="max-h-[200px] space-y-1 overflow-y-auto">
             {movements.map((movement) => {
-              const previousStock =
-                typeof movement.previousStock === 'number' ? movement.previousStock : null
-              let nextStock: number | null = null
-              if (previousStock != null) {
-                if (movement.type === 'ENTRADA') nextStock = previousStock + movement.quantity
-                else if (movement.type === 'SAIDA') nextStock = previousStock - movement.quantity
-                else if (movement.type === 'AJUSTE') nextStock = movement.quantity
-              }
+              const isLegacy =
+                movement.isLegacy ??
+                (typeof movement.previousStock === 'number' &&
+                  typeof movement.previousUnitsInStock !== 'number')
+
+              // Resumo de delta. Pos-V14: mostra (stock,use). Pre-V14: mostra previousStock.
+              const deltaText = (() => {
+                if (!isLegacy) {
+                  const ps = movement.previousUnitsInStock ?? null
+                  const pu = movement.previousUnitsInUse ?? null
+                  if (ps != null && pu != null) {
+                    return `📦${ps} 🔓${pu}`
+                  }
+                  return null
+                }
+                const ps = movement.previousStock ?? null
+                if (ps == null) return null
+                let next: number | null = null
+                if (movement.type === 'ENTRADA') next = ps + movement.quantity
+                else if (movement.type === 'SAIDA') next = ps - movement.quantity
+                else if (movement.type === 'AJUSTE') next = movement.quantity
+                return next != null ? `${ps} → ${next}` : null
+              })()
+
+              const sign =
+                movement.type === 'ENTRADA' || movement.type === 'FECHAMENTO'
+                  ? '+'
+                  : movement.type === 'SAIDA' ||
+                      movement.type === 'CONSUMO' ||
+                      movement.type === 'ABERTURA'
+                    ? '-'
+                    : '='
+
+              const colorClass =
+                movement.type === 'ENTRADA' || movement.type === 'FECHAMENTO'
+                  ? 'text-green-700'
+                  : movement.type === 'SAIDA' ||
+                      movement.type === 'CONSUMO' ||
+                      movement.type === 'ABERTURA'
+                    ? 'text-red-700'
+                    : 'text-blue-700'
+
+              const Icon =
+                movement.type === 'ENTRADA' || movement.type === 'FECHAMENTO'
+                  ? ArrowDownLeft
+                  : movement.type === 'SAIDA' ||
+                      movement.type === 'CONSUMO' ||
+                      movement.type === 'ABERTURA'
+                    ? ArrowUpRight
+                    : Pencil
 
               return (
                 <div
@@ -448,30 +583,16 @@ export function ReagentMovementModal({
                   className="flex items-center justify-between rounded-lg border border-neutral-100 px-3 py-2 text-sm"
                 >
                   <div className="flex items-center gap-2 flex-wrap">
-                    {movement.type === 'ENTRADA' ? (
-                      <ArrowDownLeft className="h-3.5 w-3.5 text-green-600" />
-                    ) : movement.type === 'SAIDA' ? (
-                      <ArrowUpRight className="h-3.5 w-3.5 text-red-600" />
-                    ) : (
-                      <Pencil className="h-3.5 w-3.5 text-blue-600" />
-                    )}
-                    <span
-                      className={cn(
-                        'font-semibold',
-                        movement.type === 'ENTRADA'
-                          ? 'text-green-700'
-                          : movement.type === 'SAIDA'
-                            ? 'text-red-700'
-                            : 'text-blue-700',
-                      )}
-                    >
-                      {movement.type === 'ENTRADA' ? '+' : movement.type === 'SAIDA' ? '-' : '='}
+                    <Icon className={cn('h-3.5 w-3.5', colorClass)} />
+                    <span className={cn('font-semibold', colorClass)}>
+                      {sign}
                       {movement.quantity}
                     </span>
-                    {previousStock != null && nextStock != null ? (
-                      <span className="text-xs text-neutral-500 font-mono">
-                        {previousStock} → {nextStock}
-                      </span>
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
+                      {movement.type}
+                    </span>
+                    {deltaText ? (
+                      <span className="text-xs text-neutral-500 font-mono">{deltaText}</span>
                     ) : null}
                     {movement.responsible ? (
                       <span className="text-neutral-400">por {movement.responsible}</span>

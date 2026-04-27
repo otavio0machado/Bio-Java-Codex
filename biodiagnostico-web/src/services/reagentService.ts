@@ -1,19 +1,21 @@
 import { api } from './api'
 import type {
+  ArchiveReagentLotRequest,
+  DeleteReagentLotRequest,
   ReagentLabelSummary,
   ReagentLot,
   ReagentLotRequest,
-  ReagentTagSummary,
   StockMovement,
   StockMovementRequest,
+  UnarchiveReagentLotRequest,
 } from '../types'
 
 /**
  * Sanitiza payload antes de submeter ao backend.
  *
- * Bloqueante audit 4.2.1: trim defensivo no {@code label} (e nas demais strings
- * obrigatorias) para impedir variantes acidentais por whitespace. Backend tambem
- * faz trim como defesa em profundidade, mas a primeira linha e aqui.
+ * Bloqueante audit 4.2.1 do v2: trim defensivo no {@code label} (e nas demais
+ * strings obrigatorias) para impedir variantes acidentais por whitespace.
+ * Backend tambem faz trim como defesa em profundidade.
  */
 function sanitizeLotRequest(request: ReagentLotRequest): ReagentLotRequest {
   return {
@@ -41,8 +43,29 @@ export const reagentService = {
     const response = await api.put<ReagentLot>(`/reagents/${id}`, sanitizeLotRequest(request))
     return response.data
   },
-  async deleteLot(id: string) {
-    await api.delete(`/reagents/${id}`)
+  /**
+   * Hard delete (refator v3). RBAC: ADMIN-only no backend.
+   * Body exige {@code confirmLotNumber} matching o lote para defesa contra
+   * delete acidental.
+   */
+  async deleteLot(id: string, request: DeleteReagentLotRequest) {
+    await api.delete(`/reagents/${id}`, { data: request })
+  },
+  /**
+   * Arquiva lote (vira {@code inativo}). Exige data + responsavel (username).
+   * RBAC: ADMIN ou FUNCIONARIO.
+   */
+  async archiveLot(id: string, request: ArchiveReagentLotRequest) {
+    const response = await api.post<ReagentLot>(`/reagents/${id}/archive`, request)
+    return response.data
+  },
+  /**
+   * Reativa lote inativo. Backend re-deriva status (validade x estoque x abertura).
+   * Preserva {@code archivedAt}/{@code archivedBy} para historico.
+   */
+  async unarchiveLot(id: string, request: UnarchiveReagentLotRequest = {}) {
+    const response = await api.post<ReagentLot>(`/reagents/${id}/unarchive`, request)
+    return response.data
   },
   async getMovements(id: string) {
     const response = await api.get<StockMovement[]>(`/reagents/${id}/movements`)
@@ -65,19 +88,10 @@ export const reagentService = {
   },
   /**
    * Endpoint canonico de etiquetas. Retorna agregados por {@code label} com
-   * contagens por status novo (em_estoque, em_uso, fora_de_estoque, vencidos).
+   * contagens dos 4 status v3 (em_estoque, em_uso, vencidos, inativos).
    */
   async getLabelSummaries() {
     const response = await api.get<ReagentLabelSummary[]>('/reagents/labels')
-    return response.data
-  },
-  /**
-   * @deprecated Alias para {@code /api/reagents/tags}. Mantido apenas para
-   * eventual cliente externo durante a janela de transicao. Frontend interno
-   * deve consumir {@link getLabelSummaries}.
-   */
-  async getTagSummaries() {
-    const response = await api.get<ReagentTagSummary[]>('/reagents/tags')
     return response.data
   },
   async exportCsv(category?: string, status?: string) {

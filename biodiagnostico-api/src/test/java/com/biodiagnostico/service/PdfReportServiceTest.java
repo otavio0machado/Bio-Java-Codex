@@ -179,7 +179,9 @@ class PdfReportServiceTest {
             .manufacturer("BioSystems")
             .status("em_estoque")
             .expiryDate(LocalDate.now().plusDays(30))
-            .currentStock(50.0)
+            .unitsInStock(50)
+            .unitsInUse(0)
+            .needsStockReview(false)
             .build();
 
         when(reagentLotRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(lot));

@@ -39,16 +39,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Rastreabilidade de reagentes — lotes, vencimentos, movimentos.
- * Secoes pos refator-v2:
+ *
+ * Secoes pos refator-v3:
  * 1. Capa
- * 2. Resumo (total, em estoque, em uso, fora de estoque, vencidos)
+ * 2. Resumo (total, em estoque, em uso, inativos, vencidos)
  * 3. Vencimentos proximos (30/60/90 dias)
- * 4. Vencidos com estoque (caixa vermelha)
+ * 4. Vencidos com estoque (caixa vermelha) — usa (unitsInStock + unitsInUse) &gt; 0
  * 5. Comentario IA
  *
- * <p>Secao "Consumo estimado por categoria" foi removida pelo refator-v2 (audit ressalva 1.11).
- * Para regenerar consumo, derivar de {@code StockMovement} agregando {@code SAIDA} por
- * categoria/janela 30/60/90 dias — issue separada.</p>
+ * <p>Refator v3: card "Fora de estoque" passa a ser "Inativos". Tabelas que filtravam
+ * por {@code currentStock > 0} usam soma {@code (unitsInStock + unitsInUse) > 0}. Filtro
+ * {@code includeInactive} agora bate em {@code 'inativo'} (era {@code 'fora_de_estoque'}).</p>
+ *
+ * <p>PDFs reports v2 ja assinados sao imutaveis — apenas geracoes futuras usam labels novos.</p>
  */
 @Component
 public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
@@ -127,11 +130,11 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
             LocalDate today = LocalDate.now();
             long emEstoque = all.stream().filter(l -> "em_estoque".equalsIgnoreCase(l.getStatus())).count();
             long emUso = all.stream().filter(l -> "em_uso".equalsIgnoreCase(l.getStatus())).count();
-            long foraDeEstoque = all.stream().filter(l -> "fora_de_estoque".equalsIgnoreCase(l.getStatus())).count();
+            long inativos = all.stream().filter(l -> "inativo".equalsIgnoreCase(l.getStatus())).count();
             long vencidos = all.stream().filter(l -> "vencido".equalsIgnoreCase(l.getStatus())).count();
             long vencidosComEstoque = all.stream()
                 .filter(l -> l.getExpiryDate() != null && l.getExpiryDate().isBefore(today)
-                    && l.getCurrentStock() != null && l.getCurrentStock() > 0)
+                    && totalUnits(l) > 0)
                 .count();
 
             doc.add(ReportV2PdfTheme.section("Resumo"));
@@ -140,7 +143,7 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
             cards.addCell(summaryCell("Total", String.valueOf(all.size()), ReportV2PdfTheme.BRAND_PRIMARY));
             cards.addCell(summaryCell("Em estoque", String.valueOf(emEstoque), ReportV2PdfTheme.STATUS_APROVADO));
             cards.addCell(summaryCell("Em uso", String.valueOf(emUso), ReportV2PdfTheme.BRAND_PRIMARY));
-            cards.addCell(summaryCell("Fora de estoque", String.valueOf(foraDeEstoque), ReportV2PdfTheme.MUTED));
+            cards.addCell(summaryCell("Inativos", String.valueOf(inativos), ReportV2PdfTheme.MUTED));
             cards.addCell(summaryCell("Vencidos", String.valueOf(vencidos), ReportV2PdfTheme.STATUS_REPROVADO));
             doc.add(cards);
 
@@ -154,8 +157,8 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
                 .collect(Collectors.toList());
             if (!expiring.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("Vencimentos proximos (" + horizon + " dias)"));
-                PdfPTable t = ReportV2PdfTheme.table(new float[] {2.4F, 1.6F, 2.0F, 1.4F, 1.2F, 1.3F});
-                ReportV2PdfTheme.headerRow(t, "Nome", "Lote", "Categoria", "Vence", "Estoque", "Status");
+                PdfPTable t = ReportV2PdfTheme.table(new float[] {2.2F, 1.4F, 1.8F, 1.3F, 1.1F, 1.1F, 1.2F});
+                ReportV2PdfTheme.headerRow(t, "Nome", "Lote", "Categoria", "Vence", "Em estoque", "Em uso", "Status");
                 boolean alt = false;
                 for (ReagentLot l : expiring) {
                     ReportV2PdfTheme.bodyRow(t, alt,
@@ -163,7 +166,8 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
                         ReportV2PdfTheme.safe(l.getLotNumber()),
                         ReportV2PdfTheme.safe(l.getCategory()),
                         ReportV2PdfTheme.formatDate(l.getExpiryDate()),
-                        ReportV2PdfTheme.formatDecimal(l.getCurrentStock()),
+                        String.valueOf(l.getUnitsInStock() == null ? 0 : l.getUnitsInStock()),
+                        String.valueOf(l.getUnitsInUse() == null ? 0 : l.getUnitsInUse()),
                         ReportV2PdfTheme.safe(l.getStatus())
                     );
                     alt = !alt;
@@ -181,17 +185,18 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
                     + "Separar e descartar conforme POP de residuos.",
                     ReportV2PdfTheme.ALERT_BG, ReportV2PdfTheme.STATUS_REPROVADO));
                 doc.add(wrap);
-                PdfPTable t = ReportV2PdfTheme.table(new float[] {2.4F, 1.6F, 1.4F, 1.2F});
-                ReportV2PdfTheme.headerRow(t, "Nome", "Lote", "Venceu em", "Estoque");
+                PdfPTable t = ReportV2PdfTheme.table(new float[] {2.2F, 1.4F, 1.4F, 1.1F, 1.1F});
+                ReportV2PdfTheme.headerRow(t, "Nome", "Lote", "Venceu em", "Em estoque", "Em uso");
                 boolean alt = false;
                 for (ReagentLot l : all) {
                     if (l.getExpiryDate() == null || !l.getExpiryDate().isBefore(today)) continue;
-                    if (l.getCurrentStock() == null || l.getCurrentStock() <= 0) continue;
+                    if (totalUnits(l) <= 0) continue;
                     ReportV2PdfTheme.bodyRow(t, alt,
                         ReportV2PdfTheme.safe(l.getName()),
                         ReportV2PdfTheme.safe(l.getLotNumber()),
                         ReportV2PdfTheme.formatDate(l.getExpiryDate()),
-                        ReportV2PdfTheme.formatDecimal(l.getCurrentStock())
+                        String.valueOf(l.getUnitsInStock() == null ? 0 : l.getUnitsInStock()),
+                        String.valueOf(l.getUnitsInUse() == null ? 0 : l.getUnitsInUse())
                     );
                     alt = !alt;
                 }
@@ -207,7 +212,7 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
                 String structured = "Total lotes: " + all.size()
                     + "\nEm estoque: " + emEstoque
                     + "\nEm uso: " + emUso
-                    + "\nFora de estoque: " + foraDeEstoque
+                    + "\nInativos: " + inativos
                     + "\nVencidos: " + vencidos
                     + "\nVencidos com estoque: " + vencidosComEstoque;
                 String commentary = aiCommentator.commentary(ReportCode.REAGENTES_RASTREABILIDADE, structured, ctx);
@@ -229,16 +234,23 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
     }
 
     private List<ReagentLot> filteredLots(Resolved rf) {
-        // Refator-v2: o terminal "inativo" foi substituido por "fora_de_estoque". O filtro
-        // {@code includeInactive} mantem nome historico no contrato do report (aceita tanto
-        // o termo legado quanto a semantica nova): quando false, oculta lotes terminais
-        // (fora_de_estoque) do PDF; quando true, inclui todos.
+        // Refator-v3: o terminal manual e {@code 'inativo'} (era {@code 'fora_de_estoque'}
+        // em v2). O filtro {@code includeInactive} mantem nome historico no contrato do
+        // report: quando false, oculta lotes terminais ({@code inativo}) do PDF; quando
+        // true, inclui todos.
         List<ReagentLot> all = lotRepository.findAll();
         return all.stream()
             .filter(l -> rf.categories == null || rf.categories.isEmpty()
                 || (l.getCategory() != null && rf.categories.contains(l.getCategory())))
-            .filter(l -> rf.includeInactive || !"fora_de_estoque".equalsIgnoreCase(l.getStatus()))
+            .filter(l -> rf.includeInactive || !"inativo".equalsIgnoreCase(l.getStatus()))
             .collect(Collectors.toList());
+    }
+
+    /** Soma {@code unitsInStock + unitsInUse} com tolerancia a null (refator v3). */
+    private static int totalUnits(ReagentLot l) {
+        int stock = l.getUnitsInStock() == null ? 0 : l.getUnitsInStock();
+        int use = l.getUnitsInUse() == null ? 0 : l.getUnitsInUse();
+        return stock + use;
     }
 
     private Resolved resolve(ReportFilters filters) {

@@ -1,17 +1,18 @@
 package com.biodiagnostico.controller;
 
+import com.biodiagnostico.dto.request.ArchiveReagentLotRequest;
+import com.biodiagnostico.dto.request.DeleteReagentLotRequest;
 import com.biodiagnostico.dto.request.ReagentLotRequest;
 import com.biodiagnostico.dto.request.StockMovementRequest;
+import com.biodiagnostico.dto.request.UnarchiveReagentLotRequest;
 import com.biodiagnostico.dto.response.ReagentLabelSummary;
 import com.biodiagnostico.dto.response.ReagentLotResponse;
-import com.biodiagnostico.dto.response.ReagentTagSummary;
 import com.biodiagnostico.dto.response.StockMovementResponse;
 import com.biodiagnostico.service.ReagentService;
 import com.biodiagnostico.util.ResponseMapper;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -56,11 +57,49 @@ public class ReagentController {
         return ResponseEntity.ok(ResponseMapper.toReagentLotResponse(reagentService.updateLot(id, request)));
     }
 
+    /**
+     * Hard delete v3 — ADMIN-only com confirmacao por digitacao do {@code lotNumber}.
+     * Cascade {@code stock_movements} via JPA. Audit
+     * {@code REAGENT_LOT_DELETED} com snapshot enumerativo (audit ressalva 1.2).
+     */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
-    public ResponseEntity<Void> deleteLot(@PathVariable UUID id) {
-        reagentService.deleteLot(id);
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteLot(
+        @PathVariable UUID id,
+        @Valid @RequestBody DeleteReagentLotRequest request
+    ) {
+        reagentService.deleteLot(id, request);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Arquiva lote (status=inativo). ADMIN ou FUNCIONARIO. Body
+     * {@code { archivedAt, archivedBy }}. Audit {@code REAGENT_LOT_ARCHIVED}.
+     */
+    @PostMapping("/{id}/archive")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    public ResponseEntity<ReagentLotResponse> archiveLot(
+        @PathVariable UUID id,
+        @Valid @RequestBody ArchiveReagentLotRequest request
+    ) {
+        return ResponseEntity.ok(
+            ResponseMapper.toReagentLotResponse(reagentService.archiveLot(id, request))
+        );
+    }
+
+    /**
+     * Reativa lote arquivado. Re-deriva status ternaria (decisao 1.7).
+     * Audit {@code REAGENT_LOT_UNARCHIVED}.
+     */
+    @PostMapping("/{id}/unarchive")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    public ResponseEntity<ReagentLotResponse> unarchiveLot(
+        @PathVariable UUID id,
+        @RequestBody(required = false) UnarchiveReagentLotRequest request
+    ) {
+        return ResponseEntity.ok(
+            ResponseMapper.toReagentLotResponse(reagentService.unarchiveLot(id, request))
+        );
     }
 
     @GetMapping("/{id}/movements")
@@ -103,28 +142,16 @@ public class ReagentController {
         return ResponseEntity.ok(reagentService.getExpiringLots(days).stream().map(ResponseMapper::toReagentLotResponse).toList());
     }
 
-    /**
-     * Endpoint canonico do refator-v2: resumo agregado por etiqueta. Substitui
-     * {@code /api/reagents/tags} no contrato externo.
-     */
     @GetMapping("/labels")
     public ResponseEntity<List<ReagentLabelSummary>> getLabelSummaries() {
         return ResponseEntity.ok(reagentService.getLabelSummaries());
     }
 
     /**
-     * Alias deprecated do endpoint canonico {@code /api/reagents/labels}. Mantido por
-     * uma janela curta para nao quebrar integradores externos. Frontend ja consome
-     * {@code /labels}. Removido em PR-4.
+     * CSV export v3 — header novo:
+     * {@code Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Em Estoque,
+     * Em Uso,Total,Status,Localizacao,Temperatura,Arquivado em,Arquivado por}.
      */
-    @GetMapping("/tags")
-    public ResponseEntity<List<ReagentTagSummary>> getTagSummaries() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.add("Deprecation", "true");
-        headers.add("Link", "</api/reagents/labels>; rel=\"successor-version\"");
-        return ResponseEntity.ok().headers(headers).body(reagentService.getTagSummaries());
-    }
-
     @GetMapping("/export/csv")
     public ResponseEntity<byte[]> exportCsv(
         @RequestParam(required = false) String category,
@@ -132,9 +159,7 @@ public class ReagentController {
     ) {
         List<ReagentLotResponse> lots = reagentService.getLots(category, status);
         StringBuilder csv = new StringBuilder();
-        // Header canonico refator-v2 (decisao 1.5):
-        // Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Estoque Atual,Status,Localizacao,Temperatura
-        csv.append("Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Estoque Atual,Status,Localizacao,Temperatura\n");
+        csv.append("Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Em Estoque,Em Uso,Total,Status,Localizacao,Temperatura,Arquivado em,Arquivado por\n");
         for (ReagentLotResponse lot : lots) {
             csv.append(escapeCsv(lot.label())).append(",");
             csv.append(escapeCsv(lot.lotNumber())).append(",");
@@ -142,15 +167,30 @@ public class ReagentController {
             csv.append(escapeCsv(lot.category())).append(",");
             csv.append(lot.expiryDate() != null ? lot.expiryDate() : "").append(",");
             csv.append(lot.daysLeft()).append(",");
-            csv.append(lot.currentStock() != null ? lot.currentStock() : 0).append(",");
-            csv.append(escapeCsv(lot.status())).append(",");
+            csv.append(lot.unitsInStock() != null ? lot.unitsInStock() : 0).append(",");
+            csv.append(lot.unitsInUse() != null ? lot.unitsInUse() : 0).append(",");
+            csv.append(lot.totalUnits() != null ? lot.totalUnits() : 0).append(",");
+            csv.append(escapeCsv(humanStatus(lot.status()))).append(",");
             csv.append(escapeCsv(lot.location())).append(",");
-            csv.append(escapeCsv(lot.storageTemp())).append("\n");
+            csv.append(escapeCsv(lot.storageTemp())).append(",");
+            csv.append(lot.archivedAt() != null ? lot.archivedAt() : "").append(",");
+            csv.append(escapeCsv(lot.archivedBy())).append("\n");
         }
         return ResponseEntity.ok()
             .header("Content-Disposition", "attachment; filename=reagentes.csv")
             .header("Content-Type", "text/csv; charset=UTF-8")
             .body(csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private String humanStatus(String status) {
+        if (status == null) return "";
+        return switch (status) {
+            case "em_estoque" -> "Em estoque";
+            case "em_uso" -> "Em uso";
+            case "vencido" -> "Vencido";
+            case "inativo" -> "Inativo";
+            default -> status;
+        };
     }
 
     private String escapeCsv(String value) {

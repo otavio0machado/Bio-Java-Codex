@@ -6,12 +6,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Schema do contrato HTTP do lote de reagente apos refator v2.
+ * Schema do contrato HTTP do lote de reagente apos refator v3.
  *
- * <p>{@code label} substitui o antigo {@code name}. Saem do response: {@code quantityValue},
- * {@code stockUnit}, {@code estimatedConsumption}, {@code startDate}, {@code endDate},
- * {@code alertThresholdDays}, {@code stockPct}, {@code daysToRupture} (campos derivados
- * que perdiam sentido sem {@code quantityValue}/{@code estimatedConsumption}).</p>
+ * <p>{@code label} substitui o antigo {@code name}. Saem do response (refator v2):
+ * {@code quantityValue}, {@code stockUnit}, {@code estimatedConsumption}, {@code startDate},
+ * {@code endDate}, {@code alertThresholdDays}, {@code stockPct}, {@code daysToRupture}.</p>
+ *
+ * <p>Mudancas v3:</p>
+ * <ul>
+ *   <li>DROP {@code currentStock: Double}.</li>
+ *   <li>ADD {@code unitsInStock}, {@code unitsInUse}, {@code totalUnits} (derivado).</li>
+ *   <li>ADD {@code archivedAt}, {@code archivedBy}, {@code needsStockReview}.</li>
+ * </ul>
  */
 public record ReagentLotResponse(
     UUID id,
@@ -20,7 +26,9 @@ public record ReagentLotResponse(
     String manufacturer,
     String category,
     LocalDate expiryDate,
-    Double currentStock,
+    Integer unitsInStock,
+    Integer unitsInUse,
+    Integer totalUnits,
     String storageTemp,
     String status,
     Instant createdAt,
@@ -31,6 +39,9 @@ public record ReagentLotResponse(
     String supplier,
     LocalDate receivedDate,
     LocalDate openedDate,
+    LocalDate archivedAt,
+    String archivedBy,
+    boolean needsStockReview,
     /**
      * Flag derivada: true quando o lote (match por lotNumber) apareceu em pelo menos
      * um registro de CQ nos ultimos 30 dias. Permite que o frontend destaque lotes
@@ -44,9 +55,8 @@ public record ReagentLotResponse(
     boolean traceabilityComplete,
     List<String> traceabilityIssues,
     /**
-     * Politica de movimentacao derivada do estado do lote. Lote {@code vencido} nao
-     * aceita {@code ENTRADA}. Os demais aceitam — {@code fora_de_estoque} retorna a
-     * {@code em_uso} via derivacao apos a entrada.
+     * Politica de movimentacao derivada do estado do lote. Lote {@code vencido} e
+     * {@code inativo} nao aceitam {@code ENTRADA}. {@code inativo} permite apenas {@code AJUSTE}.
      */
     boolean canReceiveEntry,
     List<String> allowedMovementTypes,

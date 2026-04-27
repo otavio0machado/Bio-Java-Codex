@@ -3,15 +3,15 @@ package com.biodiagnostico.dto.response;
 /**
  * Resumo agregado de lotes por etiqueta ({@code label}).
  *
- * Substitui {@link ReagentTagSummary} no contrato externo. {@code ReagentTagSummary} ainda
- * existe para servir o endpoint {@code /api/reagents/tags} marcado como deprecated.
+ * <p>Refator v3: campo {@code foraDeEstoque} renomeado para {@code inativos} no contrato
+ * (espelha drop de status {@code fora_de_estoque} e add de {@code inativo}).</p>
  */
 public record ReagentLabelSummary(
     String label,
     long total,
     long emEstoque,
     long emUso,
-    long foraDeEstoque,
+    long inativos,
     long vencidos
 ) {
 }

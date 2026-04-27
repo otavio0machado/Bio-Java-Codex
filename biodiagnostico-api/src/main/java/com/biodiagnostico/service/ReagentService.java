@@ -1,26 +1,34 @@
 package com.biodiagnostico.service;
 
+import com.biodiagnostico.dto.request.ArchiveReagentLotRequest;
+import com.biodiagnostico.dto.request.DeleteReagentLotRequest;
 import com.biodiagnostico.dto.request.ReagentLotRequest;
 import com.biodiagnostico.dto.request.StockMovementRequest;
+import com.biodiagnostico.dto.request.UnarchiveReagentLotRequest;
 import com.biodiagnostico.dto.response.ReagentLabelSummary;
 import com.biodiagnostico.dto.response.ReagentLotResponse;
-import com.biodiagnostico.dto.response.ReagentTagSummary;
+import com.biodiagnostico.dto.response.ResponsibleSummary;
 import com.biodiagnostico.entity.MovementReason;
 import com.biodiagnostico.entity.MovementType;
 import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.ReagentStatus;
+import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.entity.StockMovement;
+import com.biodiagnostico.entity.User;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.StockMovementRepository;
-import com.biodiagnostico.util.NumericUtils;
+import com.biodiagnostico.repository.UserRepository;
 import com.biodiagnostico.util.ResponseMapper;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -34,8 +42,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ReagentService {
 
-    private static final String PREVIOUS_STOCK_PREFIX = "PREVIOUS_STOCK=";
-
     /** Janela para considerar um lote "ativo em CQ" (rastreabilidade Fase 3). */
     private static final int QC_ACTIVE_WINDOW_DAYS = 30;
 
@@ -45,11 +51,6 @@ public class ReagentService {
      * <p>MUST mirror {@code biodiagnostico-web/src/components/proin/reagentes/constants.ts}
      * (CATEGORIES). Drift entre as duas listas quebra cadastro com 400. Se mudar aqui,
      * mude la — e tambem em {@link com.biodiagnostico.service.reports.v2.catalog.ReportDefinitionRegistry#REAGENT_CATEGORIES}.
-     *
-     * <p>Origem da decisao: refator-reagentes-v2 G-01 (qa-review). Fonte canonica = frontend
-     * porque (a) preserva dados historicos no banco ({@code storage_temp} VARCHAR ja contem
-     * estes literais), (b) UI e a interface humana e (c) alinhar reverse e mudanca contida.
-     * Ordem preservada para casamento literal com o dropdown.
      */
     static final List<String> ALLOWED_CATEGORIES = List.of(
         "Bioquímica",
@@ -66,12 +67,6 @@ public class ReagentService {
 
     /**
      * Lista canonica de temperaturas de armazenamento.
-     *
-     * <p>MUST mirror {@code biodiagnostico-web/src/components/proin/reagentes/constants.ts}
-     * (TEMPS). Strings com sufixo {@code °C} e parenteses sao a forma legivel para o
-     * usuario do laboratorio e ja sao o formato persistido. Drift quebra cadastro com 400.
-     *
-     * <p>Origem da decisao: refator-reagentes-v2 G-02 (qa-review).
      */
     static final List<String> ALLOWED_STORAGE_TEMPS = List.of(
         "2-8°C",
@@ -80,46 +75,64 @@ public class ReagentService {
         "-80°C"
     );
 
-    // Acoes de auditoria (regulatorio ANVISA RDC 302 / ISO 15189). Transicoes automaticas
-    // de status sao registradas em audit_log para rastreabilidade externa. Chamadas
-    // diretas deste service a AuditService cobrem mudancas originadas em fluxos
-    // operacionais (create/update/move); o scheduler registra suas proprias transicoes
-    // em trigger="scheduler".
+    /** Roles elegiveis a serem responsavel por movimento/arquivamento (decisao 1.5). */
+    public static final Set<Role> RESPONSIBLE_ROLES = Set.of(Role.ADMIN, Role.FUNCIONARIO);
+
+    // Acoes de auditoria — refator v3.
     public static final String AUDIT_ACTION_STATUS_DERIVED = "REAGENT_STATUS_DERIVED";
     public static final String AUDIT_ACTION_MOVEMENT_BLOCKED = "REAGENT_MOVEMENT_BLOCKED";
     public static final String AUDIT_ACTION_LOT_ARCHIVED = "REAGENT_LOT_ARCHIVED";
+    public static final String AUDIT_ACTION_LOT_UNARCHIVED = "REAGENT_LOT_UNARCHIVED";
+    public static final String AUDIT_ACTION_LOT_DELETED = "REAGENT_LOT_DELETED";
     public static final String AUDIT_ACTION_DELETE_BLOCKED = "REAGENT_DELETE_BLOCKED";
+
     /**
-     * Action distinta para backfill administrativo de {@code openedDate} (audit ressalva 1.7).
+     * Action distinta para backfill administrativo de {@code openedDate} (audit ressalva 1.7 v2).
      *
-     * <p>Disparada quando {@link #applyOpenedDateOnUseTransition} grava {@code openedDate=today}
-     * em um fluxo de UPDATE administrativo (admin marcou {@code em_uso} sem informar a
-     * data de abertura). Para CREATE e movimentos (ENTRADA em {@code fora_de_estoque}, etc),
-     * o backfill ocorre dentro do mesmo audit {@code REAGENT_STATUS_DERIVED} — apenas em
-     * UPDATE pedimos action separada para o auditor distinguir abertura natural vs
-     * preenchimento administrativo (RDC 302 art. 60).</p>
+     * <p>v3: PRESERVADA. Disparada SOMENTE em {@code updateLot} administrativo
+     * (admin marcou {@code em_uso} sem informar a data de abertura). Compatibilidade
+     * com audit_log historico v2 — auditor externo continua filtrando por este nome.</p>
      */
     public static final String AUDIT_ACTION_OPENED_DATE_BACKFILLED = "REAGENT_OPENED_DATE_BACKFILLED";
+
+    /**
+     * v3: nova action distinta para gravar {@code openedDate=today} quando
+     * {@code ABERTURA} dispara em lote com {@code openedDate=null} (primeira abertura).
+     *
+     * <p>Action separada por orchestrator: ABERTURA (movimento operacional) e
+     * semanticamente diferente do backfill administrativo do v2. Os dois nomes coexistem
+     * no audit_log para separar trigger natural (movement) de UPDATE administrativo.</p>
+     */
+    public static final String AUDIT_ACTION_OPENED_DATE_DERIVED = "REAGENT_OPENED_DATE_DERIVED";
 
     public static final String AUDIT_TRIGGER_CREATE_LOT = "createLot";
     public static final String AUDIT_TRIGGER_UPDATE_LOT = "updateLot";
     public static final String AUDIT_TRIGGER_MOVEMENT = "movement";
     public static final String AUDIT_TRIGGER_SCHEDULER = "scheduler";
+    public static final String AUDIT_TRIGGER_ABERTURA = "abertura";
+    public static final String AUDIT_TRIGGER_FECHAMENTO = "fechamento";
+    public static final String AUDIT_TRIGGER_CONSUMO = "consumo";
+    public static final String AUDIT_TRIGGER_ENTRADA = "entrada";
+    public static final String AUDIT_TRIGGER_AJUSTE = "ajuste";
+    public static final String AUDIT_TRIGGER_UNARCHIVE = "unarchive";
 
     private final ReagentLotRepository reagentLotRepository;
     private final StockMovementRepository stockMovementRepository;
     private final QcRecordRepository qcRecordRepository;
+    private final UserRepository userRepository;
     private final AuditService auditService;
 
     public ReagentService(
         ReagentLotRepository reagentLotRepository,
         StockMovementRepository stockMovementRepository,
         QcRecordRepository qcRecordRepository,
+        UserRepository userRepository,
         AuditService auditService
     ) {
         this.reagentLotRepository = reagentLotRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.qcRecordRepository = qcRecordRepository;
+        this.userRepository = userRepository;
         this.auditService = auditService;
     }
 
@@ -128,19 +141,14 @@ public class ReagentService {
         String normalizedCategory = (category == null || category.isBlank()) ? null : category;
         String normalizedStatus = (status == null || status.isBlank()) ? null : ReagentStatus.normalize(status);
         if (normalizedStatus != null && !ReagentStatus.isValid(normalizedStatus)) {
-            // Defesa anti-status-legado (contrato 4.3): rejeita explicitamente valores antigos
-            // para que clientes desatualizados aprendam o novo dominio.
+            // Defesa anti-status-legado v2/v3: rejeita explicitamente valores antigos.
             throw new BusinessException(
                 "Status legado nao suportado. Use: " + ReagentStatus.humanList());
         }
 
         List<ReagentLot> lots = reagentLotRepository.findByFilters(normalizedCategory, normalizedStatus);
 
-        // Descobre quais lotes apareceram em CQ recente em uma unica query.
         Set<String> activeInQc = lotNumbersUsedInQcRecently(lots);
-        // QcRecord guarda apenas lotNumber (sem manufacturer). Se dois ReagentLot
-        // compartilham o mesmo lotNumber (fabricantes distintos), a flag usedInQcRecently
-        // ficaria ambigua. Politica conservadora: nao marcar nenhum dos lotes em colisao.
         Set<String> ambiguousLotNumbers = lotNumbersWithCollision(lots);
 
         return lots.stream()
@@ -154,11 +162,6 @@ public class ReagentService {
             .toList();
     }
 
-    /**
-     * Consulta em batch quais dos {@code lotNumber} fornecidos aparecem em registros
-     * de CQ nos ultimos {@link #QC_ACTIVE_WINDOW_DAYS} dias. Retorna o conjunto em
-     * minusculas para match case-insensitive.
-     */
     private Set<String> lotNumbersUsedInQcRecently(List<ReagentLot> lots) {
         Set<String> lotNumbersLower = lots.stream()
             .map(ReagentLot::getLotNumber)
@@ -173,13 +176,8 @@ public class ReagentService {
         return new HashSet<>(qcRecordRepository.findActiveLotNumbersSince(lotNumbersLower, since));
     }
 
-    /**
-     * Retorna o conjunto (lowercase) de lotNumbers que aparecem em mais de um
-     * ReagentLot da lista — ou seja, lotes cujo lotNumber colide com outro
-     * fabricante. Usado para calibrar a flag {@code usedInQcRecently}.
-     */
     private Set<String> lotNumbersWithCollision(List<ReagentLot> lots) {
-        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        Map<String, Integer> counts = new HashMap<>();
         for (ReagentLot lot : lots) {
             String ln = lot.getLotNumber();
             if (ln == null || ln.isBlank()) continue;
@@ -198,42 +196,40 @@ public class ReagentService {
     public ReagentLot createLot(ReagentLotRequest request) {
         validateLotDates(request);
         validateCategoryAndTemp(request);
-        // Pre-check de unicidade (lotNumber, manufacturer) simetrico ao updateLot.
+        validateStatusForCreateOrUpdate(request.status());
         if (!reagentLotRepository
                 .findByLotNumberAndManufacturer(request.lotNumber(), request.manufacturer())
                 .isEmpty()) {
             throw new BusinessException("Já existe um lote com este número e fabricante");
         }
         String status = resolveStatus(request.status(), ReagentStatus.EM_ESTOQUE);
-        // Trim defensivo na label antes de salvar — protege contra capitalizacao acidental
-        // ("  Glicose  " vs "Glicose"). Frontend ja faz mas backend nao confia.
         String label = request.label() == null ? null : request.label().trim();
+        Integer unitsInStock = request.unitsInStock() == null ? 0 : request.unitsInStock();
+        Integer unitsInUse = request.unitsInUse() == null ? 0 : request.unitsInUse();
         ReagentLot lot = ReagentLot.builder()
             .name(label)
             .lotNumber(request.lotNumber())
             .manufacturer(request.manufacturer())
             .category(request.category())
             .expiryDate(request.expiryDate())
-            .currentStock(NumericUtils.defaultIfNull(request.currentStock()))
+            .unitsInStock(unitsInStock)
+            .unitsInUse(unitsInUse)
             .storageTemp(request.storageTemp())
             .status(status)
             .location(request.location())
             .supplier(request.supplier())
             .receivedDate(request.receivedDate())
             .openedDate(request.openedDate())
+            .needsStockReview(false)
             .build();
-        // Forcing rule (contrato 4.1): expiry < hoje sempre reclassifica para vencido,
-        // ignorando o status do request. Aplicado ANTES de applyDerivedStatus para que
-        // a auditoria registre a transicao "tentativa do usuario" -> "vencido".
+        // Forcing rule (heranca v2): expiry < hoje sempre forca vencido.
         LocalDate today = LocalDate.now();
         if (request.expiryDate() != null && request.expiryDate().isBefore(today)) {
             lot.setStatus(ReagentStatus.VENCIDO);
         } else if (ReagentStatus.EM_USO.equals(status) && lot.getOpenedDate() == null) {
-            // Decisao 1.7: cadastro com em_uso sem openedDate forca openedDate=today.
+            // Cadastro com em_uso sem openedDate forca openedDate=today (heranca v2).
             lot.setOpenedDate(today);
         }
-        // Derivacao automatica converge o status final com o estado real do lote (estoque,
-        // validade, abertura). Se cliente pediu em_estoque com estoque=0, vira fora_de_estoque.
         applyDerivedStatus(lot, today, AUDIT_TRIGGER_CREATE_LOT);
         try {
             return reagentLotRepository.save(lot);
@@ -248,7 +244,13 @@ public class ReagentService {
             .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
         validateLotDates(request);
         validateCategoryAndTemp(request);
-        // Reverifica unicidade (lotNumber, manufacturer) antes de salvar.
+        validateStatusForCreateOrUpdate(request.status());
+        // Lote inativo nao pode ser editado diretamente (forca uso de unarchive).
+        if (ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            throw new BusinessException(
+                "Lote arquivado nao pode ser editado diretamente — reative com POST /unarchive");
+        }
+        // Reverifica unicidade (lotNumber, manufacturer).
         List<ReagentLot> conflicts = reagentLotRepository.findByLotNumberAndManufacturer(
             request.lotNumber(), request.manufacturer());
         boolean conflict = conflicts.stream().anyMatch(other -> !other.getId().equals(id));
@@ -262,32 +264,25 @@ public class ReagentService {
         lot.setManufacturer(request.manufacturer());
         lot.setCategory(request.category());
         lot.setExpiryDate(request.expiryDate());
-        lot.setCurrentStock(NumericUtils.defaultIfNull(request.currentStock()));
+        lot.setUnitsInStock(request.unitsInStock() == null ? 0 : request.unitsInStock());
+        lot.setUnitsInUse(request.unitsInUse() == null ? 0 : request.unitsInUse());
         lot.setStorageTemp(request.storageTemp());
         if (request.status() != null && !request.status().isBlank()) {
             lot.setStatus(resolveStatus(request.status(), lot.getStatus()));
         }
-        // Decisao 1.7 (reciproca): nunca apaga openedDate no UPDATE. "Aberto" e historico forte.
-        // Atualiza openedDate apenas se o request enviar valor explicito (incluindo null que
-        // o usuario quis manter — interpretamos como "nao tocar" se nulo, sobrepor se nao-nulo).
-        // Logica defensiva: se request trouxer openedDate nao-nulo, atualiza.
         if (request.openedDate() != null) {
             lot.setOpenedDate(request.openedDate());
         }
-        // Campos opcionais — aceitam override explicito (incluindo null para limpar).
         lot.setLocation(request.location());
         lot.setSupplier(request.supplier());
         lot.setReceivedDate(request.receivedDate());
-        // Forcing rule: expiry < hoje sempre reclassifica para vencido (mesmo em UPDATE).
         LocalDate today = LocalDate.now();
         if (request.expiryDate() != null && request.expiryDate().isBefore(today)) {
             lot.setStatus(ReagentStatus.VENCIDO);
         } else {
-            // Backfill administrativo: admin pediu em_uso e o lote nao tem openedDate.
-            // Audit ressalva 1.7 — usa action distinta para UPDATE administrativo.
+            // Backfill administrativo: emite REAGENT_OPENED_DATE_BACKFILLED se admin pediu em_uso.
             applyOpenedDateOnUseTransition(lot, today, AUDIT_TRIGGER_UPDATE_LOT);
         }
-        // Derivacao automatica converge.
         applyDerivedStatus(lot, today, AUDIT_TRIGGER_UPDATE_LOT);
         try {
             return reagentLotRepository.save(lot);
@@ -296,43 +291,240 @@ public class ReagentService {
         }
     }
 
+    /**
+     * Hard delete v3: cascade de stock_movements via JPA, ADMIN-only via controller,
+     * confirmacao por digitacao do {@code lotNumber}, audit
+     * {@code REAGENT_LOT_DELETED} com snapshot enumerativo (audit ressalva 1.2 / H).
+     */
     @Transactional
-    public void deleteLot(UUID id) {
+    public void deleteLot(UUID id, DeleteReagentLotRequest request) {
         ReagentLot lot = reagentLotRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
 
-        boolean hasStockMovements = stockMovementRepository.existsByReagentLotId(id);
-        boolean usedInQc = hasOperationalQcUsage(lot);
-        if (!hasStockMovements && !usedInQc) {
-            reagentLotRepository.deleteById(id);
-            return;
+        if (request == null || request.confirmLotNumber() == null) {
+            throw new BusinessException("Confirmacao do lote (confirmLotNumber) e obrigatoria");
+        }
+        String confirmed = request.confirmLotNumber().trim();
+        String stored = lot.getLotNumber() == null ? "" : lot.getLotNumber().trim();
+        if (!confirmed.equals(stored)) {
+            throw new BusinessException("Confirmacao do lote nao confere");
         }
 
-        double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
-        if (currentStock > 0) {
+        boolean usedInQc = hasOperationalQcUsage(lot);
+        if (usedInQc) {
+            // Bloqueio v3 — protege historico ANVISA (audit ressalva 1.2).
             Map<String, Object> details = new HashMap<>();
-            details.put("reason", "historico_ou_cq_com_estoque");
-            details.put("currentStock", String.valueOf(currentStock));
-            details.put("hasStockMovements", hasStockMovements);
-            details.put("usedInQc", usedInQc);
+            details.put("reason", "used_in_qc_recently");
+            details.put("lotNumber", lot.getLotNumber());
             auditService.log(AUDIT_ACTION_DELETE_BLOCKED, "ReagentLot", lot.getId(), details);
             throw new BusinessException(
-                "Lote com histórico ou uso em CQ não pode ser removido com estoque atual. Zere o estoque antes de arquivar.");
+                "Lote utilizado em CQ recente nao pode ser apagado. Use POST /archive em vez disso.");
         }
 
-        // Arquivamento logico — refator-v2 substitui o antigo INATIVO por FORA_DE_ESTOQUE
-        // como destino terminal. Compliance preservada (mesma action, novo to-status).
-        if (!ReagentStatus.FORA_DE_ESTOQUE.equals(lot.getStatus())) {
-            String oldStatus = lot.getStatus();
-            lot.setStatus(ReagentStatus.FORA_DE_ESTOQUE);
-            reagentLotRepository.save(lot);
-            Map<String, Object> details = new HashMap<>();
-            details.put("from", oldStatus);
-            details.put("to", ReagentStatus.FORA_DE_ESTOQUE);
-            details.put("hasStockMovements", hasStockMovements);
-            details.put("usedInQc", usedInQc);
-            auditService.log(AUDIT_ACTION_LOT_ARCHIVED, "ReagentLot", lot.getId(), details);
+        // Snapshot enumerativo de movimentos ANTES do delete fisico (audit ressalva 1.2).
+        // audit_log.details e tipo `json` (nao `jsonb`) — Map preserva shape.
+        List<StockMovement> movements = stockMovementRepository
+            .findByReagentLotIdOrderByCreatedAtDesc(id);
+        long movementsCount = movements.size();
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("lot", buildLotSnapshot(lot));
+        snapshot.put("movements", movements.stream()
+            .map(this::buildMovementSnapshot)
+            .toList());
+        snapshot.put("movementsCount", movementsCount);
+        snapshot.put("deletedBy", currentUsernameOrNull());
+        snapshot.put("deletedAt", Instant.now().toString());
+
+        // Audit ANTES do delete fisico (audit_log nao tem FK em reagent_lots — sobrevive).
+        auditService.log(AUDIT_ACTION_LOT_DELETED, "ReagentLot", lot.getId(), snapshot);
+
+        // Cascade JPA ALL + orphanRemoval=true cobre stock_movements (FK SQL nao tem
+        // ON DELETE CASCADE, mas JPA garante via ReagentLot.movements).
+        reagentLotRepository.deleteById(id);
+    }
+
+    private Map<String, Object> buildLotSnapshot(ReagentLot lot) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", lot.getId() != null ? lot.getId().toString() : null);
+        data.put("label", lot.getName());
+        data.put("lotNumber", lot.getLotNumber());
+        data.put("manufacturer", lot.getManufacturer());
+        data.put("category", lot.getCategory());
+        data.put("expiryDate", lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null);
+        data.put("status", lot.getStatus());
+        data.put("unitsInStock", lot.getUnitsInStock());
+        data.put("unitsInUse", lot.getUnitsInUse());
+        data.put("archivedAt", lot.getArchivedAt() != null ? lot.getArchivedAt().toString() : null);
+        data.put("archivedBy", lot.getArchivedBy());
+        data.put("needsStockReview", Boolean.TRUE.equals(lot.getNeedsStockReview()));
+        data.put("location", lot.getLocation());
+        data.put("supplier", lot.getSupplier());
+        data.put("receivedDate", lot.getReceivedDate() != null ? lot.getReceivedDate().toString() : null);
+        data.put("openedDate", lot.getOpenedDate() != null ? lot.getOpenedDate().toString() : null);
+        data.put("storageTemp", lot.getStorageTemp());
+        return data;
+    }
+
+    private Map<String, Object> buildMovementSnapshot(StockMovement m) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", m.getId() != null ? m.getId().toString() : null);
+        data.put("type", m.getType());
+        data.put("quantity", m.getQuantity());
+        data.put("responsible", m.getResponsible());
+        data.put("reason", m.getReason());
+        data.put("notes", m.getNotes());
+        data.put("previousStock", m.getPreviousStock());
+        data.put("previousUnitsInStock", m.getPreviousUnitsInStock());
+        data.put("previousUnitsInUse", m.getPreviousUnitsInUse());
+        data.put("createdAt", m.getCreatedAt() != null ? m.getCreatedAt().toString() : null);
+        return data;
+    }
+
+    private String currentUsernameOrNull() {
+        try {
+            var auth = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication();
+            if (auth == null) return null;
+            return auth.getName();
+        } catch (Exception e) {
+            return null;
         }
+    }
+
+    /**
+     * Arquiva o lote (status='inativo'). Permissao do controller: ADMIN ou FUNCIONARIO.
+     *
+     * <p>Validacoes:</p>
+     * <ul>
+     *   <li>Lote ja {@code inativo} → 400.</li>
+     *   <li>{@code archivedAt &gt; today} → 400.</li>
+     *   <li>{@code archivedBy} deve existir em users ativos com role elegivel
+     *       (filtra por <strong>username</strong>, audit ressalva 1.1).</li>
+     * </ul>
+     */
+    @Transactional
+    public ReagentLot archiveLot(UUID id, ArchiveReagentLotRequest request) {
+        ReagentLot lot = reagentLotRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
+
+        if (ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            throw new BusinessException(
+                "Lote ja arquivado em " + (lot.getArchivedAt() != null ? lot.getArchivedAt() : "data nao registrada"));
+        }
+        LocalDate today = LocalDate.now();
+        if (request.archivedAt().isAfter(today)) {
+            throw new BusinessException("archivedAt nao pode ser data futura");
+        }
+        String username = request.archivedBy() == null ? "" : request.archivedBy().trim();
+        if (username.isEmpty()) {
+            throw new BusinessException("archivedBy obrigatorio");
+        }
+        // Auditor 1.1 — match estavel por USERNAME, NAO name.
+        if (!userRepository.existsActiveResponsibleByUsername(username, RESPONSIBLE_ROLES)) {
+            throw new BusinessException(
+                "Responsavel '" + username + "' nao encontrado ou inativo");
+        }
+
+        String fromStatus = lot.getStatus();
+        Integer unitsInStockAtArchive = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        Integer unitsInUseAtArchive = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setArchivedAt(request.archivedAt());
+        lot.setArchivedBy(username);
+        lot.setNeedsStockReview(false); // ato de arquivar resolve revisao pendente
+        ReagentLot saved = reagentLotRepository.save(lot);
+
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("archivedAt", request.archivedAt().toString());
+        details.put("archivedBy", username);
+        details.put("fromStatus", fromStatus);
+        details.put("toStatus", ReagentStatus.INATIVO);
+        details.put("unitsInStockAtArchive", unitsInStockAtArchive);
+        details.put("unitsInUseAtArchive", unitsInUseAtArchive);
+        details.put("expiryDate", lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null);
+        auditService.log(AUDIT_ACTION_LOT_ARCHIVED, "ReagentLot", lot.getId(), details);
+
+        return saved;
+    }
+
+    /**
+     * Reativa lote inativo. Re-aplica regra ternaria (decisao 1.7). archivedAt/archivedBy
+     * PRESERVADOS para historico imutavel.
+     */
+    @Transactional
+    public ReagentLot unarchiveLot(UUID id, UnarchiveReagentLotRequest request) {
+        ReagentLot lot = reagentLotRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
+
+        if (!ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            throw new BusinessException("Lote nao esta arquivado");
+        }
+        String fromStatus = ReagentStatus.INATIVO;
+        LocalDate today = LocalDate.now();
+        // Re-deriva sem confiar em deriveStatus (que tem early-return em inativo).
+        String derived = deriveStatusForUnarchive(lot, today);
+        lot.setStatus(derived);
+        // archivedAt e archivedBy PRESERVADOS — nao zera (historico imutavel).
+        ReagentLot saved = reagentLotRepository.save(lot);
+
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", request != null ? request.reason() : null);
+        details.put("fromStatus", fromStatus);
+        details.put("toStatus", derived);
+        details.put("archivedAtPreserved", lot.getArchivedAt() != null ? lot.getArchivedAt().toString() : null);
+        details.put("archivedByPreserved", lot.getArchivedBy());
+        details.put("unitsInStock", lot.getUnitsInStock());
+        details.put("unitsInUse", lot.getUnitsInUse());
+        details.put("expiryDate", lot.getExpiryDate() != null ? lot.getExpiryDate().toString() : null);
+        details.put("trigger", AUDIT_TRIGGER_UNARCHIVE);
+        auditService.log(AUDIT_ACTION_LOT_UNARCHIVED, "ReagentLot", lot.getId(), details);
+
+        return saved;
+    }
+
+    /**
+     * Re-derivacao explicita usada por unarchive (decisao 1.7). Aplica regra ternaria
+     * sem early-return de inativo:
+     * <ol>
+     *   <li>expiry &lt; today → vencido</li>
+     *   <li>unitsInUse &gt; 0 → em_uso</li>
+     *   <li>unitsInStock &gt; 0 → em_estoque</li>
+     *   <li>zero/zero → em_estoque (estoque zero deixou de ser terminal automatico)</li>
+     * </ol>
+     */
+    private String deriveStatusForUnarchive(ReagentLot lot, LocalDate today) {
+        LocalDate expiry = lot.getExpiryDate();
+        if (expiry != null && expiry.isBefore(today)) {
+            return ReagentStatus.VENCIDO;
+        }
+        int inUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+        if (inUse > 0) {
+            return ReagentStatus.EM_USO;
+        }
+        // unitsInStock > 0 OU zero/zero — em_estoque em ambos os casos
+        return ReagentStatus.EM_ESTOQUE;
+    }
+
+    /**
+     * Lista usuarios elegiveis a serem responsavel por movimento/arquivamento.
+     * Endpoint expoe via {@code GET /api/users/responsibles}.
+     */
+    @Transactional(readOnly = true)
+    public List<ResponsibleSummary> getResponsibles() {
+        return userRepository.findActiveResponsibles(RESPONSIBLE_ROLES).stream()
+            .map(this::toResponsibleSummary)
+            .toList();
+    }
+
+    private ResponsibleSummary toResponsibleSummary(User user) {
+        return new ResponsibleSummary(
+            user.getId(),
+            user.getName(),
+            user.getUsername(),
+            user.getRole() != null ? user.getRole().name() : null
+        );
     }
 
     private boolean hasOperationalQcUsage(ReagentLot lot) {
@@ -347,127 +539,259 @@ public class ReagentService {
         return stockMovementRepository.findByReagentLotIdOrderByCreatedAtDesc(lotId);
     }
 
+    /**
+     * Cria movimento de estoque com regras v3 (5 tipos de escrita).
+     * Bloqueios por status seguem matriz do contrato 5.7.
+     */
     @Transactional
     public StockMovement createMovement(UUID lotId, StockMovementRequest request) {
         ReagentLot lot = reagentLotRepository.findById(lotId)
             .orElseThrow(() -> new ResourceNotFoundException("Lote de reagente não encontrado"));
 
         String type = MovementType.normalize(request.type());
-        if (!MovementType.isValid(type)) {
+        if (MovementType.SAIDA.equals(type)) {
             throw new BusinessException(
-                "Tipo de movimentação inválido. Valores aceitos: " + MovementType.humanList());
+                "Tipo SAIDA descontinuado em v3. Use CONSUMO para registrar uso/descarte ou AJUSTE para correcao de inventario.");
+        }
+        if (!MovementType.isValidWrite(type)) {
+            throw new BusinessException(
+                "Tipo de movimentação inválido. Valores aceitos: " + MovementType.humanListWrite());
         }
 
-        // Bloqueio canonico (decisao 1.8): apenas vencido nao recebe ENTRADA. fora_de_estoque
-        // ACEITA ENTRADA — esse e o ponto: a entrada retorna o lote para em_uso via derivacao.
-        if (ReagentStatus.VENCIDO.equals(lot.getStatus()) && MovementType.ENTRADA.equals(type)) {
-            // Audit ressalva regulatoria (RDC 302 art. 49): tentativa de reaproveitar lote
-            // vencido deve ficar registrada para auditoria externa.
-            Map<String, Object> blockedDetails = new HashMap<>();
-            blockedDetails.put("reason", "lote_vencido");
-            blockedDetails.put("movementType", MovementType.ENTRADA);
-            auditService.log(
-                AUDIT_ACTION_MOVEMENT_BLOCKED,
-                "ReagentLot",
-                lot.getId(),
-                blockedDetails
-            );
+        Integer prevStock = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        Integer prevUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+        double quantity = request.quantity() == null ? 0D : request.quantity();
+        String currentStatus = lot.getStatus();
+
+        // Quantity unitario obrigatorio em ABERTURA/FECHAMENTO (audit ressalva E).
+        if ((MovementType.ABERTURA.equals(type) || MovementType.FECHAMENTO.equals(type))
+            && Double.compare(quantity, 1D) != 0) {
             throw new BusinessException(
-                "Lote vencido nao aceita nova entrada. Crie um novo lote.");
+                "ABERTURA e FECHAMENTO operam unitariamente (quantity=1 implícito). Recebido: " + quantity + ".");
         }
 
-        double quantity = NumericUtils.defaultIfNull(request.quantity());
-        double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
-        double nextStock;
+        String reason = MovementReason.normalize(request.reason());
+        String trigger;
 
         switch (type) {
-            case MovementType.ENTRADA -> nextStock = currentStock + quantity;
-            case MovementType.SAIDA -> {
-                if (currentStock - quantity < 0) {
+            case MovementType.ENTRADA -> {
+                if (ReagentStatus.INATIVO.equals(currentStatus)
+                    || ReagentStatus.VENCIDO.equals(currentStatus)) {
+                    auditMovementBlocked(lot, type, currentStatus);
                     throw new BusinessException(
-                        "Estoque insuficiente para esta saída. Estoque atual: " + currentStock);
+                        "Lote " + currentStatus + " nao aceita ENTRADA.");
                 }
-                nextStock = currentStock - quantity;
+                if (quantity <= 0) {
+                    throw new BusinessException("ENTRADA exige quantity > 0.");
+                }
+                lot.setUnitsInStock(prevStock + (int) quantity);
+                trigger = AUDIT_TRIGGER_ENTRADA;
             }
-            case MovementType.AJUSTE -> nextStock = quantity;
+            case MovementType.ABERTURA -> {
+                if (ReagentStatus.INATIVO.equals(currentStatus)
+                    || ReagentStatus.VENCIDO.equals(currentStatus)) {
+                    auditMovementBlocked(lot, type, currentStatus);
+                    throw new BusinessException(
+                        "Lote " + currentStatus + " nao aceita ABERTURA.");
+                }
+                if (prevStock < 1) {
+                    throw new BusinessException("Sem unidades fechadas para abrir.");
+                }
+                lot.setUnitsInStock(prevStock - 1);
+                lot.setUnitsInUse(prevUse + 1);
+                trigger = AUDIT_TRIGGER_ABERTURA;
+                // ABERTURA limpa needsStockReview (decisao 1.12).
+                lot.setNeedsStockReview(false);
+            }
+            case MovementType.FECHAMENTO -> {
+                if (ReagentStatus.INATIVO.equals(currentStatus)
+                    || ReagentStatus.VENCIDO.equals(currentStatus)) {
+                    auditMovementBlocked(lot, type, currentStatus);
+                    throw new BusinessException(
+                        "Lote " + currentStatus + " nao aceita FECHAMENTO.");
+                }
+                if (prevUse < 1) {
+                    throw new BusinessException("Sem unidades em uso para retornar ao estoque.");
+                }
+                lot.setUnitsInUse(prevUse - 1);
+                lot.setUnitsInStock(prevStock + 1);
+                if (reason == null || reason.isBlank()) {
+                    reason = MovementReason.REVERSAO_ABERTURA;
+                }
+                trigger = AUDIT_TRIGGER_FECHAMENTO;
+            }
+            case MovementType.CONSUMO -> {
+                if (ReagentStatus.INATIVO.equals(currentStatus)) {
+                    auditMovementBlocked(lot, type, currentStatus);
+                    throw new BusinessException("Lote inativo nao aceita CONSUMO.");
+                }
+                if (quantity <= 0) {
+                    throw new BusinessException("CONSUMO exige quantity > 0.");
+                }
+                if (prevUse < (int) quantity) {
+                    throw new BusinessException("Estoque em uso insuficiente para CONSUMO.");
+                }
+                // CONSUMO em vencido exige reason (descarte registrado — audit recomendacao F).
+                if (ReagentStatus.VENCIDO.equals(currentStatus)
+                    && (reason == null || reason.isBlank())) {
+                    throw new BusinessException(
+                        "CONSUMO em lote vencido exige reason (descarte). Valores aceitos: VENCIMENTO, OUTRO.");
+                }
+                lot.setUnitsInUse(prevUse - (int) quantity);
+                trigger = AUDIT_TRIGGER_CONSUMO;
+            }
+            case MovementType.AJUSTE -> {
+                // AJUSTE permitido em todos os status, INCLUSIVE inativo.
+                if (reason == null || reason.isBlank()) {
+                    throw new BusinessException(
+                        "AJUSTE exige reason. Valores aceitos: " + MovementReason.humanList());
+                }
+                if (request.targetUnitsInStock() == null || request.targetUnitsInUse() == null) {
+                    throw new BusinessException(
+                        "AJUSTE exige targetUnitsInStock e targetUnitsInUse.");
+                }
+                if (request.targetUnitsInStock() < 0 || request.targetUnitsInUse() < 0) {
+                    throw new BusinessException("AJUSTE exige unidades >= 0.");
+                }
+                lot.setUnitsInStock(request.targetUnitsInStock());
+                lot.setUnitsInUse(request.targetUnitsInUse());
+                lot.setNeedsStockReview(false); // AJUSTE limpa flag (revisao explicita)
+                trigger = AUDIT_TRIGGER_AJUSTE;
+                // forca quantity=0 para historico legivel (audit ressalva contrato 2.4).
+                quantity = 0D;
+            }
             default -> throw new BusinessException("Tipo de movimentação inválido");
         }
 
-        // Valida motivo: obrigatorio para AJUSTE e para SAIDA que zere o estoque.
-        String reason = MovementReason.normalize(request.reason());
-        boolean zeroingSaida = MovementType.SAIDA.equals(type) && nextStock == 0;
-        if (MovementType.AJUSTE.equals(type) && (reason == null || reason.isBlank())) {
-            throw new BusinessException(
-                "AJUSTE exige um motivo. Valores aceitos: " + MovementReason.humanList());
-        }
-        if (zeroingSaida && (reason == null || reason.isBlank())) {
-            throw new BusinessException(
-                "Saída que zera o estoque exige um motivo. Valores aceitos: " + MovementReason.humanList());
-        }
         if (reason != null && !reason.isBlank() && !MovementReason.isValid(reason)) {
             throw new BusinessException(
                 "Motivo de movimentação inválido. Valores aceitos: " + MovementReason.humanList());
         }
 
-        // Reativacao de fora_de_estoque por ENTRADA/AJUSTE (decisao 5.6 / matriz 4.7).
-        // Quando o lote estava em fora_de_estoque e o movimento eleva o estoque acima de
-        // zero, marcamos openedDate=today (se ainda nulo) ANTES da derivacao para que
-        // deriveStatus retorne em_uso (a regra ternaria distingue em_uso vs em_estoque
-        // por openedDate). Isso modela o ato operacional de "abrir um frasco novo do
-        // mesmo lote" sem precisar de UPDATE administrativo.
-        boolean estavaForaDeEstoque = ReagentStatus.FORA_DE_ESTOQUE.equals(lot.getStatus());
-        boolean reativaEstoque = nextStock > 0
-            && (MovementType.ENTRADA.equals(type) || MovementType.AJUSTE.equals(type));
         LocalDate today = LocalDate.now();
-        if (estavaForaDeEstoque && reativaEstoque && lot.getOpenedDate() == null) {
+
+        // ABERTURA: grava openedDate=today se null + audit REAGENT_OPENED_DATE_DERIVED (v3).
+        if (MovementType.ABERTURA.equals(type) && lot.getOpenedDate() == null) {
             lot.setOpenedDate(today);
+            Map<String, Object> auditDetails = new LinkedHashMap<>();
+            auditDetails.put("openedDate", today.toString());
+            auditDetails.put("trigger", AUDIT_TRIGGER_ABERTURA);
+            auditDetails.put("fromStatus", currentStatus);
+            auditDetails.put("toStatus", ReagentStatus.EM_USO);
+            auditService.log(
+                AUDIT_ACTION_OPENED_DATE_DERIVED,
+                "ReagentLot",
+                lot.getId(),
+                auditDetails);
         }
 
-        lot.setCurrentStock(nextStock);
-        // Derivacao automatica pos-movimento. Casos canonicos novos:
-        //  - ENTRADA em fora_de_estoque -> em_uso (decisao 5.6)
-        //  - SAIDA total em em_estoque/em_uso -> fora_de_estoque
-        //  - AJUSTE positivo em fora_de_estoque -> em_uso
-        applyDerivedStatus(lot, today, AUDIT_TRIGGER_MOVEMENT);
+        // Re-deriva status (apenas se nao for inativo — preserva terminal manual).
+        if (!ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            applyDerivedStatus(lot, today, trigger);
+        }
+
         reagentLotRepository.save(lot);
+
+        // Quantity efetiva no historico: 1 para ABERTURA/FECHAMENTO, 0 para AJUSTE,
+        // valor enviado para ENTRADA/CONSUMO.
+        double historicalQuantity;
+        if (MovementType.ABERTURA.equals(type) || MovementType.FECHAMENTO.equals(type)) {
+            historicalQuantity = 1D;
+        } else if (MovementType.AJUSTE.equals(type)) {
+            historicalQuantity = 0D;
+        } else {
+            historicalQuantity = quantity;
+        }
+
         StockMovement movement = StockMovement.builder()
             .reagentLot(lot)
             .type(type)
-            .quantity(quantity)
+            .quantity(historicalQuantity)
             .responsible(request.responsible())
             .notes(request.notes())
-            .previousStock(currentStock)
             .reason(reason)
+            .previousStock(null) // pos-V14 sempre NULL (campo legado read-only)
+            .previousUnitsInStock(prevStock)
+            .previousUnitsInUse(prevUse)
             .build();
         return stockMovementRepository.save(movement);
     }
 
+    private void auditMovementBlocked(ReagentLot lot, String movementType, String status) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("reason", ReagentStatus.INATIVO.equals(status) ? "lote_inativo" : "lote_vencido");
+        details.put("movementType", movementType);
+        auditService.log(AUDIT_ACTION_MOVEMENT_BLOCKED, "ReagentLot", lot.getId(), details);
+    }
+
+    /**
+     * Reverte movimento. Cobre 6 tipos (5 escrita + SAIDA legado).
+     */
     @Transactional
     public void deleteMovement(UUID movementId) {
         StockMovement movement = stockMovementRepository.findById(movementId)
             .orElseThrow(() -> new ResourceNotFoundException("Movimentação não encontrada"));
         ReagentLot lot = movement.getReagentLot();
-        double currentStock = NumericUtils.defaultIfNull(lot.getCurrentStock());
+        Integer currentStock = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        Integer currentUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
 
         switch (movement.getType()) {
             case MovementType.ENTRADA -> {
-                double resultingStock = currentStock - movement.getQuantity();
-                if (resultingStock < 0) {
+                int delta = movement.getQuantity() == null ? 0 : movement.getQuantity().intValue();
+                int resulting = currentStock - delta;
+                if (resulting < 0) {
                     throw new BusinessException(
                         "Não é possível excluir esta entrada. O estoque resultante ficaria negativo.");
                 }
-                lot.setCurrentStock(resultingStock);
+                lot.setUnitsInStock(resulting);
             }
-            case MovementType.SAIDA -> lot.setCurrentStock(currentStock + movement.getQuantity());
-            case MovementType.AJUSTE -> {
-                double previousStock = movement.getPreviousStock() != null
-                    ? movement.getPreviousStock()
-                    : extractPreviousStock(movement.getNotes(), currentStock);
-                if (previousStock < 0) {
+            case MovementType.SAIDA -> {
+                // Legado: SAIDA restaurada como if (was a CONSUMO) — adiciona ao stock fechado.
+                int delta = movement.getQuantity() == null ? 0 : movement.getQuantity().intValue();
+                lot.setUnitsInStock(currentStock + delta);
+            }
+            case MovementType.ABERTURA -> {
+                // Reverter ABERTURA: subtrai 1 de unitsInUse, adiciona 1 a unitsInStock.
+                if (currentUse < 1) {
                     throw new BusinessException(
-                        "Não é possível excluir este ajuste. O estoque resultante ficaria negativo.");
+                        "Não é possível reverter esta abertura. Sem unidades em uso para retornar.");
                 }
-                lot.setCurrentStock(previousStock);
+                lot.setUnitsInUse(currentUse - 1);
+                lot.setUnitsInStock(currentStock + 1);
+            }
+            case MovementType.FECHAMENTO -> {
+                // Reverter FECHAMENTO: subtrai 1 de unitsInStock, adiciona 1 a unitsInUse.
+                if (currentStock < 1) {
+                    throw new BusinessException(
+                        "Não é possível reverter este fechamento. Sem unidades fechadas para abrir.");
+                }
+                lot.setUnitsInStock(currentStock - 1);
+                lot.setUnitsInUse(currentUse + 1);
+            }
+            case MovementType.CONSUMO -> {
+                // Reverter CONSUMO: adiciona quantity de volta a unitsInUse.
+                int delta = movement.getQuantity() == null ? 0 : movement.getQuantity().intValue();
+                lot.setUnitsInUse(currentUse + delta);
+            }
+            case MovementType.AJUSTE -> {
+                // Reverter AJUSTE: aplica previousUnitsInStock/Use (pos-V14) ou previousStock (legado).
+                if (movement.getPreviousUnitsInStock() != null && movement.getPreviousUnitsInUse() != null) {
+                    lot.setUnitsInStock(movement.getPreviousUnitsInStock());
+                    lot.setUnitsInUse(movement.getPreviousUnitsInUse());
+                } else if (movement.getPreviousStock() != null) {
+                    // Movimento AJUSTE pre-V14: restaura previousStock como unitsInStock,
+                    // unitsInUse=0 (heranca v2 sem distincao fechado/aberto).
+                    int prev = movement.getPreviousStock().intValue();
+                    if (prev < 0) {
+                        throw new BusinessException(
+                            "Não é possível excluir este ajuste. O estoque resultante ficaria negativo.");
+                    }
+                    lot.setUnitsInStock(prev);
+                    lot.setUnitsInUse(0);
+                } else {
+                    throw new BusinessException(
+                        "Não é possível reverter este ajuste. Snapshot anterior ausente.");
+                }
             }
             default -> throw new BusinessException("Tipo de movimentação inválido");
         }
@@ -487,10 +811,6 @@ public class ReagentService {
         return reagentLotRepository.findExpiringLots(today, today.plusDays(days));
     }
 
-    /**
-     * Endpoint canonico do refator-v2: lista resumos por etiqueta. Substitui
-     * {@link #getTagSummaries()} no contrato externo.
-     */
     @Transactional(readOnly = true)
     public List<ReagentLabelSummary> getLabelSummaries() {
         return reagentLotRepository.findLabelSummaries().stream()
@@ -499,51 +819,14 @@ public class ReagentService {
                 p.getTotal(),
                 p.getEmEstoque(),
                 p.getEmUso(),
-                p.getForaDeEstoque(),
+                p.getInativos(),
                 p.getVencidos()
             ))
             .toList();
-    }
-
-    /**
-     * Alias deprecated — espelha {@link #getLabelSummaries()} mapeando para o shape antigo
-     * {@link ReagentTagSummary}. Servido pelo endpoint {@code /api/reagents/tags} apenas
-     * por compatibilidade temporaria com integradores externos. Removido em PR-4.
-     */
-    @Transactional(readOnly = true)
-    public List<ReagentTagSummary> getTagSummaries() {
-        return reagentLotRepository.findLabelSummaries().stream()
-            .map(p -> new ReagentTagSummary(
-                p.getName(),
-                p.getTotal(),
-                // Mapeamento de compatibilidade do shape antigo (refator-v2 substitui semanticamente):
-                //   ativos    <- emEstoque (lotes ativos com estoque, sem abertura)
-                //   emUso     <- emUso
-                //   inativos  <- foraDeEstoque (lotes terminais — substitui o antigo INATIVO)
-                //   vencidos  <- vencidos
-                p.getEmEstoque(),
-                p.getEmUso(),
-                p.getForaDeEstoque(),
-                p.getVencidos()
-            ))
-            .toList();
-    }
-
-    private double extractPreviousStock(String notes, double fallback) {
-        if (notes == null || !notes.startsWith(PREVIOUS_STOCK_PREFIX)) {
-            return fallback;
-        }
-        String value = notes.substring(PREVIOUS_STOCK_PREFIX.length()).split(";")[0];
-        try {
-            return Double.parseDouble(value);
-        } catch (NumberFormatException exception) {
-            return fallback;
-        }
     }
 
     /**
      * Cross-field: receivedDate <= openedDate <= expiryDate (quando ambas presentes).
-     * @NotNull/@NotBlank cobrem obrigatoriedade no DTO.
      */
     private void validateLotDates(ReagentLotRequest request) {
         if (request.expiryDate() != null && request.openedDate() != null
@@ -578,108 +861,110 @@ public class ReagentService {
     }
 
     /**
-     * Regra ternaria canonica do refator-v2 (contrato 5.1):
+     * Recusa {@code status='inativo'} em CREATE/UPDATE — forca uso de
+     * {@code POST /archive} (decisao 1.4 do contrato).
+     */
+    private void validateStatusForCreateOrUpdate(String requestStatus) {
+        if (requestStatus == null) return;
+        String normalized = ReagentStatus.normalize(requestStatus);
+        if (ReagentStatus.INATIVO.equals(normalized)) {
+            throw new BusinessException(
+                "Status 'inativo' nao pode ser definido em CREATE/UPDATE — use POST /archive.");
+        }
+    }
+
+    /**
+     * Regra ternaria canonica do refator-v3 (contrato 5.1):
      *
      * <ol>
+     *   <li>{@code inativo} é terminal manual — nao auto-deriva (preserva).</li>
      *   <li>{@code expiryDate < today} (qualquer estoque/abertura) — {@code vencido}</li>
-     *   <li>{@code stock <= 0} — {@code fora_de_estoque}</li>
-     *   <li>{@code openedDate != null} — {@code em_uso}</li>
-     *   <li>caso contrario — {@code em_estoque}</li>
+     *   <li>{@code unitsInUse &gt; 0} — {@code em_uso}</li>
+     *   <li>{@code unitsInStock &gt; 0 AND unitsInUse == 0} — {@code em_estoque}</li>
+     *   <li>{@code zero/zero} — mantem status anterior (NAO virou terminal automatico)</li>
      * </ol>
-     *
-     * <p>Defesa: se {@code expiryDate} for nulo (cenario impossivel apos V13 NOT NULL,
-     * mas teste protege), retorna o status atual sem alterar.</p>
      */
     public String deriveStatus(ReagentLot lot, LocalDate today) {
         if (lot == null) {
             return null;
         }
+        // 1) Inativo é terminal manual.
+        if (ReagentStatus.INATIVO.equals(lot.getStatus())) {
+            return ReagentStatus.INATIVO;
+        }
         LocalDate expiry = lot.getExpiryDate();
         if (expiry == null) {
             return lot.getStatus();
         }
+        // 2) Validade — regra mais forte que estoque.
         if (expiry.isBefore(today)) {
             return ReagentStatus.VENCIDO;
         }
-        double stock = NumericUtils.defaultIfNull(lot.getCurrentStock());
-        if (stock <= 0) {
-            return ReagentStatus.FORA_DE_ESTOQUE;
-        }
-        if (lot.getOpenedDate() != null) {
+        int inUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+        int inStock = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        // 3) Em uso tem precedencia.
+        if (inUse > 0) {
             return ReagentStatus.EM_USO;
         }
-        return ReagentStatus.EM_ESTOQUE;
+        // 4) Tem estoque fechado.
+        if (inStock > 0) {
+            return ReagentStatus.EM_ESTOQUE;
+        }
+        // 5) zero/zero — mantem (nao terminal automatico).
+        return lot.getStatus();
     }
 
     /**
-     * Aplica {@link #deriveStatus(ReagentLot, LocalDate)} mutando o lote quando o status
-     * derivado difere do atual. Quando o status final e {@code em_uso} e o lote nao tem
-     * {@code openedDate}, dispara o backfill (audit ressalva 1.7) — a action de auditoria
-     * difere conforme o trigger:
-     *
-     * <ul>
-     *   <li>{@code createLot}: openedDate vai com o REAGENT_STATUS_DERIVED principal.</li>
-     *   <li>{@code movement}: idem (entrada em fora_de_estoque -> em_uso).</li>
-     *   <li>{@code updateLot}: o backfill ja foi feito ANTES desta chamada via
-     *       {@link #applyOpenedDateOnUseTransition} para emitir REAGENT_OPENED_DATE_BACKFILLED
-     *       em audit_log (separa abertura administrativa de abertura natural).</li>
-     * </ul>
-     *
-     * <p>Transicoes no-op (derivado == atual) nao sao logadas para evitar ruido.</p>
+     * Aplica {@link #deriveStatus} mutando o lote quando o derivado difere do atual.
+     * Lote {@code inativo} nao e tocado (early return).
      */
     private void applyDerivedStatus(ReagentLot lot, LocalDate today, String trigger) {
         if (lot == null) return;
+        if (ReagentStatus.INATIVO.equals(lot.getStatus())) return; // terminal manual
         String oldStatus = lot.getStatus();
         String derived = deriveStatus(lot, today);
         if (Objects.equals(oldStatus, derived)) {
             return;
         }
         lot.setStatus(derived);
-        // Set openedDate quando o status final for em_uso e ainda nao houver. Para CREATE
-        // e MOVEMENT a marcacao acompanha REAGENT_STATUS_DERIVED. Para UPDATE, o backfill
-        // ja deve ter ocorrido antes desta chamada — defesa: nao re-emite audit aqui.
+        // Para CREATE e movement/scheduler, set openedDate=today se virou em_uso e null.
         if (ReagentStatus.EM_USO.equals(derived)
             && lot.getOpenedDate() == null
-            && !AUDIT_TRIGGER_UPDATE_LOT.equals(trigger)) {
+            && !AUDIT_TRIGGER_UPDATE_LOT.equals(trigger)
+            && !AUDIT_TRIGGER_ABERTURA.equals(trigger)) {
+            // ABERTURA ja gravou opened + audit DERIVED separado.
             lot.setOpenedDate(today);
         }
         recordStatusTransition(lot, oldStatus, derived, trigger);
     }
 
     /**
-     * Backfill administrativo: dispara o set de {@code openedDate=today} quando o status
-     * final SERA {@code em_uso} e {@code openedDate} esta nulo. Para o caminho de UPDATE,
-     * chama {@link AuditService} com action distinta {@link #AUDIT_ACTION_OPENED_DATE_BACKFILLED}
-     * (audit ressalva 1.7).
-     *
-     * <p>Esta funcao deve ser chamada ANTES de {@link #applyDerivedStatus} no fluxo de
-     * UPDATE para que o derivado ja conte com {@code openedDate} setada.</p>
+     * Backfill administrativo (audit ressalva 1.7 v2 — PRESERVADO em v3).
+     * Dispara em UPDATE quando o status final SERA {@code em_uso} e {@code openedDate}
+     * esta nulo.
      */
     private void applyOpenedDateOnUseTransition(ReagentLot lot, LocalDate today, String trigger) {
         if (lot == null) return;
         if (lot.getOpenedDate() != null) return;
         String fromStatus = lot.getStatus();
-        // Decide se o status final sera em_uso. Replica a logica de deriveStatus mas sem
-        // assumir que openedDate ja foi setado (esta sendo definido AGORA).
         LocalDate expiry = lot.getExpiryDate();
         if (expiry == null || expiry.isBefore(today)) {
-            return; // vencido (ou indefinido) — nao marca abertura
+            return;
         }
-        double stock = NumericUtils.defaultIfNull(lot.getCurrentStock());
-        if (stock <= 0) {
-            return; // fora_de_estoque — nao marca abertura
+        int inStock = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        int inUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+        // Se total = 0 nao marca abertura. Mantem v2.
+        if (inStock + inUse <= 0) {
+            return;
         }
-        // O usuario pediu em_uso explicitamente? Se sim, o backfill e administrativo.
-        // Caso contrario (em_estoque pedido + estoque > 0 + opened nulo), o derivado
-        // sera em_estoque e nao precisamos marcar.
         if (!ReagentStatus.EM_USO.equals(lot.getStatus())) {
             return;
         }
         lot.setOpenedDate(today);
         if (AUDIT_TRIGGER_UPDATE_LOT.equals(trigger)) {
-            // Action distinta para UPDATE administrativo (audit 1.7).
-            Map<String, Object> details = new HashMap<>();
-            details.put("openedDate", String.valueOf(today));
+            // Action distinta para UPDATE administrativo (audit 1.7 v2 preservado).
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("openedDate", today.toString());
             details.put("fromStatus", fromStatus);
             details.put("toStatus", ReagentStatus.EM_USO);
             details.put("trigger", AUDIT_TRIGGER_UPDATE_LOT);
@@ -690,41 +975,32 @@ public class ReagentService {
                 details
             );
         }
-        // Para createLot/movement, o backfill viaja junto do REAGENT_STATUS_DERIVED.
     }
 
     /**
-     * Aplicacao invocada pelo scheduler: alem de mutar o status, tambem registra
-     * o log de auditoria com {@code trigger="scheduler"}. Retorna {@code true}
-     * se houve transicao efetiva (usado pelo scheduler para decidir se adiciona
-     * o lote ao batch de saveAll).
+     * Aplicacao invocada pelo scheduler. Lote {@code inativo} NAO e tocado.
      */
     public boolean applyDerivedStatusFromScheduler(ReagentLot lot, LocalDate today) {
         if (lot == null) return false;
+        if (ReagentStatus.INATIVO.equals(lot.getStatus())) return false; // terminal manual
         String oldStatus = lot.getStatus();
         String derived = deriveStatus(lot, today);
         if (Objects.equals(oldStatus, derived)) {
             return false;
         }
         lot.setStatus(derived);
-        // Scheduler nao faz backfill administrativo de openedDate — derivacao puramente
-        // mecanica. Se virou em_uso e openedDate=null (pouco provavel apos V13), apenas
-        // registra a transicao sem set automatico (preserva o sinal de "abertura nao registrada").
         recordStatusTransition(lot, oldStatus, derived, AUDIT_TRIGGER_SCHEDULER);
         return true;
     }
 
-    /**
-     * Emite um AuditLog de transicao de status. Isolado para centralizar o shape
-     * dos {@code details} (comparavel entre triggers) e permitir testes uniformes.
-     */
     private void recordStatusTransition(ReagentLot lot, String from, String to, String trigger) {
-        Map<String, Object> details = new HashMap<>();
+        Map<String, Object> details = new LinkedHashMap<>();
         details.put("from", from);
         details.put("to", to);
         details.put("trigger", trigger);
-        details.put("expiryDate", String.valueOf(lot.getExpiryDate()));
-        details.put("currentStock", String.valueOf(lot.getCurrentStock()));
+        details.put("expiryDate", lot.getExpiryDate() == null ? null : lot.getExpiryDate().toString());
+        details.put("unitsInStock", lot.getUnitsInStock());
+        details.put("unitsInUse", lot.getUnitsInUse());
         auditService.log(
             AUDIT_ACTION_STATUS_DERIVED,
             "ReagentLot",
@@ -733,10 +1009,6 @@ public class ReagentService {
         );
     }
 
-    /**
-     * Normaliza e valida o status. Retorna o valor canonico ou lanca BusinessException
-     * com a lista de valores permitidos. Se input vier vazio, usa o fallback.
-     */
     private String resolveStatus(String raw, String fallback) {
         if (raw == null || raw.isBlank()) {
             return fallback;

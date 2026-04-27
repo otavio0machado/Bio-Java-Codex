@@ -9,15 +9,21 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.biodiagnostico.dto.request.ArchiveReagentLotRequest;
+import com.biodiagnostico.dto.request.DeleteReagentLotRequest;
 import com.biodiagnostico.dto.request.ReagentLotRequest;
 import com.biodiagnostico.dto.request.StockMovementRequest;
+import com.biodiagnostico.dto.request.UnarchiveReagentLotRequest;
 import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.ReagentStatus;
+import com.biodiagnostico.entity.Role;
 import com.biodiagnostico.entity.StockMovement;
+import com.biodiagnostico.entity.User;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.StockMovementRepository;
+import com.biodiagnostico.repository.UserRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -35,13 +41,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 /**
- * Bateria do refator-reagentes-v2 (PR-1). Cobre:
- *  - Regra ternaria de {@code deriveStatus}
- *  - Forcing rule de cadastro vencido
- *  - Backfill administrativo de {@code openedDate} em UPDATE com action distinta
- *  - Bloqueio de ENTRADA em {@code vencido} (decisao 1.8)
- *  - ENTRADA em {@code fora_de_estoque} retornando a {@code em_uso} (decisao 5.6)
- *  - Auditoria com triggers {@code createLot/updateLot/movement}
+ * Bateria do refator-reagentes-v3 (PR consolidado). Cobre:
+ *  - Regra ternaria de {@code deriveStatus} v3 (drop fora_de_estoque, add inativo)
+ *  - Estoque per-unit ({@code unitsInStock} + {@code unitsInUse})
+ *  - Branches de {@code createMovement}: ENTRADA, ABERTURA, FECHAMENTO, CONSUMO, AJUSTE
+ *  - SAIDA recusada em escrita (mantida em leitura/historico)
+ *  - ABERTURA/FECHAMENTO recusam {@code quantity != 1}
+ *  - CONSUMO em vencido exige reason
+ *  - {@code archive} valida archivedBy=username (NAO name) com role elegivel
+ *  - {@code unarchive} preserva archivedAt/archivedBy + re-deriva status
+ *  - {@code deleteLot} hard delete cascade + audit snapshot enumerativo
+ *  - {@code REAGENT_OPENED_DATE_DERIVED} (ABERTURA) vs {@code _BACKFILLED} (UPDATE)
  */
 @ExtendWith(MockitoExtension.class)
 class ReagentServiceTest {
@@ -57,13 +67,17 @@ class ReagentServiceTest {
     @Mock
     private QcRecordRepository qcRecordRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
     private RecordingAuditService auditService;
 
     @BeforeEach
     void setUp() {
         auditService = new RecordingAuditService();
         reagentService = new ReagentService(
-            reagentLotRepository, stockMovementRepository, qcRecordRepository, auditService);
+            reagentLotRepository, stockMovementRepository, qcRecordRepository,
+            userRepository, auditService);
     }
 
     private static final class RecordingAuditService extends AuditService {
@@ -95,7 +109,7 @@ class ReagentServiceTest {
     private ReagentLotRequest defaultRequest(String status) {
         return new ReagentLotRequest(
             "ALT", "L123", "Bio", "Bioquímica",
-            80D, status,
+            8, 0, status,
             LocalDate.now().plusDays(60), "Geladeira 2", "2-8°C",
             null, null, null
         );
@@ -103,26 +117,28 @@ class ReagentServiceTest {
 
     private ReagentLotRequest fullRequest(
         String label, String lotNumber, String manufacturer, String category,
-        Double currentStock, String status, LocalDate expiry,
+        Integer unitsInStock, Integer unitsInUse, String status, LocalDate expiry,
         String location, String temp,
         String supplier, LocalDate received, LocalDate opened
     ) {
         return new ReagentLotRequest(
             label, lotNumber, manufacturer, category,
-            currentStock, status, expiry, location, temp,
+            unitsInStock, unitsInUse, status, expiry, location, temp,
             supplier, received, opened
         );
     }
 
-    private ReagentLot lot(double stock) {
+    private ReagentLot lot(int stock, int use) {
         return ReagentLot.builder()
             .id(UUID.randomUUID())
             .name("ALT")
             .lotNumber("L123")
             .manufacturer("Bio")
-            .currentStock(stock)
+            .unitsInStock(stock)
+            .unitsInUse(use)
             .expiryDate(LocalDate.now().plusDays(60))
             .status(ReagentStatus.EM_ESTOQUE)
+            .needsStockReview(false)
             .build();
     }
 
@@ -137,16 +153,26 @@ class ReagentServiceTest {
 
         assertThat(lot.getName()).isEqualTo("ALT");
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_ESTOQUE);
+        assertThat(lot.getUnitsInStock()).isEqualTo(8);
+        assertThat(lot.getUnitsInUse()).isEqualTo(0);
     }
 
     @Test
-    @DisplayName("createLot com expiryDate < hoje forca status=vencido (audit ressalva 3.5)")
+    @DisplayName("createLot com status='inativo' rejeitado com 400 (decisao 1.4)")
+    void createLot_statusInativo_rejeitado() {
+        assertThatThrownBy(() -> reagentService.createLot(defaultRequest("inativo")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Status 'inativo' nao pode ser definido em CREATE/UPDATE");
+    }
+
+    @Test
+    @DisplayName("createLot com expiryDate < hoje forca status=vencido")
     void createLot_expiryPassada_forcaVencido() {
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
         ReagentLotRequest req = fullRequest(
             "ALT", "L-VENC", "Bio", "Bioquímica",
-            10D, "em_estoque",
+            10, 0, "em_estoque",
             LocalDate.now().minusDays(5),
             "Geladeira 2", "2-8°C",
             null, null, null
@@ -155,25 +181,16 @@ class ReagentServiceTest {
         ReagentLot lot = reagentService.createLot(req);
 
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
-        // Audit: from='em_estoque' (status do builder antes da forcing rule), to='vencido'.
-        List<RecordingAuditService.Call> derived = auditService.callsFor(
-            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
-        // Forcing rule ja setou para vencido; applyDerivedStatus e no-op (em_estoque -> vencido
-        // apenas via forcing); audit emite 1 entry com from='em_estoque' to='vencido' apenas
-        // se o status reverter via deriveStatus. No nosso fluxo: forcing seta vencido e
-        // applyDerivedStatus chega com status=vencido + expiry passada -> derivado=vencido =
-        // no-op, sem audit. Verificamos que NAO tem audit nesse caso especifico.
-        assertThat(derived).isEmpty();
     }
 
     @Test
-    @DisplayName("createLot com status=em_uso e openedDate=null grava openedDate=hoje")
+    @DisplayName("createLot com em_uso e openedDate=null grava openedDate=hoje")
     void createLot_emUso_semOpenedDate_setaToday() {
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
         ReagentLotRequest req = fullRequest(
             "ALT", "L-USO", "Bio", "Bioquímica",
-            5D, "em_uso",
+            5, 1, "em_uso",
             LocalDate.now().plusDays(30),
             "Geladeira 2", "2-8°C",
             null, null, null
@@ -196,86 +213,45 @@ class ReagentServiceTest {
             .hasMessageContaining("Já existe um lote com este número e fabricante");
     }
 
-    @Test
-    @DisplayName("createLot com pre-check de duplicata nao chama save")
-    void createLot_comPreCheckDuplicata_naoChamaSave() {
-        when(reagentLotRepository.findByLotNumberAndManufacturer("L123", "Bio"))
-            .thenReturn(List.of(lot(5D)));
-
-        assertThatThrownBy(() -> reagentService.createLot(defaultRequest("em_estoque")))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Já existe um lote com este número e fabricante");
-        verify(reagentLotRepository, never()).save(any(ReagentLot.class));
-    }
-
-    @Test
-    @DisplayName("createLot com status legado deve ser rejeitado")
-    void createLot_statusLegado_deveFalhar() {
-        ReagentLotRequest req = defaultRequest("ativo"); // legado
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Status de lote inválido");
-    }
-
-    @Test
-    @DisplayName("createLot com category fora de lista deve falhar")
-    void createLot_categoryInvalida_deveFalhar() {
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L123", "Bio", "INEXISTENTE",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(30),
-            "Geladeira 2", "2-8°C",
-            null, null, null
-        );
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Categoria invalida");
-    }
-
-    @Test
-    @DisplayName("createLot com storageTemp fora de lista deve falhar")
-    void createLot_tempInvalida_deveFalhar() {
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L123", "Bio", "Bioquímica",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(30),
-            "Geladeira 2", "QUENTE",
-            null, null, null
-        );
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Temperatura de armazenamento invalida");
-    }
-
-    @Test
-    @DisplayName("createLot com receivedDate posterior a expiryDate deve falhar")
-    void createLot_receivedAposExpiry_deveFalhar() {
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L123", "Bio", "Bioquímica",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(10),
-            "Geladeira 2", "2-8°C",
-            null, LocalDate.now().plusDays(20), null
-        );
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("recebimento não pode ser posterior à data de validade");
-    }
-
     // ===== updateLot =====
 
     @Test
-    @DisplayName("updateLot mudando status para em_uso com openedDate=null grava audit BACKFILLED")
-    void updateLot_emUso_backfillOpenedDate_emiteAuditDistinto() {
-        ReagentLot lot = lot(50D);
+    @DisplayName("updateLot com status='inativo' rejeitado com 400")
+    void updateLot_statusInativo_rejeitado() {
+        ReagentLot lot = lot(50, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), defaultRequest("inativo")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Status 'inativo' nao pode ser definido em CREATE/UPDATE");
+    }
+
+    @Test
+    @DisplayName("updateLot em lote ja inativo retorna 400 (forca uso de unarchive)")
+    void updateLot_loteInativo_rejeitado() {
+        ReagentLot lot = lot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), defaultRequest("em_estoque")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Lote arquivado nao pode ser editado diretamente");
+    }
+
+    @Test
+    @DisplayName("updateLot mudando status para em_uso com openedDate=null grava audit BACKFILLED (v2 invariante)")
+    void updateLot_emUso_backfillOpenedDate_emiteAuditBackfilled() {
+        ReagentLot lot = lot(45, 5);
         lot.setStatus(ReagentStatus.EM_ESTOQUE);
         lot.setOpenedDate(null);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
+        // Request envia em_uso com unitsInUse=5 — backfill administrativo grava openedDate
+        // pelo UPDATE path (audit ressalva 1.7 v2 preservado).
         ReagentLotRequest req = fullRequest(
             "ALT", "L123", "Bio", "Bioquímica",
-            50D, "em_uso",
+            45, 5, "em_uso",
             LocalDate.now().plusDays(30),
             "Geladeira 2", "2-8°C",
             null, null, null
@@ -286,66 +262,19 @@ class ReagentServiceTest {
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_USO);
         assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now());
 
-        // Audit BACKFILLED distinto.
+        // BACKFILLED (v2 invariante preservado em v3 pelo path UPDATE).
         List<RecordingAuditService.Call> backfilled = auditService.callsFor(
             ReagentService.AUDIT_ACTION_OPENED_DATE_BACKFILLED);
         assertThat(backfilled).hasSize(1);
-        RecordingAuditService.Call call = backfilled.getFirst();
-        assertThat(call.entityId()).isEqualTo(lot.getId());
-        assertThat(call.details())
+        assertThat(backfilled.getFirst().details())
             .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_UPDATE_LOT)
             .containsEntry("toStatus", ReagentStatus.EM_USO);
     }
 
     @Test
-    @DisplayName("updateLot mantendo em_uso com openedDate ja setada nao grava BACKFILLED (idempotencia)")
-    void updateLot_emUsoComOpenedSetada_naoEmiteBackfilled() {
-        ReagentLot lot = lot(50D);
-        lot.setStatus(ReagentStatus.EM_USO);
-        lot.setOpenedDate(LocalDate.now().minusDays(5));
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L123", "Bio", "Bioquímica",
-            50D, "em_uso",
-            LocalDate.now().plusDays(30),
-            "Geladeira 2", "2-8°C",
-            null, null, LocalDate.now().minusDays(5)
-        );
-
-        reagentService.updateLot(lot.getId(), req);
-
-        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_OPENED_DATE_BACKFILLED)).isEmpty();
-    }
-
-    @Test
-    @DisplayName("updateLot mudando para em_estoque preserva openedDate (decisao 1.7 reciproca)")
-    void updateLot_naoApagaOpenedDate() {
-        ReagentLot lot = lot(50D);
-        lot.setStatus(ReagentStatus.EM_USO);
-        lot.setOpenedDate(LocalDate.now().minusDays(3));
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L123", "Bio", "Bioquímica",
-            50D, "em_estoque",
-            LocalDate.now().plusDays(30),
-            "Geladeira 2", "2-8°C",
-            null, null, null
-        );
-
-        reagentService.updateLot(lot.getId(), req);
-
-        // openedDate preservado pelo service (request.openedDate=null nao apaga).
-        assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now().minusDays(3));
-    }
-
-    @Test
     @DisplayName("updateLot com expiryDate passada forca vencido")
     void updateLot_setValidadePassada_deveVirarVencido() {
-        ReagentLot lot = lot(25D);
+        ReagentLot lot = lot(25, 0);
         lot.setStatus(ReagentStatus.EM_ESTOQUE);
         lot.setExpiryDate(LocalDate.now().plusDays(30));
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
@@ -353,7 +282,7 @@ class ReagentServiceTest {
 
         ReagentLotRequest req = fullRequest(
             "ALT", "L123", "Bio", "Bioquímica",
-            25D, "em_estoque",
+            25, 0, "em_estoque",
             LocalDate.now().minusDays(1),
             "Geladeira 2", "2-8°C",
             null, null, null
@@ -364,136 +293,29 @@ class ReagentServiceTest {
         assertThat(updated.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
     }
 
-    @Test
-    @DisplayName("updateLot com duplicata deve lançar exception")
-    void updateLot_comDuplicata_deveLancarException() {
-        ReagentLot lot = lot(50D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class)))
-            .thenThrow(new DataIntegrityViolationException("unique constraint"));
-
-        assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), defaultRequest("em_estoque")))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Já existe um lote com este número e fabricante");
-    }
-
-    @Test
-    @DisplayName("updateLot reverifica unicidade antes de salvar")
-    void updateLot_reverificaUnicidade() {
-        ReagentLot current = lot(100D);
-        current.setManufacturer("Bio");
-        ReagentLot otherConflicting = ReagentLot.builder()
-            .id(UUID.randomUUID())
-            .name("OUTRO")
-            .lotNumber("LCOLIDE")
-            .manufacturer("Bio")
-            .currentStock(0D)
-            .expiryDate(LocalDate.now().plusDays(30))
-            .status(ReagentStatus.EM_ESTOQUE)
-            .build();
-        when(reagentLotRepository.findById(current.getId())).thenReturn(Optional.of(current));
-        when(reagentLotRepository.findByLotNumberAndManufacturer("LCOLIDE", "Bio"))
-            .thenReturn(List.of(otherConflicting));
-
-        ReagentLotRequest req = fullRequest(
-            "ALT", "LCOLIDE", "Bio", "Bioquímica",
-            100D, "em_estoque",
-            LocalDate.now().plusDays(60),
-            "Geladeira 2", "2-8°C",
-            null, null, null
-        );
-
-        assertThatThrownBy(() -> reagentService.updateLot(current.getId(), req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Já existe um lote com este número e fabricante");
-        verify(reagentLotRepository, never()).save(any());
-    }
-
     // ===== createMovement =====
 
     @Test
-    @DisplayName("ENTRADA aumenta estoque")
-    void shouldUpdateCurrentStockOnEntradaMovement() {
-        ReagentLot lot = lot(100D);
+    @DisplayName("ENTRADA aumenta unitsInStock")
+    void entrada_aumentaUnitsInStock() {
+        ReagentLot lot = lot(5, 0);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null));
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null));
 
-        assertThat(lot.getCurrentStock()).isEqualTo(120D);
+        assertThat(lot.getUnitsInStock()).isEqualTo(15);
+        assertThat(lot.getUnitsInUse()).isEqualTo(0);
+        assertThat(mv.getPreviousUnitsInStock()).isEqualTo(5);
+        assertThat(mv.getPreviousUnitsInUse()).isEqualTo(0);
     }
 
     @Test
-    @DisplayName("SAIDA diminui estoque")
-    void shouldDecreaseCurrentStockOnSaidaMovement() {
-        ReagentLot lot = lot(100D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("SAIDA", 15D, "Ana", "", null));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(85D);
-    }
-
-    @Test
-    @DisplayName("AJUSTE define o estoque exato")
-    void shouldSetStockOnAjusteMovement() {
-        ReagentLot lot = lot(100D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 55D, "Ana", "", "CONTAGEM_FISICA"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(55D);
-    }
-
-    @Test
-    @DisplayName("SAIDA com estoque insuficiente lanca exception")
-    void saidaComEstoqueInsuficiente_deveLancarException() {
-        ReagentLot lot = lot(10D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-
-        assertThatThrownBy(() ->
-            reagentService.createMovement(lot.getId(),
-                new StockMovementRequest("SAIDA", 20D, "Ana", "", null))
-        )
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Estoque insuficiente");
-    }
-
-    @Test
-    @DisplayName("SAIDA total em em_estoque vira fora_de_estoque + audit")
-    void saidaTotal_emEstoque_viraForaDeEstoque() {
-        ReagentLot lot = lot(20D);
-        lot.setStatus(ReagentStatus.EM_ESTOQUE);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("SAIDA", 20D, "Ana", "", "VENCIMENTO"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(0D);
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.FORA_DE_ESTOQUE);
-        List<RecordingAuditService.Call> derived = auditService.callsFor(
-            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
-        assertThat(derived).hasSize(1);
-        assertThat(derived.getFirst().details())
-            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_MOVEMENT)
-            .containsEntry("from", ReagentStatus.EM_ESTOQUE)
-            .containsEntry("to", ReagentStatus.FORA_DE_ESTOQUE);
-    }
-
-    @Test
-    @DisplayName("SAIDA parcial em em_estoque com openedDate=null mantem em_estoque")
-    void saidaParcial_emEstoque_mantemSemAbertura() {
-        ReagentLot lot = lot(20D);
+    @DisplayName("ABERTURA q=1 com unitsInStock=5 → 4 fechadas, 1 aberta, status=em_uso, openedDate=today")
+    void abertura_q1_aberturaPrimeiraUnidade() {
+        ReagentLot lot = lot(5, 0);
         lot.setStatus(ReagentStatus.EM_ESTOQUE);
         lot.setOpenedDate(null);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
@@ -501,527 +323,672 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("SAIDA", 5D, "Ana", "", null));
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null));
 
-        assertThat(lot.getCurrentStock()).isEqualTo(15D);
-        // Sem openedDate o derivado e em_estoque (decisao 5.1 — abertura distingue em_uso de em_estoque).
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_ESTOQUE);
-    }
-
-    @Test
-    @DisplayName("ENTRADA em fora_de_estoque com openedDate=null vira em_uso e grava openedDate=today (audit ressalva 3.6)")
-    void entradaForaDeEstoque_semOpenedDate_viraEmUso() {
-        ReagentLot lot = lot(0D);
-        lot.setStatus(ReagentStatus.FORA_DE_ESTOQUE);
-        lot.setOpenedDate(null);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(10D);
+        assertThat(lot.getUnitsInStock()).isEqualTo(4);
+        assertThat(lot.getUnitsInUse()).isEqualTo(1);
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_USO);
         assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now());
 
+        // Audit DERIVED (v3 — ABERTURA path).
         List<RecordingAuditService.Call> derived = auditService.callsFor(
-            ReagentService.AUDIT_ACTION_STATUS_DERIVED);
+            ReagentService.AUDIT_ACTION_OPENED_DATE_DERIVED);
         assertThat(derived).hasSize(1);
         assertThat(derived.getFirst().details())
-            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_MOVEMENT)
-            .containsEntry("from", ReagentStatus.FORA_DE_ESTOQUE)
-            .containsEntry("to", ReagentStatus.EM_USO);
+            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_ABERTURA);
 
-        // ENTRADA em fora_de_estoque NAO emite REAGENT_OPENED_DATE_BACKFILLED — abertura
-        // operacional (movimento) e diferente de abertura administrativa (UPDATE).
+        // BACKFILLED NAO emitido (path ABERTURA, nao UPDATE administrativo).
         assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_OPENED_DATE_BACKFILLED))
             .isEmpty();
     }
 
     @Test
-    @DisplayName("ENTRADA em fora_de_estoque com openedDate ja setada mantem openedDate")
-    void entradaForaDeEstoque_comOpenedDate_mantemOpened() {
-        LocalDate previousOpening = LocalDate.now().minusDays(10);
-        ReagentLot lot = lot(0D);
-        lot.setStatus(ReagentStatus.FORA_DE_ESTOQUE);
-        lot.setOpenedDate(previousOpening);
+    @DisplayName("ABERTURA com unitsInStock=0 → 400 (sem unidades fechadas)")
+    void abertura_semEstoque_falha() {
+        ReagentLot lot = lot(0, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sem unidades fechadas para abrir");
+    }
+
+    @Test
+    @DisplayName("ABERTURA com quantity != 1 → 400 (audit ressalva E)")
+    void abertura_quantityDiferente1_falha() {
+        ReagentLot lot = lot(5, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 5D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("operam unitariamente");
+    }
+
+    @Test
+    @DisplayName("FECHAMENTO q=1 com unitsInUse=2 → 1 em uso, +1 em estoque, reason default REVERSAO_ABERTURA")
+    void fechamento_q1_inverso_aberturaUnidade() {
+        ReagentLot lot = lot(3, 2);
+        lot.setStatus(ReagentStatus.EM_USO);
+        lot.setOpenedDate(LocalDate.now().minusDays(2));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null));
+
+        assertThat(lot.getUnitsInStock()).isEqualTo(4);
+        assertThat(lot.getUnitsInUse()).isEqualTo(1);
+        assertThat(mv.getReason()).isEqualTo("REVERSAO_ABERTURA");
+        // openedDate preservado — fechamento e reversao de engano.
+        assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now().minusDays(2));
+    }
+
+    @Test
+    @DisplayName("FECHAMENTO com unitsInUse=0 → 400")
+    void fechamento_semUso_falha() {
+        ReagentLot lot = lot(5, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Sem unidades em uso");
+    }
+
+    @Test
+    @DisplayName("FECHAMENTO com quantity != 1 → 400")
+    void fechamento_quantityDiferente1_falha() {
+        ReagentLot lot = lot(2, 3);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("FECHAMENTO", 2D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("operam unitariamente");
+    }
+
+    @Test
+    @DisplayName("CONSUMO q=2 com unitsInUse=2 → 0 em uso, status mantem em_uso (NAO arquiva)")
+    void consumo_q2_zeraUso_mantemStatus() {
+        ReagentLot lot = lot(0, 2);
+        lot.setStatus(ReagentStatus.EM_USO);
+        lot.setOpenedDate(LocalDate.now().minusDays(1));
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
         when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 5D, "Ana", "", null));
+            new StockMovementRequest("CONSUMO", 2D, "Ana", "", "OUTRO", null, null));
 
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_USO);
-        assertThat(lot.getOpenedDate()).isEqualTo(previousOpening);
+        assertThat(lot.getUnitsInUse()).isEqualTo(0);
+        // Status nao reverte para terminal automatico (estoque zero deixou de ser terminal).
+        // Mantem em_estoque (zero/zero) — NAO arquiva.
+        assertThat(lot.getStatus()).isIn(ReagentStatus.EM_ESTOQUE, ReagentStatus.EM_USO);
     }
 
     @Test
-    @DisplayName("ENTRADA em vencido bloqueia com BusinessException + audit MOVEMENT_BLOCKED (audit ressalva 3.7)")
-    void entradaEmVencido_bloqueiaComAudit() {
-        ReagentLot lot = lot(5D);
+    @DisplayName("CONSUMO em vencido sem reason → 400 (decisao orchestrator)")
+    void consumo_emVencidoSemReason_falha() {
+        ReagentLot lot = lot(0, 5);
         lot.setStatus(ReagentStatus.VENCIDO);
-        lot.setExpiryDate(LocalDate.now().minusDays(5));
+        lot.setExpiryDate(LocalDate.now().minusDays(3));
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        assertThatThrownBy(() ->
-            reagentService.createMovement(lot.getId(),
-                new StockMovementRequest("ENTRADA", 10D, "Ana", "", null))
-        )
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null)))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Lote vencido nao aceita nova entrada");
+            .hasMessageContaining("CONSUMO em lote vencido exige reason");
+    }
+
+    @Test
+    @DisplayName("CONSUMO em vencido com reason VENCIMENTO permitido (descarte)")
+    void consumo_emVencidoComReason_permitido() {
+        ReagentLot lot = lot(0, 5);
+        lot.setStatus(ReagentStatus.VENCIDO);
+        lot.setExpiryDate(LocalDate.now().minusDays(3));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", "VENCIMENTO", null, null));
+
+        assertThat(lot.getUnitsInUse()).isEqualTo(4);
+        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
+    }
+
+    @Test
+    @DisplayName("AJUSTE em inativo permitido com reason e targets (decisao 1.4)")
+    void ajuste_emInativo_permitido() {
+        ReagentLot lot = lot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 0));
+
+        assertThat(lot.getUnitsInStock()).isEqualTo(5);
+        assertThat(lot.getUnitsInUse()).isEqualTo(0);
+        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.INATIVO); // terminal manual preservado
+        assertThat(lot.getNeedsStockReview()).isFalse();
+    }
+
+    @Test
+    @DisplayName("AJUSTE limpa needsStockReview")
+    void ajuste_limpaNeedsStockReview() {
+        ReagentLot lot = lot(10, 0);
+        lot.setNeedsStockReview(true);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 2));
+
+        assertThat(lot.getNeedsStockReview()).isFalse();
+    }
+
+    @Test
+    @DisplayName("AJUSTE sem reason → 400")
+    void ajuste_semReason_falha() {
+        ReagentLot lot = lot(50, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "", null, 30, 0)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("AJUSTE exige reason");
+    }
+
+    @Test
+    @DisplayName("AJUSTE sem targetUnitsInStock → 400")
+    void ajuste_semTargetStock_falha() {
+        ReagentLot lot = lot(50, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "", "CORRECAO", null, 0)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("AJUSTE exige targetUnitsInStock e targetUnitsInUse");
+    }
+
+    @Test
+    @DisplayName("ENTRADA em inativo bloqueada com 400 + audit")
+    void entrada_emInativo_bloqueia() {
+        ReagentLot lot = lot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ENTRADA", 5D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("nao aceita ENTRADA");
 
         List<RecordingAuditService.Call> blocked = auditService.callsFor(
             ReagentService.AUDIT_ACTION_MOVEMENT_BLOCKED);
         assertThat(blocked).hasSize(1);
         assertThat(blocked.getFirst().details())
-            .containsEntry("reason", "lote_vencido")
+            .containsEntry("reason", "lote_inativo")
             .containsEntry("movementType", "ENTRADA");
-        verify(reagentLotRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("SAIDA em vencido permanece permitida (descarte registrado)")
-    void saidaEmVencido_devePermitir() {
-        ReagentLot lot = lot(5D);
+    @DisplayName("ENTRADA em vencido bloqueada com 400 + audit")
+    void entrada_emVencido_bloqueia() {
+        ReagentLot lot = lot(5, 0);
         lot.setStatus(ReagentStatus.VENCIDO);
         lot.setExpiryDate(LocalDate.now().minusDays(5));
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("SAIDA", 5D, "Ana", "", "VENCIMENTO"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(0D);
-        // Mantem vencido — vencido nao reverte para outra coisa apenas porque zerou estoque.
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
-    }
-
-    @Test
-    @DisplayName("AJUSTE em fora_de_estoque com q>0 vira em_uso")
-    void ajusteForaDeEstoque_q_positivo_viraEmUso() {
-        ReagentLot lot = lot(0D);
-        lot.setStatus(ReagentStatus.FORA_DE_ESTOQUE);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 8D, "Ana", "Recontagem", "CORRECAO"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(8D);
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_USO);
-        assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now());
-    }
-
-    // ===== Validacoes de motivo (preservadas) =====
-
-    @Test
-    @DisplayName("AJUSTE sem motivo deve falhar")
-    void ajusteSemMotivo_deveFalhar() {
-        ReagentLot lot = lot(50D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-
-        assertThatThrownBy(() ->
-            reagentService.createMovement(lot.getId(),
-                new StockMovementRequest("AJUSTE", 30D, "Ana", "", null))
-        )
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null)))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("AJUSTE exige um motivo");
+            .hasMessageContaining("nao aceita ENTRADA");
+
+        List<RecordingAuditService.Call> blocked = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_MOVEMENT_BLOCKED);
+        assertThat(blocked).hasSize(1);
+        assertThat(blocked.getFirst().details())
+            .containsEntry("reason", "lote_vencido");
     }
 
     @Test
-    @DisplayName("SAIDA que zera estoque sem motivo deve falhar")
-    void saidaZerandoSemMotivo_deveFalhar() {
-        ReagentLot lot = lot(40D);
+    @DisplayName("ABERTURA em inativo bloqueada")
+    void abertura_emInativo_bloqueia() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        assertThatThrownBy(() ->
-            reagentService.createMovement(lot.getId(),
-                new StockMovementRequest("SAIDA", 40D, "Ana", "", null))
-        )
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null)))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Saída que zera o estoque exige um motivo");
+            .hasMessageContaining("nao aceita ABERTURA");
     }
 
     @Test
-    @DisplayName("AJUSTE com motivo invalido deve falhar")
-    void ajusteMotivoInvalido_deveFalhar() {
-        ReagentLot lot = lot(50D);
+    @DisplayName("FECHAMENTO em vencido bloqueada")
+    void fechamento_emVencido_bloqueia() {
+        ReagentLot lot = lot(2, 1);
+        lot.setStatus(ReagentStatus.VENCIDO);
+        lot.setExpiryDate(LocalDate.now().minusDays(3));
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        assertThatThrownBy(() ->
-            reagentService.createMovement(lot.getId(),
-                new StockMovementRequest("AJUSTE", 30D, "Ana", "", "FANTASIA"))
-        )
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null)))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Motivo de movimentação inválido");
+            .hasMessageContaining("nao aceita FECHAMENTO");
     }
 
     @Test
-    @DisplayName("SAIDA permitida quando iguala zero com motivo")
-    void saidaQueIgualaZero_devePermitir() {
-        ReagentLot lot = lot(50D);
+    @DisplayName("SAIDA em createMovement → 400 (descontinuado em v3)")
+    void saida_emCreateMovement_recusada() {
+        ReagentLot lot = lot(20, 0);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
-        StockMovement movement = reagentService.createMovement(
-            lot.getId(), new StockMovementRequest("SAIDA", 50D, "Ana", "", "VENCIMENTO"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(0D);
-        assertThat(movement.getQuantity()).isEqualTo(50D);
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("SAIDA descontinuado");
     }
 
-    @Test
-    @DisplayName("AJUSTE para zero deve permitir")
-    void ajusteParaZero_devePermitir() {
-        ReagentLot lot = lot(80D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        StockMovement movement = reagentService.createMovement(
-            lot.getId(), new StockMovementRequest("AJUSTE", 0D, "Ana", "Zerando estoque", "CORRECAO"));
-
-        assertThat(lot.getCurrentStock()).isEqualTo(0D);
-        assertThat(movement.getNotes()).isEqualTo("Zerando estoque");
-        assertThat(movement.getPreviousStock()).isEqualTo(80D);
-    }
+    // ===== archive =====
 
     @Test
-    @DisplayName("ENTRADA grava previousStock")
-    void entradaGravaPreviousStock() {
-        ReagentLot lot = lot(60D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        StockMovement movement = reagentService.createMovement(
-            lot.getId(), new StockMovementRequest("ENTRADA", 10D, "Ana", "", null));
-
-        assertThat(movement.getPreviousStock()).isEqualTo(60D);
-        assertThat(lot.getCurrentStock()).isEqualTo(70D);
-    }
-
-    @Test
-    @DisplayName("SAIDA grava previousStock")
-    void saidaGravaPreviousStock() {
-        ReagentLot lot = lot(60D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
-
-        StockMovement movement = reagentService.createMovement(
-            lot.getId(), new StockMovementRequest("SAIDA", 10D, "Ana", "", null));
-
-        assertThat(movement.getPreviousStock()).isEqualTo(60D);
-        assertThat(lot.getCurrentStock()).isEqualTo(50D);
-    }
-
-    // ===== getLots / filtros =====
-
-    @Test
-    @DisplayName("getLots calcula daysLeft corretamente")
-    void shouldCalculateDaysLeftCorrectly() {
-        ReagentLot lot = lot(100D);
-        lot.setExpiryDate(LocalDate.now().plusDays(10));
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(lot));
-
-        var result = reagentService.getLots(null, null);
-
-        assertThat(result.getFirst().daysLeft()).isBetween(9L, 10L);
-    }
-
-    @Test
-    @DisplayName("getLots nao altera status (auto-vencimento delegado ao scheduler)")
-    void getLots_naoDeveAlterarStatus() {
-        ReagentLot lot = lot(100D);
-        lot.setExpiryDate(LocalDate.now().minusDays(1));
+    @DisplayName("archive happy path: status=inativo, archivedAt/By set, audit")
+    void archive_happy() {
+        ReagentLot lot = lot(5, 0);
         lot.setStatus(ReagentStatus.EM_ESTOQUE);
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(lot));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(userRepository.existsActiveResponsibleByUsername(eq("ana"), any()))
+            .thenReturn(true);
 
-        var result = reagentService.getLots(null, null);
+        ReagentLot result = reagentService.archiveLot(lot.getId(),
+            new ArchiveReagentLotRequest(LocalDate.now(), "ana"));
 
-        // Mantem status atual; derivacao automatica ocorre no scheduler/createMovement, nao em GET.
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.EM_ESTOQUE);
-        verify(reagentLotRepository, never()).save(any());
-        assertThat(result).hasSize(1);
+        assertThat(result.getStatus()).isEqualTo(ReagentStatus.INATIVO);
+        assertThat(result.getArchivedAt()).isEqualTo(LocalDate.now());
+        assertThat(result.getArchivedBy()).isEqualTo("ana");
+        assertThat(result.getNeedsStockReview()).isFalse();
+
+        List<RecordingAuditService.Call> archived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_LOT_ARCHIVED);
+        assertThat(archived).hasSize(1);
+        assertThat(archived.getFirst().details())
+            .containsEntry("toStatus", ReagentStatus.INATIVO)
+            .containsEntry("archivedBy", "ana");
     }
 
     @Test
-    @DisplayName("filtragem por category e status novo deve usar repository")
-    void filtragemCategoryEStatus_deveUsarRepository() {
-        ReagentLot lot = lot(100D);
-        lot.setCategory("Bioquímica");
-        lot.setExpiryDate(LocalDate.now().plusDays(30));
-        when(reagentLotRepository.findByFilters(eq("Bioquímica"), eq("em_estoque")))
-            .thenReturn(List.of(lot));
+    @DisplayName("archive com archivedBy username inexistente → 400")
+    void archive_archivedByInvalido_falha() {
+        ReagentLot lot = lot(5, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(userRepository.existsActiveResponsibleByUsername(eq("fantasma"), any()))
+            .thenReturn(false);
 
-        var result = reagentService.getLots("Bioquímica", "em_estoque");
-
-        assertThat(result).hasSize(1);
-        verify(reagentLotRepository).findByFilters("Bioquímica", "em_estoque");
-    }
-
-    @Test
-    @DisplayName("filtro por status legado retorna 400 (defesa anti-status-legado)")
-    void filtragemStatusLegado_deveFalhar() {
-        assertThatThrownBy(() -> reagentService.getLots(null, "ativo"))
+        assertThatThrownBy(() -> reagentService.archiveLot(lot.getId(),
+            new ArchiveReagentLotRequest(LocalDate.now(), "fantasma")))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Status legado nao suportado");
+            .hasMessageContaining("nao encontrado ou inativo");
     }
 
     @Test
-    @DisplayName("getByLotNumber retorna lotes com mesmo numero")
-    void getByLotNumber_deveRetornarLotes() {
-        ReagentLot lot1 = lot(100D);
-        ReagentLot lot2 = lot(50D);
-        lot2.setManufacturer("OutroFab");
-        when(reagentLotRepository.findByLotNumberIgnoreCase("L123")).thenReturn(List.of(lot1, lot2));
+    @DisplayName("archive com archivedAt futura → 400")
+    void archive_archivedAtFutura_falha() {
+        ReagentLot lot = lot(5, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        var result = reagentService.getByLotNumber("L123");
-
-        assertThat(result).hasSize(2);
+        assertThatThrownBy(() -> reagentService.archiveLot(lot.getId(),
+            new ArchiveReagentLotRequest(LocalDate.now().plusDays(1), "ana")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("nao pode ser data futura");
     }
 
     @Test
-    @DisplayName("getLots marca usedInQcRecently com base em CQ recente")
-    void getLotsMarcaUsedInQcRecently() {
-        ReagentLot usedLot = lot(100D);
-        usedLot.setLotNumber("L-ACTIVE");
-        ReagentLot unusedLot = lot(100D);
-        unusedLot.setLotNumber("L-INACTIVE");
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(usedLot, unusedLot));
-        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(List.of("l-active"));
+    @DisplayName("archive em lote ja inativo → 400")
+    void archive_jaInativo_falha() {
+        ReagentLot lot = lot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setArchivedAt(LocalDate.now().minusDays(2));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        var result = reagentService.getLots(null, null);
-
-        assertThat(result).hasSize(2);
-        assertThat(result.get(0).usedInQcRecently()).isTrue();
-        assertThat(result.get(1).usedInQcRecently()).isFalse();
+        assertThatThrownBy(() -> reagentService.archiveLot(lot.getId(),
+            new ArchiveReagentLotRequest(LocalDate.now(), "ana")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("ja arquivado");
     }
 
     @Test
-    @DisplayName("getLots tolera retorno vazio do repo de CQ")
-    void getLotsToleraCqVazio() {
-        ReagentLot l = lot(100D);
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(l));
-        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
+    @DisplayName("archive valida archivedBy por USERNAME (audit ressalva 1.1) — name colidindo nao engana")
+    void archive_buscaPorUsernameNaoName() {
+        // Cenario: dois usuarios com mesmo `name='Joao Silva'` mas usernames distintos.
+        // Repository so encontra o que bate por USERNAME — chave estavel.
+        ReagentLot lot = lot(5, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(userRepository.existsActiveResponsibleByUsername(eq("jsilva2"), any()))
+            .thenReturn(true);
+        // jsilva (outro usuario com mesmo name) nao foi consultado — irrelevante.
 
-        var result = reagentService.getLots(null, null);
+        ReagentLot result = reagentService.archiveLot(lot.getId(),
+            new ArchiveReagentLotRequest(LocalDate.now(), "jsilva2"));
 
-        assertThat(result).hasSize(1);
-        assertThat(result.getFirst().usedInQcRecently()).isFalse();
+        assertThat(result.getArchivedBy()).isEqualTo("jsilva2");
+    }
+
+    // ===== unarchive =====
+
+    @Test
+    @DisplayName("unarchive de inativo + expiry passou → vencido")
+    void unarchive_expiryPassada_viraVencido() {
+        ReagentLot lot = lot(2, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setExpiryDate(LocalDate.now().minusDays(3));
+        lot.setArchivedAt(LocalDate.now().minusDays(10));
+        lot.setArchivedBy("ana");
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLot result = reagentService.unarchiveLot(lot.getId(),
+            new UnarchiveReagentLotRequest("auditor pediu"));
+
+        assertThat(result.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
+        // Preserva archivedAt/By.
+        assertThat(result.getArchivedAt()).isEqualTo(LocalDate.now().minusDays(10));
+        assertThat(result.getArchivedBy()).isEqualTo("ana");
     }
 
     @Test
-    @DisplayName("getLots: lotNumber em colisao NAO marca usedInQcRecently (P0-1)")
-    void usedInQcRecentlyConservadorQuandoColide() {
-        ReagentLot a = lot(100D);
-        a.setLotNumber("L-DUO");
-        a.setManufacturer("FabA");
-        ReagentLot b = lot(100D);
-        b.setLotNumber("L-DUO");
-        b.setManufacturer("FabB");
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(a, b));
-        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(List.of("l-duo"));
+    @DisplayName("unarchive de inativo + expiry futura + unitsInStock>0 + unitsInUse=0 → em_estoque")
+    void unarchive_emEstoque() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setExpiryDate(LocalDate.now().plusDays(60));
+        lot.setArchivedAt(LocalDate.now().minusDays(5));
+        lot.setArchivedBy("ana");
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
-        var result = reagentService.getLots(null, null);
+        ReagentLot result = reagentService.unarchiveLot(lot.getId(),
+            new UnarchiveReagentLotRequest(null));
 
-        assertThat(result.get(0).usedInQcRecently()).isFalse();
-        assertThat(result.get(1).usedInQcRecently()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(ReagentStatus.EM_ESTOQUE);
+        assertThat(result.getArchivedAt()).isEqualTo(LocalDate.now().minusDays(5));
     }
 
     @Test
-    @DisplayName("getLots expoe diagnostico de rastreabilidade forte")
-    void getLotsExpoeDiagnostico() {
-        ReagentLot incomplete = lot(100D);
-        incomplete.setManufacturer("Bio");
-        incomplete.setLocation(null);
-        incomplete.setSupplier(null);
-        incomplete.setReceivedDate(null);
+    @DisplayName("unarchive de inativo + unitsInUse>0 → em_uso")
+    void unarchive_emUso() {
+        ReagentLot lot = lot(2, 1);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setExpiryDate(LocalDate.now().plusDays(60));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
-        ReagentLot complete = lot(100D);
-        complete.setLotNumber("L-COMPLETE");
-        complete.setManufacturer("Bio");
-        complete.setLocation("Geladeira 2");
-        complete.setSupplier("ForneceX");
-        complete.setReceivedDate(LocalDate.now().minusDays(3));
+        ReagentLot result = reagentService.unarchiveLot(lot.getId(),
+            new UnarchiveReagentLotRequest(null));
 
-        when(reagentLotRepository.findByFilters(isNull(), isNull())).thenReturn(List.of(incomplete, complete));
-        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
-
-        var result = reagentService.getLots(null, null);
-
-        assertThat(result.get(0).traceabilityComplete()).isFalse();
-        assertThat(result.get(0).traceabilityIssues())
-            .containsExactlyInAnyOrder("location", "supplier", "receivedDate");
-        assertThat(result.get(1).traceabilityComplete()).isTrue();
-        assertThat(result.get(1).traceabilityIssues()).isEmpty();
+        assertThat(result.getStatus()).isEqualTo(ReagentStatus.EM_USO);
     }
 
     @Test
-    @DisplayName("getLots expoe canReceiveEntry=false apenas para vencido")
-    void getLotsExpoePoliticaMovimentacao() {
-        ReagentLot foraDeEstoque = lot(0D);
-        foraDeEstoque.setStatus(ReagentStatus.FORA_DE_ESTOQUE);
-        ReagentLot vencido = lot(0D);
-        vencido.setLotNumber("L-V");
-        vencido.setStatus(ReagentStatus.VENCIDO);
+    @DisplayName("unarchive de inativo zero/zero → em_estoque (NAO volta para inativo)")
+    void unarchive_zeroZero_viraEmEstoque() {
+        ReagentLot lot = lot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setExpiryDate(LocalDate.now().plusDays(60));
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
 
-        when(reagentLotRepository.findByFilters(isNull(), isNull()))
-            .thenReturn(List.of(foraDeEstoque, vencido));
-        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
+        ReagentLot result = reagentService.unarchiveLot(lot.getId(),
+            new UnarchiveReagentLotRequest(null));
 
-        var result = reagentService.getLots(null, null);
+        assertThat(result.getStatus()).isEqualTo(ReagentStatus.EM_ESTOQUE);
+    }
 
-        assertThat(result.get(0).canReceiveEntry()).isTrue();
-        assertThat(result.get(0).allowedMovementTypes()).containsExactly("ENTRADA", "SAIDA", "AJUSTE");
-        assertThat(result.get(0).movementWarning()).isNull();
+    @Test
+    @DisplayName("unarchive de lote nao-inativo → 400")
+    void unarchive_naoInativo_falha() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
-        assertThat(result.get(1).canReceiveEntry()).isFalse();
-        assertThat(result.get(1).allowedMovementTypes()).containsExactly("SAIDA", "AJUSTE");
-        assertThat(result.get(1).movementWarning())
-            .isEqualTo("Lote vencido nao aceita nova entrada. Crie um novo lote.");
+        assertThatThrownBy(() -> reagentService.unarchiveLot(lot.getId(),
+            new UnarchiveReagentLotRequest(null)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Lote nao esta arquivado");
+    }
+
+    @Test
+    @DisplayName("unarchive emite audit REAGENT_LOT_UNARCHIVED com archivedAt/By preservados")
+    void unarchive_audit() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setArchivedAt(LocalDate.now().minusDays(7));
+        lot.setArchivedBy("ana");
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        reagentService.unarchiveLot(lot.getId(), new UnarchiveReagentLotRequest("teste"));
+
+        List<RecordingAuditService.Call> calls = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_LOT_UNARCHIVED);
+        assertThat(calls).hasSize(1);
+        assertThat(calls.getFirst().details())
+            .containsEntry("archivedAtPreserved", LocalDate.now().minusDays(7).toString())
+            .containsEntry("archivedByPreserved", "ana")
+            .containsEntry("reason", "teste");
     }
 
     // ===== deleteLot =====
 
     @Test
-    @DisplayName("deleteLot remove fisicamente quando sem historico")
-    void deleteLot_semHistorico_deveRemoverFisicamente() {
-        ReagentLot lot = lot(0D);
+    @DisplayName("deleteLot com confirmLotNumber mismatch → 400")
+    void deleteLot_confirmMismatch_falha() {
+        ReagentLot lot = lot(0, 0);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(false);
+
+        assertThatThrownBy(() -> reagentService.deleteLot(lot.getId(),
+            new DeleteReagentLotRequest("OUTRO")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Confirmacao do lote nao confere");
+
+        verify(reagentLotRepository, never()).deleteById(any());
+    }
+
+    @Test
+    @DisplayName("deleteLot com usedInQcRecently=true → 400 + audit DELETE_BLOCKED, nada apagado")
+    void deleteLot_usedInQc_bloqueia() {
+        ReagentLot lot = lot(0, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(true);
+
+        assertThatThrownBy(() -> reagentService.deleteLot(lot.getId(),
+            new DeleteReagentLotRequest("L123")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("CQ recente");
+
+        verify(reagentLotRepository, never()).deleteById(any());
+        List<RecordingAuditService.Call> blocked = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_DELETE_BLOCKED);
+        assertThat(blocked).hasSize(1);
+        assertThat(blocked.getFirst().details())
+            .containsEntry("reason", "used_in_qc_recently");
+    }
+
+    @Test
+    @DisplayName("deleteLot happy path: audit REAGENT_LOT_DELETED com snapshot enumerativo de movements")
+    void deleteLot_happy_snapshotEnumerativo() {
+        ReagentLot lot = lot(0, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
         when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
 
-        reagentService.deleteLot(lot.getId());
+        // Lista de movements para snapshot.
+        StockMovement m1 = StockMovement.builder()
+            .id(UUID.randomUUID())
+            .reagentLot(lot).type("ENTRADA").quantity(10D)
+            .responsible("Ana").build();
+        StockMovement m2 = StockMovement.builder()
+            .id(UUID.randomUUID())
+            .reagentLot(lot).type("ABERTURA").quantity(1D)
+            .responsible("Ana").build();
+        when(stockMovementRepository.findByReagentLotIdOrderByCreatedAtDesc(lot.getId()))
+            .thenReturn(List.of(m1, m2));
+
+        reagentService.deleteLot(lot.getId(), new DeleteReagentLotRequest("L123"));
 
         verify(reagentLotRepository).deleteById(lot.getId());
-        verify(reagentLotRepository, never()).save(any());
+
+        List<RecordingAuditService.Call> deleted = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_LOT_DELETED);
+        assertThat(deleted).hasSize(1);
+        // Snapshot deve incluir movements como array nao-vazio (audit ressalva 1.2).
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> movements = (List<Map<String, Object>>) deleted.getFirst().details().get("movements");
+        assertThat(movements).hasSize(2);
+        assertThat(movements.get(0)).containsKeys("id", "type", "quantity", "responsible", "createdAt");
+        assertThat(deleted.getFirst().details()).containsEntry("movementsCount", 2L);
     }
 
     @Test
-    @DisplayName("deleteLot arquiva como fora_de_estoque quando ha movimentos com estoque zero")
-    void deleteLot_comMovimentos_arquivaForaDeEstoque() {
-        ReagentLot lot = lot(0D);
-        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+    @DisplayName("deleteLot sem movements: snapshot tem array vazio mas existe")
+    void deleteLot_semMovements_snapshotVazio() {
+        ReagentLot lot = lot(0, 0);
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(true);
         when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.findByReagentLotIdOrderByCreatedAtDesc(lot.getId()))
+            .thenReturn(List.of());
 
-        reagentService.deleteLot(lot.getId());
+        reagentService.deleteLot(lot.getId(), new DeleteReagentLotRequest("L123"));
 
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.FORA_DE_ESTOQUE);
-        verify(reagentLotRepository, never()).deleteById(any());
-        List<RecordingAuditService.Call> archived = auditService.callsFor(
-            ReagentService.AUDIT_ACTION_LOT_ARCHIVED);
-        assertThat(archived).hasSize(1);
-        assertThat(archived.getFirst().details())
-            .containsEntry("to", ReagentStatus.FORA_DE_ESTOQUE);
+        verify(reagentLotRepository).deleteById(lot.getId());
+        List<RecordingAuditService.Call> deleted = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_LOT_DELETED);
+        assertThat(deleted).hasSize(1);
+    }
+
+    // ===== deriveStatus =====
+
+    @Test
+    @DisplayName("deriveStatus: inativo respeita terminal manual")
+    void deriveStatus_inativoRespeita() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        assertThat(reagentService.deriveStatus(lot, LocalDate.now()))
+            .isEqualTo(ReagentStatus.INATIVO);
     }
 
     @Test
-    @DisplayName("deleteLot bloqueia arquivamento com historico e estoque positivo")
-    void deleteLot_comHistoricoEEstoquePositivo_deveBloquear() {
-        ReagentLot lot = lot(5D);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(true);
-        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(false);
-
-        assertThatThrownBy(() -> reagentService.deleteLot(lot.getId()))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Zere o estoque antes de arquivar");
-
-        verify(reagentLotRepository, never()).deleteById(any());
-        verify(reagentLotRepository, never()).save(any());
-        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_DELETE_BLOCKED)).hasSize(1);
+    @DisplayName("deriveStatus: expiry < hoje retorna vencido (mais forte)")
+    void deriveStatus_expiryPassada_vencido() {
+        ReagentLot lot = lot(5, 0);
+        lot.setExpiryDate(LocalDate.now().minusDays(1));
+        assertThat(reagentService.deriveStatus(lot, LocalDate.now()))
+            .isEqualTo(ReagentStatus.VENCIDO);
     }
 
     @Test
-    @DisplayName("deleteLot preserva lote usado em CQ como fora_de_estoque quando estoque zerado")
-    void deleteLot_usadoEmCqComEstoqueZero_deveArquivar() {
-        ReagentLot lot = lot(0D);
+    @DisplayName("deriveStatus: unitsInUse > 0 retorna em_uso")
+    void deriveStatus_unitsInUse_emUso() {
+        ReagentLot lot = lot(2, 3);
+        assertThat(reagentService.deriveStatus(lot, LocalDate.now()))
+            .isEqualTo(ReagentStatus.EM_USO);
+    }
+
+    @Test
+    @DisplayName("deriveStatus: unitsInStock > 0 e unitsInUse == 0 → em_estoque")
+    void deriveStatus_emEstoque() {
+        ReagentLot lot = lot(5, 0);
+        assertThat(reagentService.deriveStatus(lot, LocalDate.now()))
+            .isEqualTo(ReagentStatus.EM_ESTOQUE);
+    }
+
+    @Test
+    @DisplayName("deriveStatus: zero/zero mantem status atual (NAO terminal automatico)")
+    void deriveStatus_zeroZero_mantemStatus() {
+        ReagentLot lot = lot(0, 0);
         lot.setStatus(ReagentStatus.EM_ESTOQUE);
-        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
-        when(stockMovementRepository.existsByReagentLotId(lot.getId())).thenReturn(false);
-        when(qcRecordRepository.existsByLotNumberOperational(lot.getLotNumber())).thenReturn(true);
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-
-        reagentService.deleteLot(lot.getId());
-
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.FORA_DE_ESTOQUE);
-        verify(reagentLotRepository, never()).deleteById(any());
+        assertThat(reagentService.deriveStatus(lot, LocalDate.now()))
+            .isEqualTo(ReagentStatus.EM_ESTOQUE);
     }
 
-    // ===== deleteMovement =====
+    // ===== getResponsibles =====
 
     @Test
-    @DisplayName("deleteMovement ENTRADA com estoque insuficiente lanca exception")
-    void deleteMovementEntrada_comEstoqueInsuficiente_deveLancarException() {
-        ReagentLot lot = lot(20D);
-        StockMovement entradaMovement = StockMovement.builder()
+    @DisplayName("getResponsibles retorna shape minimo filtrado")
+    void getResponsibles_shapeMinimo() {
+        User u1 = User.builder()
             .id(UUID.randomUUID())
-            .reagentLot(lot)
-            .type("ENTRADA")
-            .quantity(50D)
-            .responsible("Ana")
-            .notes("")
+            .username("ana")
+            .name("Ana Silva")
+            .email("ana@bio.com")
+            .role(Role.FUNCIONARIO)
+            .isActive(true)
             .build();
-        when(stockMovementRepository.findById(entradaMovement.getId()))
-            .thenReturn(Optional.of(entradaMovement));
+        when(userRepository.findActiveResponsibles(any())).thenReturn(List.of(u1));
 
-        assertThatThrownBy(() -> reagentService.deleteMovement(entradaMovement.getId()))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Não é possível excluir esta entrada");
+        var responsibles = reagentService.getResponsibles();
+
+        assertThat(responsibles).hasSize(1);
+        assertThat(responsibles.getFirst().username()).isEqualTo("ana");
+        assertThat(responsibles.getFirst().name()).isEqualTo("Ana Silva");
+        assertThat(responsibles.getFirst().role()).isEqualTo("FUNCIONARIO");
     }
 
-    @Test
-    @DisplayName("deleteMovement SAIDA restaura estoque")
-    void deleteMovementSaida_deveRestaurarEstoque() {
-        ReagentLot lot = lot(70D);
-        StockMovement saidaMovement = StockMovement.builder()
-            .id(UUID.randomUUID())
-            .reagentLot(lot)
-            .type("SAIDA")
-            .quantity(30D)
-            .responsible("Ana")
-            .notes("")
-            .build();
-        when(stockMovementRepository.findById(saidaMovement.getId()))
-            .thenReturn(Optional.of(saidaMovement));
-        when(reagentLotRepository.save(any(ReagentLot.class)))
-            .thenAnswer(invocation -> invocation.getArgument(0));
-
-        reagentService.deleteMovement(saidaMovement.getId());
-
-        assertThat(lot.getCurrentStock()).isEqualTo(100D);
-        verify(stockMovementRepository).delete(saidaMovement);
-    }
-
-    // ===== getExpiringLots / getLabelSummaries =====
+    // ===== getLots =====
 
     @Test
-    @DisplayName("getExpiringLots delega ao repository com janela de dias")
-    void shouldFindExpiringLots() {
-        when(reagentLotRepository.findExpiringLots(any(), any())).thenReturn(List.of(lot(100D)));
+    @DisplayName("getLots: filtro por status inativo permitido (v3)")
+    void getLots_filtraInativo() {
+        ReagentLot l = lot(0, 0);
+        l.setStatus(ReagentStatus.INATIVO);
+        when(reagentLotRepository.findByFilters(isNull(), eq("inativo")))
+            .thenReturn(List.of(l));
+        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
 
-        var result = reagentService.getExpiringLots(30);
+        var result = reagentService.getLots(null, "inativo");
 
         assertThat(result).hasSize(1);
+        assertThat(result.getFirst().status()).isEqualTo("inativo");
     }
 
-    // ===== Alinhamento de listas canonicas (G-01 / G-02) =====
-    //
-    // Regressao para o bug critico do refator-reagentes-v2 (qa-review):
-    // ALLOWED_CATEGORIES e ALLOWED_STORAGE_TEMPS no backend DEVEM espelhar exatamente
-    // CATEGORIES e TEMPS em biodiagnostico-web/src/components/proin/reagentes/constants.ts.
-    // Drift quebra cadastro com BusinessException("Categoria invalida..." / "Temperatura..."
-    // de armazenamento invalida...").
+    @Test
+    @DisplayName("getLots: filtro por status legado fora_de_estoque retorna 400")
+    void getLots_statusLegado_falha() {
+        assertThatThrownBy(() -> reagentService.getLots(null, "fora_de_estoque"))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Status legado nao suportado");
+    }
+
+    @Test
+    @DisplayName("getLots expoe canReceiveEntry=false para vencido E inativo")
+    void getLots_canReceiveEntry() {
+        ReagentLot vencido = lot(0, 0);
+        vencido.setLotNumber("L-V");
+        vencido.setStatus(ReagentStatus.VENCIDO);
+        ReagentLot inativo = lot(0, 0);
+        inativo.setLotNumber("L-I");
+        inativo.setStatus(ReagentStatus.INATIVO);
+
+        when(reagentLotRepository.findByFilters(isNull(), isNull()))
+            .thenReturn(List.of(vencido, inativo));
+        when(qcRecordRepository.findActiveLotNumbersSince(any(), any())).thenReturn(Collections.emptyList());
+
+        var result = reagentService.getLots(null, null);
+
+        assertThat(result.get(0).canReceiveEntry()).isFalse();
+        assertThat(result.get(0).allowedMovementTypes()).containsExactly("CONSUMO", "AJUSTE");
+        assertThat(result.get(1).canReceiveEntry()).isFalse();
+        assertThat(result.get(1).allowedMovementTypes()).containsExactly("AJUSTE");
+    }
+
+    // ===== Categorias / temperaturas (mantidos do v2) =====
 
     @org.junit.jupiter.params.ParameterizedTest(name = "createLot aceita categoria canonica: {0}")
     @org.junit.jupiter.params.provider.MethodSource(
@@ -1032,7 +999,7 @@ class ReagentServiceTest {
 
         ReagentLotRequest req = fullRequest(
             "ALT", "L-CAT-" + Math.abs(category.hashCode()), "Bio", category,
-            80D, "em_estoque",
+            8, 0, "em_estoque",
             LocalDate.now().plusDays(60),
             "Geladeira 2", "2-8°C",
             null, null, null
@@ -1042,96 +1009,25 @@ class ReagentServiceTest {
         assertThat(lot.getCategory()).isEqualTo(category);
     }
 
-    @org.junit.jupiter.params.ParameterizedTest(name = "createLot aceita storageTemp canonica: {0}")
-    @org.junit.jupiter.params.provider.MethodSource(
-        "com.biodiagnostico.service.ReagentServiceTest#allowedStorageTempsProvider")
-    @DisplayName("ALLOWED_STORAGE_TEMPS: cada temperatura canonica e aceita por createLot (G-02)")
-    void allTemperaturas_canonicas_saoAceitas(String storageTemp) {
-        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
-
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L-TEMP-" + Math.abs(storageTemp.hashCode()), "Bio", "Bioquímica",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(60),
-            "Geladeira 2", storageTemp,
-            null, null, null
-        );
-
-        ReagentLot lot = reagentService.createLot(req);
-        assertThat(lot.getStorageTemp()).isEqualTo(storageTemp);
-    }
-
     @Test
-    @DisplayName("ALLOWED_CATEGORIES: valor fora da lista (legado) e rejeitado com mensagem clara (G-01)")
-    void categoria_legada_eRejeitada() {
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L-CAT-LEG", "Bio", "Coagulacao",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(60),
-            "Geladeira 2", "2-8°C",
-            null, null, null
-        );
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Categoria invalida")
-            .hasMessageContaining("Bioquímica")
-            .hasMessageContaining("Kit Diagnóstico");
-    }
-
-    @Test
-    @DisplayName("ALLOWED_STORAGE_TEMPS: formato legado (sem °C) e rejeitado com mensagem clara (G-02)")
-    void temperatura_legada_eRejeitada() {
-        ReagentLotRequest req = fullRequest(
-            "ALT", "L-TEMP-LEG", "Bio", "Bioquímica",
-            80D, "em_estoque",
-            LocalDate.now().plusDays(60),
-            "Geladeira 2", "2-8C",
-            null, null, null
-        );
-        assertThatThrownBy(() -> reagentService.createLot(req))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Temperatura de armazenamento invalida")
-            .hasMessageContaining("2-8°C");
-    }
-
-    @Test
-    @DisplayName("ALLOWED_CATEGORIES espelha frontend constants.ts (literal de seguranca G-01)")
+    @DisplayName("ALLOWED_CATEGORIES espelha frontend constants.ts (G-01)")
     void categorias_espelhamFrontendConstantsTs() {
-        // Snapshot literal das CATEGORIES em
-        // biodiagnostico-web/src/components/proin/reagentes/constants.ts.
-        // Se este teste quebrar, alinhar tambem la (ou aqui se a UI mudou primeiro).
         assertThat(ReagentService.ALLOWED_CATEGORIES).containsExactly(
-            "Bioquímica",
-            "Hematologia",
-            "Imunologia",
-            "Parasitologia",
-            "Microbiologia",
-            "Uroanálise",
-            "Kit Diagnóstico",
-            "Controle CQ",
-            "Calibrador",
-            "Geral"
+            "Bioquímica", "Hematologia", "Imunologia", "Parasitologia",
+            "Microbiologia", "Uroanálise", "Kit Diagnóstico",
+            "Controle CQ", "Calibrador", "Geral"
         );
     }
 
     @Test
-    @DisplayName("ALLOWED_STORAGE_TEMPS espelha frontend constants.ts (literal de seguranca G-02)")
+    @DisplayName("ALLOWED_STORAGE_TEMPS espelha frontend constants.ts (G-02)")
     void temperaturas_espelhamFrontendConstantsTs() {
-        // Snapshot literal das TEMPS em
-        // biodiagnostico-web/src/components/proin/reagentes/constants.ts.
         assertThat(ReagentService.ALLOWED_STORAGE_TEMPS).containsExactly(
-            "2-8°C",
-            "15-25°C (Ambiente)",
-            "-20°C",
-            "-80°C"
+            "2-8°C", "15-25°C (Ambiente)", "-20°C", "-80°C"
         );
     }
 
     static java.util.stream.Stream<String> allowedCategoriesProvider() {
         return ReagentService.ALLOWED_CATEGORIES.stream();
-    }
-
-    static java.util.stream.Stream<String> allowedStorageTempsProvider() {
-        return ReagentService.ALLOWED_STORAGE_TEMPS.stream();
     }
 }

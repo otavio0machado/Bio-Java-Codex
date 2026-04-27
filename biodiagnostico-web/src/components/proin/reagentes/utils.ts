@@ -4,20 +4,21 @@ import type { ReagentLot, ReagentLotRequest, StockMovementRequest, User } from '
 export type ReagentSortMode = 'urgency' | 'name' | 'stock'
 export type ReagentViewMode = 'list' | 'tags'
 /**
- * Filtros operacionais aplicados pelo dashboard. Pos-refator v2 saem
- * {@code lowStock}, {@code ruptureRisk} e {@code expired} (este renomeado
- * para {@code vencidos}). Adicionados {@code emEstoque, emUso, foraDeEstoque}
- * para alinhar com os 5 cards de status canonicos.
+ * Filtros operacionais aplicados pelo dashboard. Pos-refator v3:
+ * - DROP {@code foraDeEstoque}.
+ * - ADD {@code inativos} (substitui o anterior, como sumario do estado terminal manual).
+ * - ADD {@code needsReview} (lotes com flag {@code needsStockReview} vindos da V14).
  */
 export type DashFilter =
   | 'emEstoque'
   | 'emUso'
-  | 'foraDeEstoque'
   | 'vencidos'
+  | 'inativos'
   | 'expiring7d'
   | 'expiring30d'
   | 'noTraceability'
   | 'noValidity'
+  | 'needsReview'
 
 /**
  * Stats consumidos pelo {@code ReagentsDashboard}. Cinco contagens principais
@@ -27,12 +28,13 @@ export interface ReagentStats {
   total: number
   emEstoque: number
   emUso: number
-  foraDeEstoque: number
   vencidos: number
+  inativos: number
   expiring7d: number
   expiring30d: number
   noTraceability: number
   noValidity: number
+  needsReview: number
 }
 
 export interface ReagentFilters {
@@ -49,9 +51,8 @@ export function getResponsibleName(user: User | null | undefined) {
 }
 
 /**
- * Form vazio para o {@code ReagentLotModal}. Reflete os 9 obrigatorios canonicos
- * + 3 opcionais (Detalhes adicionais). Status default = 'em_estoque' alinha com
- * o backend ({@code ReagentLot.status} default).
+ * Form vazio para o {@code ReagentLotModal}. Reflete os 10 obrigatorios canonicos
+ * pos-v3 + 3 opcionais (Detalhes adicionais). Status default = 'em_estoque'.
  */
 export function createEmptyLotForm(): ReagentLotRequest {
   return {
@@ -60,7 +61,8 @@ export function createEmptyLotForm(): ReagentLotRequest {
     manufacturer: '',
     category: '',
     expiryDate: '',
-    currentStock: 0,
+    unitsInStock: 0,
+    unitsInUse: 0,
     status: 'em_estoque',
     location: '',
     storageTemp: '',
@@ -115,41 +117,54 @@ export function getTraceabilityIssueLabels(lot: ReagentLot) {
 }
 
 /**
- * Politica canonica de aceitacao de ENTRADA pos-refator v2: somente
- * {@code vencido} bloqueia. Demais status ({@code em_estoque, em_uso,
- * fora_de_estoque}) aceitam ENTRADA — em particular {@code fora_de_estoque}
- * volta a {@code em_uso} via derivacao no backend.
- *
- * Bloqueante audit 4.2.2: fallback alinhado com a politica nova; usa
- * {@code lot.canReceiveEntry} sempre que o backend manda; senao testa
- * {@code status !== 'vencido'}.
+ * Politica canonica de aceitacao de ENTRADA pos-refator v3: {@code vencido} e
+ * {@code inativo} bloqueiam. Inativo so aceita AJUSTE (com reason) ou unarchive
+ * antes de aceitar movimentos operacionais. Backend grava
+ * {@code canReceiveEntry} no DTO; o fallback abaixo replica a regra para o caso
+ * raro de o campo nao vir.
  */
 export function canReceiveEntry(lot: ReagentLot) {
   if (typeof lot.canReceiveEntry === 'boolean') {
     return lot.canReceiveEntry
   }
-  return lot.status !== 'vencido'
+  return lot.status !== 'vencido' && lot.status !== 'inativo'
 }
 
 /**
- * Constroi os 9 indicadores do dashboard. Cinco principais sao contagens
- * por status canonico; quatro de alerta operacional.
+ * Pode abrir uma unidade ({@code ABERTURA}) — exige estoque fechado e lote
+ * operavel.
+ */
+export function canOpenUnit(lot: ReagentLot) {
+  if (lot.status === 'vencido' || lot.status === 'inativo') return false
+  return (lot.unitsInStock ?? 0) >= 1
+}
+
+/**
+ * Pode reverter uma abertura ({@code FECHAMENTO}) — exige unidade aberta e
+ * lote operavel.
+ */
+export function canCloseUnit(lot: ReagentLot) {
+  if (lot.status === 'vencido' || lot.status === 'inativo') return false
+  return (lot.unitsInUse ?? 0) >= 1
+}
+
+/**
+ * Constroi os indicadores do dashboard pos refator v3.
+ * Cinco principais sao contagens por status canonico; quatro de alerta operacional.
  */
 export function buildReagentStats(lots: ReagentLot[]): ReagentStats {
+  const isActive = (lot: ReagentLot) => lot.status !== 'vencido' && lot.status !== 'inativo'
   return {
     total: lots.length,
     emEstoque: lots.filter((lot) => lot.status === 'em_estoque').length,
     emUso: lots.filter((lot) => lot.status === 'em_uso').length,
-    foraDeEstoque: lots.filter((lot) => lot.status === 'fora_de_estoque').length,
     vencidos: lots.filter((lot) => lot.status === 'vencido').length,
-    expiring7d: lots.filter(
-      (lot) => lot.status !== 'vencido' && lot.daysLeft >= 0 && lot.daysLeft <= 7,
-    ).length,
-    expiring30d: lots.filter(
-      (lot) => lot.status !== 'vencido' && lot.daysLeft > 7 && lot.daysLeft <= 30,
-    ).length,
+    inativos: lots.filter((lot) => lot.status === 'inativo').length,
+    expiring7d: lots.filter((lot) => isActive(lot) && lot.daysLeft >= 0 && lot.daysLeft <= 7).length,
+    expiring30d: lots.filter((lot) => isActive(lot) && lot.daysLeft > 7 && lot.daysLeft <= 30).length,
     noTraceability: lots.filter((lot) => getTraceabilityIssues(lot).length > 0).length,
     noValidity: lots.filter((lot) => !lot.expiryDate).length,
+    needsReview: lots.filter((lot) => Boolean(lot.needsStockReview)).length,
   }
 }
 
@@ -224,7 +239,8 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
         lot.daysLeft < 0 ||
         (lot.daysLeft >= 0 && lot.daysLeft <= 7) ||
         getTraceabilityIssues(lot).length > 0 ||
-        !lot.expiryDate,
+        !lot.expiryDate ||
+        Boolean(lot.needsStockReview),
     )
   }
 
@@ -232,22 +248,32 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
     result = result.filter((lot) => lot.status === 'em_estoque')
   } else if (filters.dashFilter === 'emUso') {
     result = result.filter((lot) => lot.status === 'em_uso')
-  } else if (filters.dashFilter === 'foraDeEstoque') {
-    result = result.filter((lot) => lot.status === 'fora_de_estoque')
   } else if (filters.dashFilter === 'vencidos') {
     result = result.filter((lot) => lot.status === 'vencido')
+  } else if (filters.dashFilter === 'inativos') {
+    result = result.filter((lot) => lot.status === 'inativo')
   } else if (filters.dashFilter === 'expiring7d') {
     result = result.filter(
-      (lot) => lot.status !== 'vencido' && lot.daysLeft >= 0 && lot.daysLeft <= 7,
+      (lot) =>
+        lot.status !== 'vencido' &&
+        lot.status !== 'inativo' &&
+        lot.daysLeft >= 0 &&
+        lot.daysLeft <= 7,
     )
   } else if (filters.dashFilter === 'expiring30d') {
     result = result.filter(
-      (lot) => lot.status !== 'vencido' && lot.daysLeft > 7 && lot.daysLeft <= 30,
+      (lot) =>
+        lot.status !== 'vencido' &&
+        lot.status !== 'inativo' &&
+        lot.daysLeft > 7 &&
+        lot.daysLeft <= 30,
     )
   } else if (filters.dashFilter === 'noTraceability') {
     result = result.filter((lot) => getTraceabilityIssues(lot).length > 0)
   } else if (filters.dashFilter === 'noValidity') {
     result = result.filter((lot) => !lot.expiryDate)
+  } else if (filters.dashFilter === 'needsReview') {
+    result = result.filter((lot) => Boolean(lot.needsStockReview))
   }
 
   const sorted = [...result]
@@ -265,22 +291,31 @@ export function filterReagentLots(lots: ReagentLot[], filters: ReagentFilters) {
   } else if (filters.sortMode === 'name') {
     sorted.sort((a, b) => (a.label ?? '').localeCompare(b.label ?? ''))
   } else if (filters.sortMode === 'stock') {
-    sorted.sort((a, b) => a.currentStock - b.currentStock)
+    sorted.sort((a, b) => getTotalUnits(a) - getTotalUnits(b))
   }
 
   return sorted
 }
 
 /**
- * Estado visual derivado por lote para colorir cards (vencido, urgente, alerta).
- * Sem {@code stockPct}/{@code daysToRupture} pos refator v2.
+ * Total de unidades do lote ({@code unitsInStock + unitsInUse}). Falls back
+ * para {@code totalUnits} quando o backend ja calcula.
+ */
+export function getTotalUnits(lot: ReagentLot) {
+  if (typeof lot.totalUnits === 'number') return lot.totalUnits
+  return (lot.unitsInStock ?? 0) + (lot.unitsInUse ?? 0)
+}
+
+/**
+ * Estado visual derivado por lote para colorir cards. Pos refator v3:
+ * {@code archived} bate em {@code inativo} (era {@code fora_de_estoque} no v2).
  */
 export function getLotVisualState(lot: ReagentLot) {
   const daysLeft = lot.daysLeft ?? 999
   const expired = lot.status === 'vencido'
-  const archived = lot.status === 'fora_de_estoque'
-  const urgent = !expired && daysLeft >= 0 && daysLeft <= 7
-  const warning = !expired && daysLeft > 7 && daysLeft <= 30
+  const archived = lot.status === 'inativo'
+  const urgent = !expired && !archived && daysLeft >= 0 && daysLeft <= 7
+  const warning = !expired && !archived && daysLeft > 7 && daysLeft <= 30
 
   return {
     daysLeft,

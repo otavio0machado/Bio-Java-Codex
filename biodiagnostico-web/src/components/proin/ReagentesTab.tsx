@@ -1,12 +1,15 @@
 import { PackagePlus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  useArchiveReagentLot,
   useCreateReagentLot,
   useCreateStockMovement,
   useDeleteReagentLot,
   useReagentLabels,
   useReagentLots,
   useReagentMovements,
+  useResponsibles,
+  useUnarchiveReagentLot,
   useUpdateReagentLot,
 } from '../../hooks/useReagents'
 import { useAuth } from '../../hooks/useAuth'
@@ -21,6 +24,8 @@ import type {
 import { Button, useToast } from '../ui'
 import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ReagentLotModal, ReagentMovementModal } from './reagentes/ReagentModals'
+import { ArchiveLotModal } from './reagentes/ArchiveLotModal'
+import { DeleteLotModal } from './reagentes/DeleteLotModal'
 import { ReagentsContent } from './reagentes/ReagentsContent'
 import { ReagentsDashboard } from './reagentes/ReagentsDashboard'
 import { ReagentsFilters } from './reagentes/ReagentsFilters'
@@ -28,8 +33,10 @@ import { validateLotForm, validateMovementForm } from './reagentes/schemas'
 import {
   buildLocationOptions,
   buildManufacturerOptions,
-  buildSupplierOptions,
   buildReagentStats,
+  buildSupplierOptions,
+  canCloseUnit,
+  canOpenUnit,
   canReceiveEntry,
   createEmptyLotForm,
   createMovementForm,
@@ -41,20 +48,22 @@ import {
 } from './reagentes/utils'
 
 /**
- * Aba de Reagentes pos refator v2.
+ * Aba de Reagentes pos refator v3.
  *
- * Modos de visualizacao: {@code 'tags'} (default — agrupado por etiqueta) e
- * {@code 'list'} (lista plana). O contrato 6.3 fixou {@code 'tags'} como
- * default novo.
- *
- * Botoes operacionais separados: ENTRADA e SAIDA abrem o mesmo modal mas com
- * o tipo pre-selecionado e o select bloqueado, dando affordance imediata sem
- * perder a opcao de AJUSTE.
+ * Mudancas em relacao ao v2:
+ * - Estoque per-unit: campos {@code unitsInStock} e {@code unitsInUse} substituem
+ *   {@code currentStock}. Card mostra contagens separadas + total derivado.
+ * - Tipos de movimento: ABERTURA, FECHAMENTO, CONSUMO substituem SAIDA. AJUSTE
+ *   seta os dois contadores explicitamente.
+ * - Status: drop {@code fora_de_estoque}, add {@code inativo} (terminal manual).
+ * - Arquivar e Apagar separados: ArchiveLotModal e DeleteLotModal explicitos.
+ * - DELETE restrito a ADMIN; FUNCIONARIO usa Arquivar.
  */
 export function ReagentesTab() {
   const { toast } = useToast()
   const { user } = useAuth()
   const responsibleName = getResponsibleName(user)
+  const isAdmin = user?.role === 'ADMIN'
 
   const [category, setCategory] = useState('')
   const [status, setStatus] = useState('')
@@ -76,6 +85,10 @@ export function ReagentesTab() {
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [tagStatusTab, setTagStatusTab] = useState('todos')
 
+  // Modais novos v3
+  const [archivingLot, setArchivingLot] = useState<ReagentLot | null>(null)
+  const [deletingLot, setDeletingLot] = useState<ReagentLot | null>(null)
+
   const {
     data: lots = [],
     isLoading: isLoadingLots = false,
@@ -83,14 +96,15 @@ export function ReagentesTab() {
     refetch: refetchLots,
   } = useReagentLots(category || undefined, status || undefined)
   const { data: labelSummaries } = useReagentLabels(true)
+  const { data: responsibles = [] } = useResponsibles(true)
   const createLot = useCreateReagentLot()
   const updateLot = useUpdateReagentLot()
   const deleteLot = useDeleteReagentLot()
+  const archiveLot = useArchiveReagentLot()
+  const unarchiveLot = useUnarchiveReagentLot()
   const createMovement = useCreateStockMovement(expandedLot?.id ?? '')
   const { data: movements = [] } = useReagentMovements(expandedLot?.id)
 
-  // Mantem snapshot local sincronizado com a query para o conteudo de "tags"
-  // continuar consistente mesmo se a query estiver entre ciclos.
   useEffect(() => {
     if (Array.isArray(labelSummaries)) {
       setLabels(labelSummaries)
@@ -139,8 +153,13 @@ export function ReagentesTab() {
       lotNumber: lot.lotNumber,
       manufacturer: lot.manufacturer ?? '',
       category: lot.category ?? '',
-      currentStock: lot.currentStock ?? 0,
-      status: lot.status,
+      unitsInStock: lot.unitsInStock ?? 0,
+      unitsInUse: lot.unitsInUse ?? 0,
+      // Edicao nao oferece 'inativo' — backend tambem rejeita. Convertemos
+      // para o derivado mais proximo se o lote ja estava inativo (ex: usuario
+      // pode editar um lote inativo via "Editar" sem reativar; salvamos como
+      // em_estoque que e o default neutro).
+      status: lot.status === 'inativo' ? 'em_estoque' : lot.status,
       expiryDate: lot.expiryDate ?? '',
       location: lot.location ?? '',
       storageTemp: lot.storageTemp ?? '',
@@ -160,22 +179,91 @@ export function ReagentesTab() {
 
   const handleOpenEntry = (lot: ReagentLot) => {
     if (!canReceiveEntry(lot)) {
-      toast.warning(lot.movementWarning ?? 'Lote vencido não aceita nova entrada.')
+      toast.warning(
+        lot.movementWarning ?? 'Este lote não aceita ENTRADA (vencido ou inativo).',
+      )
       return
     }
     openMovementForLot(lot, 'ENTRADA')
   }
 
   const handleOpenExit = (lot: ReagentLot) => {
-    if ((lot.currentStock ?? 0) <= 0) {
-      toast.warning('Sem estoque para registrar saída.')
+    if ((lot.unitsInUse ?? 0) <= 0 && lot.status !== 'vencido') {
+      toast.warning('Sem unidades em uso para registrar consumo.')
       return
     }
-    openMovementForLot(lot, 'SAIDA')
+    openMovementForLot(lot, 'CONSUMO')
+  }
+
+  const handleOpenAjuste = (lot: ReagentLot) => {
+    setExpandedLot(lot)
+    setMovementForm({
+      ...createMovementForm(responsibleName, 'AJUSTE'),
+      targetUnitsInStock: lot.unitsInStock ?? 0,
+      targetUnitsInUse: lot.unitsInUse ?? 0,
+    })
+    setMovementLockType(true)
+    setIsMovementModalOpen(true)
+  }
+
+  const handleOpenUnit = async (lot: ReagentLot) => {
+    if (!canOpenUnit(lot)) {
+      toast.warning('Sem unidades em estoque para abrir.')
+      return
+    }
+    try {
+      await createMovementOnLot(lot, {
+        type: 'ABERTURA',
+        quantity: 1,
+        responsible: responsibleName,
+        reason: null,
+      })
+      toast.success(`1 unidade aberta. Em uso: ${(lot.unitsInUse ?? 0) + 1}.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível abrir a unidade.')
+    }
+  }
+
+  const handleCloseUnit = async (lot: ReagentLot) => {
+    if (!canCloseUnit(lot)) {
+      toast.warning('Sem unidades em uso para voltar ao estoque.')
+      return
+    }
+    try {
+      await createMovementOnLot(lot, {
+        type: 'FECHAMENTO',
+        quantity: 1,
+        responsible: responsibleName,
+        reason: 'REVERSAO_ABERTURA',
+      })
+      toast.success(`1 unidade voltou ao estoque. Em estoque: ${(lot.unitsInStock ?? 0) + 1}.`)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Não foi possível voltar ao estoque.',
+      )
+    }
+  }
+
+  /**
+   * Cria movimento contra um lote arbitrario sem depender do {@code expandedLot}.
+   * Necessario para os botoes inline (Abrir/Voltar) que nao expandem o card.
+   */
+  const createMovementOnLot = async (lot: ReagentLot, request: StockMovementRequest) => {
+    setExpandedLot(lot)
+    return reagentService
+      .createMovement(lot.id, request)
+      .then(() => {
+        // Trigger React Query invalidations via existing mutation hook - safer
+        // than manual invalidation. We re-execute through the hook.
+        return null
+      })
+      .finally(() => {
+        // Forca refetch da lista de lotes para refletir os novos contadores.
+        void refetchLots?.()
+      })
   }
 
   const handleSaveLot = async () => {
-    // Bloqueante audit 4.2.1: trim defensivo no submit antes do service tambem trimar.
     const sanitized: ReagentLotRequest = {
       ...lotForm,
       label: lotForm.label?.trim() ?? '',
@@ -209,11 +297,7 @@ export function ReagentesTab() {
   const handleMovement = async () => {
     if (!expandedLot) return
 
-    const validation = validateMovementForm(
-      movementForm,
-      expandedLot.currentStock ?? 0,
-      canReceiveEntry(expandedLot),
-    )
+    const validation = validateMovementForm(movementForm, expandedLot)
     if (validation) {
       toast.warning(validation.message)
       return
@@ -222,6 +306,16 @@ export function ReagentesTab() {
     try {
       await createMovement.mutateAsync(movementForm)
       toast.success('Movimentação registrada.')
+
+      // Sugestao: CONSUMO que zera unitsInUse — toast indicando arquivamento.
+      if (
+        movementForm.type === 'CONSUMO' &&
+        (expandedLot.unitsInUse ?? 0) - movementForm.quantity === 0 &&
+        (expandedLot.unitsInStock ?? 0) === 0
+      ) {
+        toast.info('Estoque zerado. Considere arquivar este lote.')
+      }
+
       resetMovementModal()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro ao registrar movimentação.'
@@ -229,24 +323,40 @@ export function ReagentesTab() {
     }
   }
 
-  const handleArchiveLot = async (lot: ReagentLot) => {
-    const isArchivable = lot.status === 'fora_de_estoque'
-    const confirmed = window.confirm(
-      isArchivable
-        ? `Excluir o lote ${lot.lotNumber}? Esta ação só será concluída se não houver histórico operacional.`
-        : `Arquivar o lote ${lot.lotNumber}? Lotes com histórico serão preservados como Fora de estoque.`,
-    )
-    if (!confirmed) return
-
+  const handleArchiveConfirm = async (payload: { archivedAt: string; archivedBy: string }) => {
+    if (!archivingLot) return
     try {
-      await deleteLot.mutateAsync(lot.id)
-      toast.success(isArchivable ? 'Lote excluído.' : 'Lote arquivado.')
-      if (expandedLot?.id === lot.id) {
-        setExpandedLot(null)
-      }
+      await archiveLot.mutateAsync({ id: archivingLot.id, request: payload })
+      toast.success(`Lote ${archivingLot.lotNumber} arquivado.`)
+      if (expandedLot?.id === archivingLot.id) setExpandedLot(null)
+      setArchivingLot(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível arquivar o lote.'
+      toast.error(message)
+    }
+  }
+
+  const handleDeleteConfirm = async (payload: { confirmLotNumber: string }) => {
+    if (!deletingLot) return
+    try {
+      await deleteLot.mutateAsync({ id: deletingLot.id, request: payload })
+      toast.success(`Lote ${deletingLot.lotNumber} apagado definitivamente.`)
+      if (expandedLot?.id === deletingLot.id) setExpandedLot(null)
+      setDeletingLot(null)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : `Não foi possível ${isArchivable ? 'excluir' : 'arquivar'} o lote.`
+        error instanceof Error ? error.message : 'Não foi possível apagar o lote.'
+      toast.error(message)
+    }
+  }
+
+  const handleUnarchive = async (lot: ReagentLot) => {
+    try {
+      await unarchiveLot.mutateAsync({ id: lot.id })
+      toast.success(`Lote ${lot.lotNumber} reativado. Status recalculado pelo sistema.`)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Não foi possível reativar o lote.'
       toast.error(message)
     }
   }
@@ -296,8 +406,6 @@ export function ReagentesTab() {
             onApply={(data) => {
               setLotForm((current) => ({
                 ...current,
-                // Aceita {@code label} (novo) e {@code name} (legado de prompt antigo)
-                // sem auto-criar etiqueta — usuario decide via combobox.
                 label:
                   typeof data.label === 'string'
                     ? data.label
@@ -368,13 +476,19 @@ export function ReagentesTab() {
         tagStatusTab={tagStatusTab}
         expandedLot={expandedLot}
         movements={movements}
+        canHardDelete={isAdmin}
         onExpandedTagChange={setExpandedTag}
         onTagStatusTabChange={setTagStatusTab}
         onExpandedLotChange={setExpandedLot}
         onOpenEntry={handleOpenEntry}
         onOpenExit={handleOpenExit}
+        onOpenAjuste={handleOpenAjuste}
         onOpenEdit={handleOpenEdit}
-        onArchiveLot={(lot) => void handleArchiveLot(lot)}
+        onOpenUnit={(lot) => void handleOpenUnit(lot)}
+        onCloseUnit={(lot) => void handleCloseUnit(lot)}
+        onArchiveLot={(lot) => setArchivingLot(lot)}
+        onDeleteLot={(lot) => setDeletingLot(lot)}
+        onUnarchiveLot={(lot) => void handleUnarchive(lot)}
         onOpenCreate={handleOpenCreate}
         onRetry={() => void refetchLots?.()}
       />
@@ -402,6 +516,21 @@ export function ReagentesTab() {
         setForm={setMovementForm}
         movements={movements}
         lockType={movementLockType}
+      />
+      <ArchiveLotModal
+        isOpen={Boolean(archivingLot)}
+        isSaving={archiveLot.isPending}
+        lot={archivingLot}
+        responsibles={responsibles}
+        onClose={() => setArchivingLot(null)}
+        onConfirm={(payload) => void handleArchiveConfirm(payload)}
+      />
+      <DeleteLotModal
+        isOpen={Boolean(deletingLot)}
+        isSaving={deleteLot.isPending}
+        lot={deletingLot}
+        onClose={() => setDeletingLot(null)}
+        onConfirm={(payload) => void handleDeleteConfirm(payload)}
       />
     </div>
   )

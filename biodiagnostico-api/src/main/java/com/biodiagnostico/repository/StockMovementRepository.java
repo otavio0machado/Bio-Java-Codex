@@ -10,4 +10,6 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, UU
     List<StockMovement> findByReagentLotIdOrderByCreatedAtDesc(UUID lotId);
 
     boolean existsByReagentLotId(UUID lotId);
+
+    long countByReagentLotId(UUID lotId);
 }

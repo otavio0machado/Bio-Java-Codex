@@ -145,8 +145,10 @@ class DashboardServiceTest {
             .manufacturer("Bio")
             .category("Bioquimica")
             .expiryDate(LocalDate.now().plusDays(10))
-            .currentStock(80.0)
+            .unitsInStock(80)
+            .unitsInUse(0)
             .status("em_estoque")
+            .needsStockReview(false)
             .createdAt(Instant.now())
             .updatedAt(Instant.now())
             .build();

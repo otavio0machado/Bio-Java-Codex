@@ -168,13 +168,20 @@ public final class ResponseMapper {
             : ChronoUnit.DAYS.between(LocalDate.now(), lot.getExpiryDate());
         boolean nearExpiry = daysLeft >= 0 && daysLeft <= ALERT_THRESHOLD_DAYS;
         List<String> traceabilityIssues = reagentTraceabilityIssues(lot);
-        // Politica refator-v2 (decisao 1.8): apenas 'vencido' bloqueia ENTRADA. Os demais
-        // status (em_estoque, em_uso, fora_de_estoque) aceitam entrada — fora_de_estoque
-        // retorna a em_uso via derivacao apos a entrada.
-        boolean canReceiveEntry = !ReagentStatus.VENCIDO.equals(lot.getStatus());
-        List<String> allowedMovementTypes = canReceiveEntry
-            ? List.of(MovementType.ENTRADA, MovementType.SAIDA, MovementType.AJUSTE)
-            : List.of(MovementType.SAIDA, MovementType.AJUSTE);
+
+        Integer unitsInStock = lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock();
+        Integer unitsInUse = lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse();
+        Integer totalUnits = unitsInStock + unitsInUse;
+
+        // Refator v3: vencido E inativo bloqueiam ENTRADA. Inativo so aceita AJUSTE
+        // (terminal manual). Vencido aceita CONSUMO (descarte) e AJUSTE.
+        String status = lot.getStatus();
+        boolean canReceiveEntry = !ReagentStatus.VENCIDO.equals(status)
+            && !ReagentStatus.INATIVO.equals(status);
+
+        List<String> allowedMovementTypes = computeAllowedMovementTypes(
+            status, unitsInStock, unitsInUse);
+        String movementWarning = computeMovementWarning(status);
 
         return new ReagentLotResponse(
             lot.getId(),
@@ -183,9 +190,11 @@ public final class ResponseMapper {
             lot.getManufacturer(),
             lot.getCategory(),
             lot.getExpiryDate(),
-            lot.getCurrentStock(),
+            unitsInStock,
+            unitsInUse,
+            totalUnits,
             lot.getStorageTemp(),
-            lot.getStatus(),
+            status,
             lot.getCreatedAt(),
             lot.getUpdatedAt(),
             daysLeft,
@@ -194,13 +203,55 @@ public final class ResponseMapper {
             lot.getSupplier(),
             lot.getReceivedDate(),
             lot.getOpenedDate(),
+            lot.getArchivedAt(),
+            lot.getArchivedBy(),
+            Boolean.TRUE.equals(lot.getNeedsStockReview()),
             usedInQcRecently,
             traceabilityIssues.isEmpty(),
             traceabilityIssues,
             canReceiveEntry,
             allowedMovementTypes,
-            canReceiveEntry ? null : "Lote vencido nao aceita nova entrada. Crie um novo lote."
+            movementWarning
         );
+    }
+
+    /**
+     * Matriz de tipos permitidos por status — espelha contrato 5.7.
+     */
+    private static List<String> computeAllowedMovementTypes(
+        String status, Integer unitsInStock, Integer unitsInUse
+    ) {
+        if (ReagentStatus.INATIVO.equals(status)) {
+            return List.of(MovementType.AJUSTE);
+        }
+        if (ReagentStatus.VENCIDO.equals(status)) {
+            return List.of(MovementType.CONSUMO, MovementType.AJUSTE);
+        }
+        boolean hasStock = unitsInStock != null && unitsInStock > 0;
+        boolean hasUse = unitsInUse != null && unitsInUse > 0;
+        if (hasStock && hasUse) {
+            return List.of(MovementType.ENTRADA, MovementType.ABERTURA,
+                MovementType.FECHAMENTO, MovementType.CONSUMO, MovementType.AJUSTE);
+        }
+        if (hasStock) {
+            return List.of(MovementType.ENTRADA, MovementType.ABERTURA, MovementType.AJUSTE);
+        }
+        if (hasUse) {
+            return List.of(MovementType.ENTRADA, MovementType.FECHAMENTO,
+                MovementType.CONSUMO, MovementType.AJUSTE);
+        }
+        // zero/zero
+        return List.of(MovementType.ENTRADA, MovementType.AJUSTE);
+    }
+
+    private static String computeMovementWarning(String status) {
+        if (ReagentStatus.VENCIDO.equals(status)) {
+            return "Lote vencido — apenas CONSUMO (descarte) e AJUSTE permitidos.";
+        }
+        if (ReagentStatus.INATIVO.equals(status)) {
+            return "Lote arquivado — apenas AJUSTE permitido.";
+        }
+        return null;
     }
 
     private static List<String> reagentTraceabilityIssues(ReagentLot lot) {
@@ -299,6 +350,9 @@ public final class ResponseMapper {
     }
 
     public static StockMovementResponse toStockMovementResponse(StockMovement movement) {
+        // isLegacy: movimento gravado pre-V14 (so previousStock preenchido).
+        boolean isLegacy = movement.getPreviousStock() != null
+            && movement.getPreviousUnitsInStock() == null;
         return new StockMovementResponse(
             movement.getId(),
             movement.getType(),
@@ -306,6 +360,9 @@ public final class ResponseMapper {
             movement.getResponsible(),
             movement.getNotes(),
             movement.getPreviousStock(),
+            movement.getPreviousUnitsInStock(),
+            movement.getPreviousUnitsInUse(),
+            isLegacy,
             movement.getReason(),
             movement.getCreatedAt()
         );

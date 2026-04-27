@@ -204,12 +204,19 @@ export interface PostCalibrationRecord {
 }
 
 /**
- * Conjunto canonico do status de lote pos refator v2.
+ * Conjunto canonico do status de lote pos refator v3.
  *
- * Backend forca {@code vencido} quando expiry < hoje. {@code fora_de_estoque}
- * absorve a antiga semantica de {@code inativo} (terminal sem estoque).
+ * Mudancas v3:
+ * - DROP {@code fora_de_estoque}.
+ * - ADD {@code inativo} (terminal manual via endpoint {@code /archive}).
+ *
+ * Regra de derivacao no backend:
+ * - {@code inativo} preserva (estado manual).
+ * - {@code expiry < hoje} forca {@code vencido}.
+ * - {@code unitsInUse > 0} → {@code em_uso}.
+ * - {@code unitsInStock > 0} → {@code em_estoque}.
  */
-export type ReagentStatus = 'em_estoque' | 'em_uso' | 'fora_de_estoque' | 'vencido'
+export type ReagentStatus = 'em_estoque' | 'em_uso' | 'vencido' | 'inativo'
 
 export interface ReagentLot {
   id: string
@@ -219,7 +226,12 @@ export interface ReagentLot {
   manufacturer: string
   category?: string
   expiryDate: string
-  currentStock: number
+  /** Unidades fechadas, prontas para abrir. Substitui {@code currentStock} (drop em V14). */
+  unitsInStock: number
+  /** Unidades abertas, sendo consumidas. */
+  unitsInUse: number
+  /** Soma derivada {@code unitsInStock + unitsInUse}. */
+  totalUnits: number
   storageTemp?: string
   status: ReagentStatus | string
   createdAt: string
@@ -231,6 +243,11 @@ export interface ReagentLot {
   supplier?: string | null
   receivedDate?: string | null
   openedDate?: string | null
+  // Arquivamento manual (v3)
+  archivedAt?: string | null
+  archivedBy?: string | null
+  /** Lote vindo da migracao V14 com estoque potencialmente nao classificado. */
+  needsStockReview?: boolean
   usedInQcRecently?: boolean
   traceabilityComplete?: boolean
   traceabilityIssues?: string[]
@@ -240,13 +257,14 @@ export interface ReagentLot {
 }
 
 export interface ReagentLotRequest {
-  // 9 obrigatorios canonicos
+  // 10 obrigatorios canonicos
   label: string
   lotNumber: string
   manufacturer: string
   category: string
-  currentStock: number
-  status: ReagentStatus | string
+  unitsInStock: number
+  unitsInUse: number
+  status: Exclude<ReagentStatus, 'inativo'> | string
   expiryDate: string
   location: string
   storageTemp: string
@@ -256,11 +274,40 @@ export interface ReagentLotRequest {
   openedDate?: string
 }
 
+/**
+ * Payload do endpoint {@code POST /api/reagents/{id}/archive}.
+ * {@code archivedBy} e o {@code username} do responsavel (decisao audit 1.1).
+ */
+export interface ArchiveReagentLotRequest {
+  archivedAt: string
+  archivedBy: string
+}
+
+export interface UnarchiveReagentLotRequest {
+  reason?: string
+}
+
+export interface DeleteReagentLotRequest {
+  confirmLotNumber: string
+}
+
+/**
+ * Shape minimo de usuario para combobox de responsavel.
+ * Endpoint: {@code GET /api/users/responsibles}.
+ */
+export interface ResponsibleSummary {
+  id: string
+  name: string
+  username: string
+  role: string
+}
+
 export type MovementReason =
   | 'CONTAGEM_FISICA'
   | 'QUEBRA'
   | 'CONTAMINACAO'
   | 'CORRECAO'
+  | 'REVERSAO_ABERTURA'
   | 'VENCIMENTO'
   | 'OUTRO'
 
@@ -311,47 +358,59 @@ export interface BatchImportResult {
   results: BatchImportRowResult[]
 }
 
+/**
+ * Tipos de movimento aceitos em escrita pos refator v3.
+ *
+ * - {@code ENTRADA}: aumenta {@code unitsInStock} (compra/recebimento).
+ * - {@code ABERTURA}: -1 unitsInStock, +1 unitsInUse. Quantity sempre 1.
+ * - {@code FECHAMENTO}: reverte abertura por engano. -1 unitsInUse, +1 unitsInStock.
+ * - {@code CONSUMO}: diminui {@code unitsInUse} (uso real).
+ * - {@code AJUSTE}: seta {@code targetUnitsInStock} e {@code targetUnitsInUse}.
+ *
+ * {@code SAIDA} legado existe apenas em leitura (movimentos pre-V14 conservam o tipo).
+ */
+export type MovementType = 'ENTRADA' | 'ABERTURA' | 'FECHAMENTO' | 'CONSUMO' | 'AJUSTE'
+
 export interface StockMovement {
   id: string
-  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE' | string
+  /** Aceita {@link MovementType} mais {@code 'SAIDA'} para movimentos legados. */
+  type: MovementType | 'SAIDA' | string
   quantity: number
   responsible?: string
   notes?: string
-  previousStock?: number
+  /** Estoque total antes do movimento (movimentos pre-V14). NULL apos V14. */
+  previousStock?: number | null
+  /** Unidades fechadas antes do movimento (apenas movimentos pos-V14). NULL antes. */
+  previousUnitsInStock?: number | null
+  /** Unidades abertas antes do movimento (apenas movimentos pos-V14). NULL antes. */
+  previousUnitsInUse?: number | null
+  /** True quando {@code previousStock != null AND previousUnitsInStock == null}. */
+  isLegacy?: boolean
   reason?: MovementReason | string | null
   createdAt: string
 }
 
 export interface StockMovementRequest {
-  type: 'ENTRADA' | 'SAIDA' | 'AJUSTE'
+  type: MovementType
   quantity: number
   responsible: string
   notes?: string
   reason?: MovementReason | null
+  /** Obrigatorio para AJUSTE; ignorado para outros tipos. */
+  targetUnitsInStock?: number
+  targetUnitsInUse?: number
 }
 
 /**
- * Resumo agregado de lotes por etiqueta. Substitui {@link ReagentTagSummary}
- * no contrato vigente. Endpoint: {@code GET /api/reagents/labels}.
+ * Resumo agregado de lotes por etiqueta. Endpoint: {@code GET /api/reagents/labels}.
+ *
+ * Refator v3: campo {@code foraDeEstoque} renomeado para {@code inativos} (espelha
+ * drop de status {@code fora_de_estoque} e add de {@code inativo}).
  */
 export interface ReagentLabelSummary {
   label: string
   total: number
   emEstoque: number
-  emUso: number
-  foraDeEstoque: number
-  vencidos: number
-}
-
-/**
- * @deprecated Use {@link ReagentLabelSummary}. Mantido apenas para compatibilidade
- * com clientes externos que ainda consomem {@code /api/reagents/tags}. Sera removido
- * em PR-4 do refator de Reagentes.
- */
-export interface ReagentTagSummary {
-  name: string
-  total: number
-  ativos: number
   emUso: number
   inativos: number
   vencidos: number

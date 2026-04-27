@@ -172,21 +172,24 @@ class ReagentMigrationV13Test {
             @Override public void log(String a, String t, UUID id, Map<String, Object> d) { /* no-op */ }
             @Override public void log(String a, String t, UUID id) { /* no-op */ }
         };
-        ReagentService rs = new ReagentService(null, null, null, noopAudit);
+        ReagentService rs = new ReagentService(null, null, null, null, noopAudit);
 
         ReagentLot lot = ReagentLot.builder()
             .id(UUID.randomUUID())
             .name("ALT")
             .lotNumber("L1")
             .manufacturer("Bio")
-            .currentStock(50D)
+            .unitsInStock(50)
+            .unitsInUse(0)
             .expiryDate(LocalDate.now().plusDays(30))
             .openedDate(LocalDate.now().minusDays(2))
-            .status("em_uso")
+            .status("em_estoque")
             .build();
-        // Service vê em_uso ja correto.
-        assertThat(rs.deriveStatus(lot, LocalDate.now())).isEqualTo(ReagentStatus.EM_USO);
-        // V13 partindo de "ativo + opened set" mapeia para o mesmo em_uso.
+        // Pos-V14: deriveStatus v3 retorna em_estoque (units_in_use=0). V13 (legado) ainda
+        // mapeava 'ativo + opened set' para 'em_uso' — esse e o motivo do flag needs_stock_review
+        // em V14: lote ex-em_uso V13 vira em_uso pos-V14 mas com unitsInUse=0 forca AJUSTE explicito.
+        assertThat(rs.deriveStatus(lot, LocalDate.now())).isEqualTo(ReagentStatus.EM_ESTOQUE);
+        // V13 partindo de "ativo + opened set" mapeia para o mesmo em_uso (legado).
         assertThat(v13Target("ativo", lot.getExpiryDate(), 50D, lot.getOpenedDate())).isEqualTo("em_uso");
     }
 }

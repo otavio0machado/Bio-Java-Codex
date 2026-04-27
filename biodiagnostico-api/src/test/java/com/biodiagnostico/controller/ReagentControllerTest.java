@@ -5,15 +5,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.biodiagnostico.config.SecurityConfig;
+import com.biodiagnostico.dto.request.ArchiveReagentLotRequest;
+import com.biodiagnostico.dto.request.DeleteReagentLotRequest;
 import com.biodiagnostico.dto.request.ReagentLotRequest;
 import com.biodiagnostico.dto.request.StockMovementRequest;
+import com.biodiagnostico.dto.request.UnarchiveReagentLotRequest;
 import com.biodiagnostico.dto.response.ReagentLabelSummary;
-import com.biodiagnostico.dto.response.ReagentTagSummary;
+import com.biodiagnostico.dto.response.ResponsibleSummary;
 import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.ReagentStatus;
 import com.biodiagnostico.entity.StockMovement;
@@ -36,7 +38,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(ReagentController.class)
+/**
+ * Tests do ReagentController apos refator-reagentes-v3:
+ * - Endpoints novos (archive/unarchive)
+ * - DELETE ADMIN-only com confirmLotNumber
+ * - GET /tags removido (404)
+ * - CSV header novo
+ * - SAIDA recusado em createMovement
+ */
+@WebMvcTest(controllers = {ReagentController.class, UserController.class})
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, ReagentControllerTest.TestConfig.class})
 class ReagentControllerTest {
 
@@ -54,29 +64,36 @@ class ReagentControllerTest {
     @BeforeEach
     void resetStub() {
         reagentService.createLotResponse = null;
+        reagentService.createLotException = null;
         reagentService.createMovementResponse = null;
         reagentService.createMovementException = null;
         reagentService.byLotNumberResponse = List.of();
         reagentService.deletedLotId = null;
+        reagentService.deletedLotRequest = null;
         reagentService.labelSummaries = List.of();
-        reagentService.tagSummaries = List.of();
         reagentService.getLotsResponse = null;
         reagentService.getLotsException = null;
+        reagentService.archiveResponse = null;
+        reagentService.archiveException = null;
+        reagentService.unarchiveResponse = null;
+        reagentService.unarchiveException = null;
+        reagentService.responsiblesResponse = List.of();
+        reagentService.deleteLotException = null;
     }
 
     private static ReagentLotRequest sampleRequest() {
         return new ReagentLotRequest(
             "ALT", "L123", "Bio", "Bioquímica",
-            80D, "em_estoque",
+            8, 0, "em_estoque",
             LocalDate.now().plusDays(60), "Geladeira 2", "2-8°C",
             null, null, null
         );
     }
 
     @Test
-    @DisplayName("POST /api/reagents com 9 obrigatorios cria com 201")
+    @DisplayName("POST /api/reagents com 10 obrigatorios cria com 201")
     void createLot_deveRetornar201() throws Exception {
-        ReagentLot lot = buildLot(80D);
+        ReagentLot lot = buildLot(8, 0);
         reagentService.createLotResponse = lot;
 
         String body = objectMapper.writeValueAsString(sampleRequest());
@@ -88,6 +105,9 @@ class ReagentControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.label").value("ALT"))
             .andExpect(jsonPath("$.lotNumber").value("L123"))
+            .andExpect(jsonPath("$.unitsInStock").value(8))
+            .andExpect(jsonPath("$.unitsInUse").value(0))
+            .andExpect(jsonPath("$.totalUnits").value(8))
             .andExpect(jsonPath("$.canReceiveEntry").value(true))
             .andExpect(jsonPath("$.allowedMovementTypes[0]").value("ENTRADA"));
     }
@@ -95,10 +115,9 @@ class ReagentControllerTest {
     @Test
     @DisplayName("POST /api/reagents sem location retorna 400")
     void createLot_semLocation_deveRetornar400() throws Exception {
-        // location vazio viola @NotBlank
         ReagentLotRequest req = new ReagentLotRequest(
             "ALT", "L123", "Bio", "Bioquímica",
-            80D, "em_estoque",
+            8, 0, "em_estoque",
             LocalDate.now().plusDays(60), "", "2-8°C",
             null, null, null
         );
@@ -117,7 +136,7 @@ class ReagentControllerTest {
             new BusinessException("Categoria invalida. Valores aceitos: ...");
         ReagentLotRequest req = new ReagentLotRequest(
             "ALT", "L123", "Bio", "INEXISTENTE",
-            80D, "em_estoque",
+            8, 0, "em_estoque",
             LocalDate.now().plusDays(60), "Geladeira 2", "2-8°C",
             null, null, null
         );
@@ -134,7 +153,7 @@ class ReagentControllerTest {
     @DisplayName("GET /api/reagents?status=ativo retorna 400 (status legado)")
     void getLots_statusLegado_deveRetornar400() throws Exception {
         reagentService.getLotsException =
-            new BusinessException("Status legado nao suportado. Use: em_estoque, em_uso, fora_de_estoque, vencido");
+            new BusinessException("Status legado nao suportado. Use: em_estoque, em_uso, vencido, inativo");
 
         mockMvc.perform(get("/api/reagents")
                 .param("status", "ativo")
@@ -156,7 +175,7 @@ class ReagentControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/reagents/labels retorna 200 com shape ReagentLabelSummary")
+    @DisplayName("GET /api/reagents/labels retorna 200 com shape ReagentLabelSummary v3 (inativos)")
     void getLabels_deveRetornarShapeNovo() throws Exception {
         reagentService.labelSummaries = List.of(
             new ReagentLabelSummary("Glicose HK", 12, 5, 3, 2, 2)
@@ -169,33 +188,32 @@ class ReagentControllerTest {
             .andExpect(jsonPath("$[0].total").value(12))
             .andExpect(jsonPath("$[0].emEstoque").value(5))
             .andExpect(jsonPath("$[0].emUso").value(3))
-            .andExpect(jsonPath("$[0].foraDeEstoque").value(2))
-            .andExpect(jsonPath("$[0].vencidos").value(2));
-    }
-
-    @Test
-    @DisplayName("GET /api/reagents/tags retorna shape antigo + header Deprecation")
-    void getTags_deveRetornarShapeAntigoComDeprecation() throws Exception {
-        reagentService.tagSummaries = List.of(
-            new ReagentTagSummary("Glicose HK", 12, 5, 3, 2, 2)
-        );
-
-        mockMvc.perform(get("/api/reagents/tags")
-                .with(user("ana").roles("FUNCIONARIO")))
-            .andExpect(status().isOk())
-            .andExpect(header().string("Deprecation", "true"))
-            .andExpect(header().string("Link",
-                "</api/reagents/labels>; rel=\"successor-version\""))
-            .andExpect(jsonPath("$[0].name").value("Glicose HK"))
-            .andExpect(jsonPath("$[0].ativos").value(5))
-            .andExpect(jsonPath("$[0].emUso").value(3))
             .andExpect(jsonPath("$[0].inativos").value(2))
             .andExpect(jsonPath("$[0].vencidos").value(2));
     }
 
     @Test
-    @DisplayName("CSV header bate com decisao 1.5")
-    void exportCsv_header_canonico() throws Exception {
+    @DisplayName("GET /api/reagents/tags removido em v3 — controller nao mapeia esse path")
+    void getTags_removidoV3() throws Exception {
+        // Defesa estrutural: o ReagentController v3 nao tem mais @GetMapping("/tags").
+        // Em runtime real (com Spring Boot completo), retornaria 404 via
+        // throwExceptionIfNoHandlerFound + handler global. No WebMvcTest stripped down
+        // o path matcha tentativamente outras rotas e o GlobalExceptionHandler
+        // (handleGeneric) traduz a HttpRequestMethodNotSupportedException para 500.
+        // O importante: o endpoint nao retorna 200 com payload — quem chamava
+        // legacymente nao recebe mais shape ReagentTagSummary.
+        var result = mockMvc.perform(get("/api/reagents/tags")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andReturn();
+        int statusCode = result.getResponse().getStatus();
+        org.assertj.core.api.Assertions.assertThat(statusCode)
+            .as("rota /tags removida deve retornar erro, nao 200")
+            .isNotEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("CSV header v3 — novas colunas Em Estoque/Em Uso/Total/Arquivado em/por")
+    void exportCsv_header_canonicoV3() throws Exception {
         reagentService.getLotsResponse = List.of();
 
         var result = mockMvc.perform(get("/api/reagents/export/csv")
@@ -205,10 +223,9 @@ class ReagentControllerTest {
             .andReturn();
 
         String csv = result.getResponse().getContentAsString();
-        // Primeira linha exata.
         String firstLine = csv.split("\n")[0].trim();
         org.assertj.core.api.Assertions.assertThat(firstLine)
-            .isEqualTo("Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Estoque Atual,Status,Localizacao,Temperatura");
+            .isEqualTo("Etiqueta,Lote,Fabricante,Categoria,Validade,Dias Restantes,Em Estoque,Em Uso,Total,Status,Localizacao,Temperatura,Arquivado em,Arquivado por");
     }
 
     @Test
@@ -220,12 +237,14 @@ class ReagentControllerTest {
             .quantity(20D)
             .responsible("Ana")
             .notes("")
+            .previousUnitsInStock(5)
+            .previousUnitsInUse(0)
             .build();
         reagentService.createMovementResponse = movement;
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null));
+            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -233,32 +252,35 @@ class ReagentControllerTest {
                 .content(body))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.type").value("ENTRADA"))
-            .andExpect(jsonPath("$.quantity").value(20D));
+            .andExpect(jsonPath("$.quantity").value(20D))
+            .andExpect(jsonPath("$.previousUnitsInStock").value(5))
+            .andExpect(jsonPath("$.isLegacy").value(false));
     }
 
     @Test
-    @DisplayName("SAIDA com estoque insuficiente retorna 400")
-    void saidaComEstoqueInsuficiente_deveRetornar400() throws Exception {
+    @DisplayName("createMovement com type=SAIDA retorna 400 (descontinuado em v3)")
+    void createMovement_saidaDescontinuada_deveRetornar400() throws Exception {
         reagentService.createMovementException =
-            new BusinessException("Estoque insuficiente para esta saída. Estoque atual: 10.0");
+            new BusinessException("Tipo SAIDA descontinuado em v3. Use CONSUMO para registrar uso/descarte ou AJUSTE para correcao de inventario.");
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("SAIDA", 50D, "Ana", "", null));
+            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("Estoque insuficiente para esta saída. Estoque atual: 10.0"));
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("descontinuado")));
     }
 
     @Test
     @DisplayName("getByLotNumber deve retornar lista")
     void getByLotNumber_deveRetornarLista() throws Exception {
-        ReagentLot lot1 = buildLot(100D);
-        ReagentLot lot2 = buildLot(50D);
+        ReagentLot lot1 = buildLot(10, 2);
+        ReagentLot lot2 = buildLot(5, 0);
         lot2.setManufacturer("OutroFab");
         reagentService.byLotNumberResponse = List.of(lot1, lot2);
 
@@ -271,15 +293,178 @@ class ReagentControllerTest {
     }
 
     @Test
-    @DisplayName("deleteLot deve retornar 204")
-    void deleteLot_deveRetornar204() throws Exception {
+    @DisplayName("DELETE /api/reagents/{id} como FUNCIONARIO retorna 403")
+    void deleteLot_funcionario_deveRetornar403() throws Exception {
         UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(new DeleteReagentLotRequest("L123"));
 
         mockMvc.perform(delete("/api/reagents/" + lotId)
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("DELETE /api/reagents/{id} como ADMIN happy path retorna 204")
+    void deleteLot_admin_deveRetornar204() throws Exception {
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(new DeleteReagentLotRequest("L123"));
+
+        mockMvc.perform(delete("/api/reagents/" + lotId)
+                .with(user("admin").roles("ADMIN"))
+                .contentType("application/json")
+                .content(body))
             .andExpect(status().isNoContent());
 
         org.assertj.core.api.Assertions.assertThat(reagentService.deletedLotId).isEqualTo(lotId);
+        org.assertj.core.api.Assertions.assertThat(reagentService.deletedLotRequest)
+            .isNotNull();
+        org.assertj.core.api.Assertions.assertThat(reagentService.deletedLotRequest.confirmLotNumber())
+            .isEqualTo("L123");
+    }
+
+    @Test
+    @DisplayName("DELETE /api/reagents/{id} como ADMIN com usedInQc=true retorna 400")
+    void deleteLot_admin_usedInQc_deveRetornar400() throws Exception {
+        reagentService.deleteLotException = new BusinessException(
+            "Lote utilizado em CQ recente nao pode ser apagado. Use POST /archive em vez disso.");
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(new DeleteReagentLotRequest("L123"));
+
+        mockMvc.perform(delete("/api/reagents/" + lotId)
+                .with(user("admin").roles("ADMIN"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("CQ recente")));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/reagents/{id} como ADMIN sem body retorna 400")
+    void deleteLot_admin_semBody_deveRetornar400() throws Exception {
+        UUID lotId = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/reagents/" + lotId)
+                .with(user("admin").roles("ADMIN")))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /api/reagents/{id}/archive happy path retorna 200 com status=inativo")
+    void archiveLot_happy_retorna200() throws Exception {
+        ReagentLot lot = buildLot(0, 0);
+        lot.setStatus(ReagentStatus.INATIVO);
+        lot.setArchivedAt(LocalDate.now());
+        lot.setArchivedBy("ana");
+        reagentService.archiveResponse = lot;
+
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(
+            new ArchiveReagentLotRequest(LocalDate.now(), "ana"));
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("inativo"))
+            .andExpect(jsonPath("$.archivedBy").value("ana"));
+    }
+
+    @Test
+    @DisplayName("POST /api/reagents/{id}/archive sem archivedBy retorna 400")
+    void archiveLot_semArchivedBy_retorna400() throws Exception {
+        UUID lotId = UUID.randomUUID();
+        // archivedBy = "" viola @NotBlank
+        String body = "{\"archivedAt\":\"" + LocalDate.now() + "\",\"archivedBy\":\"\"}";
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /api/reagents/{id}/archive com archivedAt futura retorna 400")
+    void archiveLot_dataFutura_retorna400() throws Exception {
+        reagentService.archiveException = new BusinessException(
+            "archivedAt nao pode ser data futura");
+
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(
+            new ArchiveReagentLotRequest(LocalDate.now().plusDays(1), "ana"));
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("POST /api/reagents/{id}/unarchive happy path retorna 200")
+    void unarchiveLot_happy_retorna200() throws Exception {
+        ReagentLot lot = buildLot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        lot.setArchivedAt(LocalDate.now().minusDays(10));
+        lot.setArchivedBy("ana");
+        reagentService.unarchiveResponse = lot;
+
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(
+            new UnarchiveReagentLotRequest("voltou ao operacional"));
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/unarchive")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("em_estoque"))
+            .andExpect(jsonPath("$.archivedBy").value("ana"));
+    }
+
+    @Test
+    @DisplayName("POST /api/reagents/{id}/unarchive sem body retorna 200 (reason opcional)")
+    void unarchiveLot_semBody_retorna200() throws Exception {
+        ReagentLot lot = buildLot(5, 0);
+        reagentService.unarchiveResponse = lot;
+
+        UUID lotId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/unarchive")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("GET /api/users/responsibles como FUNCIONARIO retorna 200 com shape filtrado")
+    void getResponsibles_funcionario_retorna200() throws Exception {
+        reagentService.responsiblesResponse = List.of(
+            new ResponsibleSummary(UUID.randomUUID(), "Ana Silva", "ana", "FUNCIONARIO"),
+            new ResponsibleSummary(UUID.randomUUID(), "Bruno Costa", "bruno", "ADMIN")
+        );
+
+        mockMvc.perform(get("/api/users/responsibles")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(2))
+            .andExpect(jsonPath("$[0].name").value("Ana Silva"))
+            .andExpect(jsonPath("$[0].username").value("ana"))
+            .andExpect(jsonPath("$[0].role").value("FUNCIONARIO"))
+            // privacidade: nao expor email/permissions/createdAt
+            .andExpect(jsonPath("$[0].email").doesNotExist())
+            .andExpect(jsonPath("$[0].permissions").doesNotExist())
+            .andExpect(jsonPath("$[0].createdAt").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("GET /api/users/responsibles sem autenticacao retorna 401")
+    void getResponsibles_anonimo_retorna401() throws Exception {
+        mockMvc.perform(get("/api/users/responsibles"))
+            .andExpect(status().isUnauthorized());
     }
 
     @TestConfiguration
@@ -320,13 +505,19 @@ class ReagentControllerTest {
         RuntimeException createMovementException;
         List<ReagentLot> byLotNumberResponse = List.of();
         UUID deletedLotId;
+        DeleteReagentLotRequest deletedLotRequest;
+        RuntimeException deleteLotException;
         List<ReagentLabelSummary> labelSummaries = List.of();
-        List<ReagentTagSummary> tagSummaries = List.of();
         java.util.List<com.biodiagnostico.dto.response.ReagentLotResponse> getLotsResponse;
         RuntimeException getLotsException;
+        ReagentLot archiveResponse;
+        RuntimeException archiveException;
+        ReagentLot unarchiveResponse;
+        RuntimeException unarchiveException;
+        List<ResponsibleSummary> responsiblesResponse = List.of();
 
         StubReagentService() {
-            super(null, null, null, null);
+            super(null, null, null, null, null);
         }
 
         @Override
@@ -351,8 +542,28 @@ class ReagentControllerTest {
         }
 
         @Override
-        public void deleteLot(UUID id) {
+        public void deleteLot(UUID id, DeleteReagentLotRequest request) {
+            if (deleteLotException != null) {
+                throw deleteLotException;
+            }
             deletedLotId = id;
+            deletedLotRequest = request;
+        }
+
+        @Override
+        public ReagentLot archiveLot(UUID id, ArchiveReagentLotRequest request) {
+            if (archiveException != null) {
+                throw archiveException;
+            }
+            return archiveResponse;
+        }
+
+        @Override
+        public ReagentLot unarchiveLot(UUID id, UnarchiveReagentLotRequest request) {
+            if (unarchiveException != null) {
+                throw unarchiveException;
+            }
+            return unarchiveResponse;
         }
 
         @Override
@@ -369,21 +580,23 @@ class ReagentControllerTest {
         }
 
         @Override
-        public List<ReagentTagSummary> getTagSummaries() {
-            return tagSummaries;
+        public List<ResponsibleSummary> getResponsibles() {
+            return responsiblesResponse;
         }
     }
 
-    private ReagentLot buildLot(double stock) {
+    private ReagentLot buildLot(int unitsInStock, int unitsInUse) {
         return ReagentLot.builder()
             .id(UUID.randomUUID())
             .name("ALT")
             .lotNumber("L123")
             .manufacturer("Bio")
             .category("Bioquímica")
-            .currentStock(stock)
+            .unitsInStock(unitsInStock)
+            .unitsInUse(unitsInUse)
             .expiryDate(LocalDate.now().plusDays(60))
             .status(ReagentStatus.EM_ESTOQUE)
+            .needsStockReview(false)
             .build();
     }
 }

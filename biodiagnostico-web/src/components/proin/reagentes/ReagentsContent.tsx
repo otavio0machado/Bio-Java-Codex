@@ -8,16 +8,19 @@ import {
   ChevronUp,
   ClipboardList,
   Clock,
+  Lock,
   MapPin,
   Minus,
   Package,
   PackagePlus,
   Pencil,
   Plus,
+  RotateCcw,
   ShieldCheck,
   Thermometer,
   Trash2,
   Truck,
+  Unlock,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { ReagentLabelSummary, ReagentLot, StockMovement } from '../../../types'
@@ -26,8 +29,11 @@ import { formatLongBR } from '../../../utils/date'
 import { Button, Card, EmptyState, Skeleton, StatusBadge } from '../../ui'
 import { MOVEMENT_REASONS, REAGENT_STATUS_LABELS, TAG_STATUS_TABS } from './constants'
 import {
+  canCloseUnit,
+  canOpenUnit,
   canReceiveEntry,
   getLotVisualState,
+  getTotalUnits,
   getTraceabilityIssueLabels,
   getTraceabilityIssues,
   type ReagentViewMode,
@@ -45,13 +51,25 @@ interface ReagentsContentProps {
   tagStatusTab: string
   expandedLot: ReagentLot | null
   movements: StockMovement[]
+  /** Usuario admin? Habilita botao Apagar (refator v3, decisao 1.11). */
+  canHardDelete?: boolean
   onExpandedTagChange: (tag: string | null) => void
   onTagStatusTabChange: (status: string) => void
   onExpandedLotChange: (lot: ReagentLot | null) => void
   onOpenEntry: (lot: ReagentLot) => void
   onOpenExit: (lot: ReagentLot) => void
+  onOpenAjuste: (lot: ReagentLot) => void
   onOpenEdit: (lot: ReagentLot) => void
+  /** ABERTURA q=1: -1 estoque +1 uso. */
+  onOpenUnit: (lot: ReagentLot) => void
+  /** FECHAMENTO q=1: -1 uso +1 estoque (reverter abertura por engano). */
+  onCloseUnit: (lot: ReagentLot) => void
+  /** Abre ArchiveLotModal. */
   onArchiveLot: (lot: ReagentLot) => void
+  /** Abre DeleteLotModal (admin only). */
+  onDeleteLot: (lot: ReagentLot) => void
+  /** Reativa lote inativo. */
+  onUnarchiveLot: (lot: ReagentLot) => void
   onOpenCreate: () => void
   onRetry?: () => void
 }
@@ -77,13 +95,19 @@ export function ReagentsContent({
   tagStatusTab,
   expandedLot,
   movements,
+  canHardDelete = false,
   onExpandedTagChange,
   onTagStatusTabChange,
   onExpandedLotChange,
   onOpenEntry,
   onOpenExit,
+  onOpenAjuste,
   onOpenEdit,
+  onOpenUnit,
+  onCloseUnit,
   onArchiveLot,
+  onDeleteLot,
+  onUnarchiveLot,
   onOpenCreate,
   onRetry,
 }: ReagentsContentProps) {
@@ -112,13 +136,19 @@ export function ReagentsContent({
         tagStatusTab={tagStatusTab}
         expandedLot={expandedLot}
         movements={movements}
+        canHardDelete={canHardDelete}
         onExpandedTagChange={onExpandedTagChange}
         onTagStatusTabChange={onTagStatusTabChange}
         onExpandedLotChange={onExpandedLotChange}
         onOpenEntry={onOpenEntry}
         onOpenExit={onOpenExit}
+        onOpenAjuste={onOpenAjuste}
         onOpenEdit={onOpenEdit}
+        onOpenUnit={onOpenUnit}
+        onCloseUnit={onCloseUnit}
         onArchiveLot={onArchiveLot}
+        onDeleteLot={onDeleteLot}
+        onUnarchiveLot={onUnarchiveLot}
       />
     )
   }
@@ -142,11 +172,17 @@ export function ReagentsContent({
           lot={lot}
           isExpanded={expandedLot?.id === lot.id}
           movements={movements}
+          canHardDelete={canHardDelete}
           onToggleHistory={() => onExpandedLotChange(expandedLot?.id === lot.id ? null : lot)}
           onOpenEntry={() => onOpenEntry(lot)}
           onOpenExit={() => onOpenExit(lot)}
+          onOpenAjuste={() => onOpenAjuste(lot)}
           onOpenEdit={() => onOpenEdit(lot)}
+          onOpenUnit={() => onOpenUnit(lot)}
+          onCloseUnit={() => onCloseUnit(lot)}
           onArchiveLot={() => onArchiveLot(lot)}
+          onDeleteLot={() => onDeleteLot(lot)}
+          onUnarchiveLot={() => onUnarchiveLot(lot)}
         />
       ))}
     </div>
@@ -185,13 +221,19 @@ function ReagentLabelsView({
   tagStatusTab,
   expandedLot,
   movements,
+  canHardDelete,
   onExpandedTagChange,
   onTagStatusTabChange,
   onExpandedLotChange,
   onOpenEntry,
   onOpenExit,
+  onOpenAjuste,
   onOpenEdit,
+  onOpenUnit,
+  onCloseUnit,
   onArchiveLot,
+  onDeleteLot,
+  onUnarchiveLot,
 }: Omit<ReagentsContentProps, 'viewMode' | 'filteredLots' | 'onOpenCreate'>) {
   const filteredLabels = labels.filter(
     (label) => !searchTerm || label.label.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -235,9 +277,9 @@ function ReagentLabelsView({
                   {summary.emUso} em uso
                 </span>
               ) : null}
-              {summary.foraDeEstoque > 0 ? (
+              {summary.inativos > 0 ? (
                 <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
-                  {summary.foraDeEstoque} fora de estoque
+                  {summary.inativos} inativo{summary.inativos !== 1 ? 's' : ''}
                 </span>
               ) : null}
               {summary.vencidos > 0 ? (
@@ -299,11 +341,17 @@ function ReagentLabelsView({
               lot={lot}
               isExpanded={expandedLot?.id === lot.id}
               movements={movements}
+              canHardDelete={canHardDelete ?? false}
               onToggleHistory={() => onExpandedLotChange(expandedLot?.id === lot.id ? null : lot)}
               onOpenEntry={() => onOpenEntry(lot)}
               onOpenExit={() => onOpenExit(lot)}
+              onOpenAjuste={() => onOpenAjuste(lot)}
               onOpenEdit={() => onOpenEdit(lot)}
+              onOpenUnit={() => onOpenUnit(lot)}
+              onCloseUnit={() => onCloseUnit(lot)}
               onArchiveLot={() => onArchiveLot(lot)}
+              onDeleteLot={() => onDeleteLot(lot)}
+              onUnarchiveLot={() => onUnarchiveLot(lot)}
             />
           ))}
         </div>
@@ -312,30 +360,43 @@ function ReagentLabelsView({
   )
 }
 
+interface LotCardCallbacks {
+  onToggleHistory: () => void
+  onOpenEntry: () => void
+  onOpenExit: () => void
+  onOpenAjuste: () => void
+  onOpenEdit: () => void
+  onOpenUnit: () => void
+  onCloseUnit: () => void
+  onArchiveLot: () => void
+  onDeleteLot: () => void
+  onUnarchiveLot: () => void
+}
+
 function ReagentListCard({
   lot,
   isExpanded,
   movements,
+  canHardDelete,
   onToggleHistory,
   onOpenEntry,
   onOpenExit,
+  onOpenAjuste,
   onOpenEdit,
+  onOpenUnit,
+  onCloseUnit,
   onArchiveLot,
+  onDeleteLot,
+  onUnarchiveLot,
 }: {
   lot: ReagentLot
   isExpanded: boolean
   movements: StockMovement[]
-  onToggleHistory: () => void
-  onOpenEntry: () => void
-  onOpenExit: () => void
-  onOpenEdit: () => void
-  onArchiveLot: () => void
-}) {
+  canHardDelete: boolean
+} & LotCardCallbacks) {
   const { daysLeft, expired, urgent, warning } = getLotVisualState(lot)
   const traceabilityIssues = getTraceabilityIssues(lot)
   const traceabilityIssueLabels = getTraceabilityIssueLabels(lot)
-  const canEntry = canReceiveEntry(lot)
-  const canExit = (lot.currentStock ?? 0) > 0
 
   return (
     <Card
@@ -436,53 +497,21 @@ function ReagentListCard({
 
       <LotOperationalDetails lot={lot} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onOpenEntry}
-          disabled={!canEntry}
-          icon={<Plus className="h-4 w-4" />}
-          title={canEntry ? undefined : (lot.movementWarning ?? 'Lote vencido não aceita nova entrada.')}
-        >
-          Adicionar
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onOpenExit}
-          disabled={!canExit}
-          icon={<Minus className="h-4 w-4" />}
-          title={canExit ? undefined : 'Sem estoque para registrar saída.'}
-        >
-          Remover
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenEdit} icon={<Pencil className="h-4 w-4" />}>
-          Editar
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onArchiveLot}
-          icon={
-            lot.status === 'fora_de_estoque' ? (
-              <Trash2 className="h-4 w-4" />
-            ) : (
-              <Archive className="h-4 w-4" />
-            )
-          }
-        >
-          {lot.status === 'fora_de_estoque' ? 'Excluir' : 'Arquivar'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleHistory}
-          icon={isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        >
-          {isExpanded ? 'Ocultar' : 'Histórico'}
-        </Button>
-      </div>
+      <LotActionButtons
+        lot={lot}
+        canHardDelete={canHardDelete}
+        isHistoryExpanded={isExpanded}
+        onOpenEntry={onOpenEntry}
+        onOpenExit={onOpenExit}
+        onOpenAjuste={onOpenAjuste}
+        onOpenEdit={onOpenEdit}
+        onOpenUnit={onOpenUnit}
+        onCloseUnit={onCloseUnit}
+        onArchiveLot={onArchiveLot}
+        onDeleteLot={onDeleteLot}
+        onUnarchiveLot={onUnarchiveLot}
+        onToggleHistory={onToggleHistory}
+      />
 
       {isExpanded ? <MovementHistoryPanel movements={movements} /> : null}
     </Card>
@@ -493,26 +522,26 @@ function ReagentTagCard({
   lot,
   isExpanded,
   movements,
+  canHardDelete,
   onToggleHistory,
   onOpenEntry,
   onOpenExit,
+  onOpenAjuste,
   onOpenEdit,
+  onOpenUnit,
+  onCloseUnit,
   onArchiveLot,
+  onDeleteLot,
+  onUnarchiveLot,
 }: {
   lot: ReagentLot
   isExpanded: boolean
   movements: StockMovement[]
-  onToggleHistory: () => void
-  onOpenEntry: () => void
-  onOpenExit: () => void
-  onOpenEdit: () => void
-  onArchiveLot: () => void
-}) {
+  canHardDelete: boolean
+} & LotCardCallbacks) {
   const { daysLeft, expired, urgent, warning } = getLotVisualState(lot)
   const traceabilityIssues = getTraceabilityIssues(lot)
   const traceabilityIssueLabels = getTraceabilityIssueLabels(lot)
-  const canEntry = canReceiveEntry(lot)
-  const canExit = (lot.currentStock ?? 0) > 0
 
   return (
     <Card
@@ -597,69 +626,232 @@ function ReagentTagCard({
 
       <LotOperationalDetails lot={lot} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onOpenEntry}
-          disabled={!canEntry}
-          icon={<Plus className="h-4 w-4" />}
-          title={canEntry ? undefined : (lot.movementWarning ?? 'Lote vencido não aceita nova entrada.')}
-        >
-          Adicionar
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onOpenExit}
-          disabled={!canExit}
-          icon={<Minus className="h-4 w-4" />}
-          title={canExit ? undefined : 'Sem estoque para registrar saída.'}
-        >
-          Remover
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenEdit} icon={<Pencil className="h-4 w-4" />}>
-          Editar
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onArchiveLot}
-          icon={
-            lot.status === 'fora_de_estoque' ? (
-              <Trash2 className="h-4 w-4" />
-            ) : (
-              <Archive className="h-4 w-4" />
-            )
-          }
-        >
-          {lot.status === 'fora_de_estoque' ? 'Excluir' : 'Arquivar'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggleHistory}
-          icon={isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        >
-          {isExpanded ? 'Ocultar' : 'Histórico'}
-        </Button>
-      </div>
+      <LotActionButtons
+        lot={lot}
+        canHardDelete={canHardDelete}
+        isHistoryExpanded={isExpanded}
+        onOpenEntry={onOpenEntry}
+        onOpenExit={onOpenExit}
+        onOpenAjuste={onOpenAjuste}
+        onOpenEdit={onOpenEdit}
+        onOpenUnit={onOpenUnit}
+        onCloseUnit={onCloseUnit}
+        onArchiveLot={onArchiveLot}
+        onDeleteLot={onDeleteLot}
+        onUnarchiveLot={onUnarchiveLot}
+        onToggleHistory={onToggleHistory}
+      />
 
       {isExpanded ? <MovementHistoryPanel movements={movements} /> : null}
     </Card>
   )
 }
 
+/**
+ * Conjunto canonico de botoes operacionais por card pos refator v3.
+ *
+ * Layout:
+ * - Operacoes principais (linha 1): Adicionar (ENTRADA), Abrir unidade (ABERTURA),
+ *   Voltar ao estoque (FECHAMENTO), Consumir (CONSUMO).
+ * - Manutencao (linha 2): Ajuste, Editar, Arquivar | Apagar (admin only),
+ *   Histórico.
+ * - Em {@code inativo}: substitui as principais por "Reativar".
+ */
+function LotActionButtons({
+  lot,
+  canHardDelete,
+  isHistoryExpanded,
+  onOpenEntry,
+  onOpenExit,
+  onOpenAjuste,
+  onOpenEdit,
+  onOpenUnit,
+  onCloseUnit,
+  onArchiveLot,
+  onDeleteLot,
+  onUnarchiveLot,
+  onToggleHistory,
+}: {
+  lot: ReagentLot
+  canHardDelete: boolean
+  isHistoryExpanded: boolean
+} & LotCardCallbacks) {
+  const isInativo = lot.status === 'inativo'
+  const isVencido = lot.status === 'vencido'
+  const canEntry = canReceiveEntry(lot)
+  const canOpen = canOpenUnit(lot)
+  const canClose = canCloseUnit(lot)
+  const canConsume = !isInativo && (lot.unitsInUse ?? 0) > 0
+
+  return (
+    <div className="space-y-2">
+      {isInativo ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onUnarchiveLot}
+            icon={<RotateCcw className="h-4 w-4" />}
+          >
+            Reativar lote
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onOpenEntry}
+            disabled={!canEntry}
+            icon={<Plus className="h-4 w-4" />}
+            title={
+              canEntry
+                ? 'Registrar entrada de novas unidades em estoque'
+                : (lot.movementWarning ??
+                  'Lote vencido ou inativo não aceita ENTRADA.')
+            }
+          >
+            Adicionar
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenUnit}
+            disabled={!canOpen}
+            icon={<Unlock className="h-4 w-4" />}
+            title={
+              canOpen
+                ? 'Abrir 1 unidade em estoque (mover para Em uso)'
+                : 'Sem unidades em estoque para abrir.'
+            }
+          >
+            Abrir unidade
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCloseUnit}
+            disabled={!canClose}
+            icon={<Lock className="h-4 w-4" />}
+            title={
+              canClose
+                ? 'Reverter abertura: voltar 1 unidade ao estoque'
+                : 'Sem unidades em uso para voltar ao estoque.'
+            }
+          >
+            Voltar ao estoque
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenExit}
+            disabled={!canConsume && !isVencido}
+            icon={<Minus className="h-4 w-4" />}
+            title={
+              canConsume
+                ? 'Registrar consumo (uso real da unidade aberta)'
+                : 'Sem unidades em uso para consumir.'
+            }
+          >
+            Consumir
+          </Button>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {!isInativo ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenAjuste}
+            icon={<Pencil className="h-4 w-4" />}
+            title="Ajuste manual de Em estoque e Em uso (exige motivo)"
+          >
+            Ajuste
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenEdit}
+          icon={<Pencil className="h-4 w-4" />}
+        >
+          Editar
+        </Button>
+        {!isInativo ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onArchiveLot}
+            icon={<Archive className="h-4 w-4" />}
+            title="Arquivar lote (vira Inativo)"
+          >
+            Arquivar
+          </Button>
+        ) : null}
+        {canHardDelete ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDeleteLot}
+            icon={<Trash2 className="h-4 w-4 text-red-600" />}
+            title="Apagar definitivamente — só ADMIN. Use só para correções de cadastro."
+          >
+            <span className="text-red-700">Apagar</span>
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onToggleHistory}
+          icon={
+            isHistoryExpanded ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )
+          }
+        >
+          {isHistoryExpanded ? 'Ocultar' : 'Histórico'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function StockSummary({ lot }: { lot: ReagentLot }) {
-  const stock = (lot.currentStock ?? 0).toFixed(0)
+  const inStock = lot.unitsInStock ?? 0
+  const inUse = lot.unitsInUse ?? 0
+  const total = getTotalUnits(lot)
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
       <span className="inline-flex items-center gap-1.5 font-medium text-neutral-800">
         <Package className="h-4 w-4 text-neutral-500" />
-        {stock} unidades
+        Em estoque: <strong>{inStock}</strong>
       </span>
+      <span className="inline-flex items-center gap-1.5 font-medium text-neutral-800">
+        <Unlock className="h-4 w-4 text-neutral-500" />
+        Em uso: <strong>{inUse}</strong>
+      </span>
+      <span className="text-neutral-500">Total: {total}</span>
       {lot.openedDate ? (
-        <span className="text-xs text-neutral-500">Aberto em {formatLongBR(lot.openedDate)}</span>
+        <span className="text-xs text-neutral-500">
+          Primeira abertura {formatLongBR(lot.openedDate)}
+        </span>
+      ) : null}
+      {lot.status === 'inativo' && lot.archivedAt ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-medium text-neutral-700">
+          Arquivado em {formatLongBR(lot.archivedAt)}
+          {lot.archivedBy ? ` por ${lot.archivedBy}` : ''}
+        </span>
+      ) : null}
+      {lot.needsStockReview ? (
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+          title="Lote vindo da migração V14 — confirme quantas unidades estão em uso vs. em estoque."
+        >
+          <AlertTriangle className="h-3 w-3" /> Revisar estoque
+        </span>
       ) : null}
     </div>
   )
@@ -731,35 +923,59 @@ function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
       </div>
       {movements.length ? (
         movements.map((movement) => {
-          const previousStock =
-            typeof movement.previousStock === 'number' ? movement.previousStock : null
-          let nextStock: number | null = null
-          if (previousStock != null) {
-            if (movement.type === 'ENTRADA') nextStock = previousStock + movement.quantity
-            else if (movement.type === 'SAIDA') nextStock = previousStock - movement.quantity
-            else if (movement.type === 'AJUSTE') nextStock = movement.quantity
-          }
           const reasonLabel =
             MOVEMENT_REASONS.find((reason) => reason.value === movement.reason)?.label ??
             movement.reason
-          const presentation =
-            movement.type === 'ENTRADA'
-              ? {
-                  icon: <ArrowDownLeft className="h-4 w-4 text-green-600" />,
-                  sign: '+',
-                  className: 'text-green-700',
-                }
-              : movement.type === 'SAIDA'
-                ? {
-                    icon: <ArrowUpRight className="h-4 w-4 text-red-600" />,
-                    sign: '-',
-                    className: 'text-red-700',
-                  }
-                : {
-                    icon: <Pencil className="h-4 w-4 text-blue-600" />,
-                    sign: '=',
-                    className: 'text-blue-700',
-                  }
+          const isLegacy =
+            movement.isLegacy ??
+            (typeof movement.previousStock === 'number' &&
+              typeof movement.previousUnitsInStock !== 'number')
+
+          // Delta amigavel. Pos-V14: mostra previousUnitsInStock/InUse.
+          // Pre-V14: mostra previousStock → nextStock derivado pelo tipo.
+          let deltaText: string | null = null
+          if (!isLegacy) {
+            const ps = movement.previousUnitsInStock ?? null
+            const pu = movement.previousUnitsInUse ?? null
+            if (ps != null || pu != null) {
+              deltaText = `📦${ps ?? '-'} 🔓${pu ?? '-'}`
+            }
+          } else {
+            const ps = movement.previousStock ?? null
+            if (ps != null) {
+              let next: number | null = null
+              if (movement.type === 'ENTRADA') next = ps + movement.quantity
+              else if (movement.type === 'SAIDA') next = ps - movement.quantity
+              else if (movement.type === 'AJUSTE') next = movement.quantity
+              deltaText = next != null ? `${ps} → ${next}` : null
+            }
+          }
+
+          const presentation = (() => {
+            if (movement.type === 'ENTRADA' || movement.type === 'FECHAMENTO') {
+              return {
+                icon: <ArrowDownLeft className="h-4 w-4 text-green-600" />,
+                sign: '+',
+                className: 'text-green-700',
+              }
+            }
+            if (
+              movement.type === 'SAIDA' ||
+              movement.type === 'CONSUMO' ||
+              movement.type === 'ABERTURA'
+            ) {
+              return {
+                icon: <ArrowUpRight className="h-4 w-4 text-red-600" />,
+                sign: '-',
+                className: 'text-red-700',
+              }
+            }
+            return {
+              icon: <Pencil className="h-4 w-4 text-blue-600" />,
+              sign: '=',
+              className: 'text-blue-700',
+            }
+          })()
 
           return (
             <div key={movement.id} className="rounded-lg bg-white px-3 py-2 text-sm">
@@ -770,10 +986,11 @@ function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
                     {presentation.sign}
                     {movement.quantity}
                   </span>
-                  {previousStock != null && nextStock != null ? (
-                    <span className="font-mono text-xs text-neutral-500">
-                      {previousStock} → {nextStock}
-                    </span>
+                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-neutral-600">
+                    {movement.type}
+                  </span>
+                  {deltaText ? (
+                    <span className="font-mono text-xs text-neutral-500">{deltaText}</span>
                   ) : null}
                   {movement.responsible ? (
                     <span className="text-neutral-500">por {movement.responsible}</span>
@@ -781,6 +998,14 @@ function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
                   {reasonLabel ? (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
                       {reasonLabel}
+                    </span>
+                  ) : null}
+                  {isLegacy ? (
+                    <span
+                      className="rounded-full bg-neutral-200 px-2 py-0.5 text-[10px] font-medium text-neutral-600"
+                      title="Movimento pre-refator v3 (V14)."
+                    >
+                      Legado
                     </span>
                   ) : null}
                 </div>

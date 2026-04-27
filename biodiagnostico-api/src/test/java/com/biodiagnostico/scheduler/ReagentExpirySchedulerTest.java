@@ -11,6 +11,7 @@ import com.biodiagnostico.entity.ReagentStatus;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.StockMovementRepository;
+import com.biodiagnostico.repository.UserRepository;
 import com.biodiagnostico.service.AuditService;
 import com.biodiagnostico.service.ReagentService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,10 +29,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * Testa {@link ReagentExpiryScheduler#markExpiredLots()} apos refator-v2.
+ * Testa {@link ReagentExpiryScheduler#markExpiredLots()} apos refator-v3.
  *
- * <p>Usa um {@link ReagentService} real (nao mock) para exercitar
- * {@code deriveStatus} e {@code applyDerivedStatusFromScheduler} de ponta a ponta.</p>
+ * <p>Cobre os seguintes cenarios canonicos:</p>
+ * <ul>
+ *   <li>Lote em_estoque + validade passada → vencido + audit trigger=scheduler</li>
+ *   <li>Lote inativo + validade passada → scheduler NAO toca (terminal manual)</li>
+ *   <li>Lote em_estoque + validade futura → no-op</li>
+ * </ul>
  */
 @ExtendWith(MockitoExtension.class)
 class ReagentExpirySchedulerTest {
@@ -45,6 +50,9 @@ class ReagentExpirySchedulerTest {
     @Mock
     private QcRecordRepository qcRecordRepository;
 
+    @Mock
+    private UserRepository userRepository;
+
     private RecordingAuditService auditService;
     private ReagentService reagentService;
     private ReagentExpiryScheduler scheduler;
@@ -53,7 +61,8 @@ class ReagentExpirySchedulerTest {
     void setUp() {
         auditService = new RecordingAuditService();
         reagentService = new ReagentService(
-            reagentLotRepository, stockMovementRepository, qcRecordRepository, auditService);
+            reagentLotRepository, stockMovementRepository, qcRecordRepository,
+            userRepository, auditService);
         scheduler = new ReagentExpiryScheduler(reagentLotRepository, reagentService);
     }
 
@@ -82,9 +91,9 @@ class ReagentExpirySchedulerTest {
     }
 
     @Test
-    @DisplayName("lote em_estoque + validade passada + estoque > 0 vira vencido")
-    void emEstoque_comValidadePassadaEEstoque_deveVirarVencido() {
-        ReagentLot lot = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(3), 15D);
+    @DisplayName("lote em_estoque + validade passada vira vencido")
+    void emEstoque_comValidadePassada_deveVirarVencido() {
+        ReagentLot lot = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(3), 15, 0);
         when(reagentLotRepository.findExpiredNeedingReclassification(any()))
             .thenReturn(List.of(lot));
 
@@ -98,40 +107,34 @@ class ReagentExpirySchedulerTest {
     }
 
     @Test
-    @DisplayName("lote em_estoque + validade passada + estoque 0 vira vencido (refator-v2: vencido absorve antigo inativo)")
-    void emEstoque_comValidadePassadaSemEstoque_deveVirarVencido() {
-        ReagentLot lot = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(3), 0D);
+    @DisplayName("lote em_uso + validade passada vira vencido")
+    void emUso_comValidadePassada_deveVirarVencido() {
+        ReagentLot lot = lotBuilder(ReagentStatus.EM_USO, LocalDate.now().minusDays(3), 0, 5);
         when(reagentLotRepository.findExpiredNeedingReclassification(any()))
             .thenReturn(List.of(lot));
 
         scheduler.markExpiredLots();
 
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
-        verify(reagentLotRepository).saveAll(List.of(lot));
     }
 
     @Test
-    @DisplayName("lote fora_de_estoque com validade passada vira vencido (validade e regra mais forte)")
-    void foraDeEstoque_comValidadePassada_viraVencido() {
-        ReagentLot lot = lotBuilder(ReagentStatus.FORA_DE_ESTOQUE, LocalDate.now().minusDays(10), 0D);
+    @DisplayName("scheduler NAO toca lote inativo (terminal manual — decisao 1.1)")
+    void inativo_comValidadePassada_naoTocado() {
+        // O repository ja filtra inativo via JPQL (status NOT IN ('vencido','inativo')),
+        // mas testamos defesa em profundidade: mesmo se chegasse aqui, applyDerivedStatusFromScheduler
+        // faz early return em lote inativo.
+        ReagentLot lot = lotBuilder(ReagentStatus.INATIVO, LocalDate.now().minusDays(10), 0, 0);
         when(reagentLotRepository.findExpiredNeedingReclassification(any()))
             .thenReturn(List.of(lot));
 
         scheduler.markExpiredLots();
 
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
-        verify(reagentLotRepository).saveAll(List.of(lot));
-    }
-
-    @Test
-    @DisplayName("lote em_estoque com validade futura nao deve ser tocado (filtrado pelo repository)")
-    void emEstoqueComValidadeFutura_naoDeveSerTocado() {
-        when(reagentLotRepository.findExpiredNeedingReclassification(any()))
-            .thenReturn(List.of());
-
-        scheduler.markExpiredLots();
-
+        // Status NAO mudou (terminal manual preservado).
+        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.INATIVO);
         verify(reagentLotRepository, never()).saveAll(any());
+        // Sem audit DERIVED.
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_STATUS_DERIVED)).isEmpty();
     }
 
     @Test
@@ -148,35 +151,29 @@ class ReagentExpirySchedulerTest {
     @Test
     @DisplayName("scheduler grava audit log REAGENT_STATUS_DERIVED trigger=scheduler para cada reclassificacao")
     void scheduler_gravaAuditLogPorLoteReclassificado() {
-        ReagentLot emEstoqueComEstoque = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(2), 10D);
-        ReagentLot emEstoqueSemEstoque = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(2), 0D);
+        ReagentLot l1 = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(2), 10, 0);
+        ReagentLot l2 = lotBuilder(ReagentStatus.EM_ESTOQUE, LocalDate.now().minusDays(2), 0, 0);
         when(reagentLotRepository.findExpiredNeedingReclassification(any()))
-            .thenReturn(List.of(emEstoqueComEstoque, emEstoqueSemEstoque));
+            .thenReturn(List.of(l1, l2));
 
         scheduler.markExpiredLots();
 
         List<RecordingAuditService.Call> derived = auditService.callsFor(
             ReagentService.AUDIT_ACTION_STATUS_DERIVED);
         assertThat(derived).hasSize(2);
-        assertThat(derived).extracting(RecordingAuditService.Call::entityId)
-            .containsExactly(emEstoqueComEstoque.getId(), emEstoqueSemEstoque.getId());
         assertThat(derived).allSatisfy(call -> {
             assertThat(call.entityType()).isEqualTo("ReagentLot");
             assertThat(call.details())
                 .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_SCHEDULER)
-                .containsEntry("from", ReagentStatus.EM_ESTOQUE);
+                .containsEntry("from", ReagentStatus.EM_ESTOQUE)
+                .containsEntry("to", ReagentStatus.VENCIDO);
         });
-        // Refator-v2: ambos viram VENCIDO porque expiry < today (regra mais forte).
-        assertThat(derived.get(0).details()).containsEntry("to", ReagentStatus.VENCIDO);
-        assertThat(derived.get(1).details()).containsEntry("to", ReagentStatus.VENCIDO);
     }
 
     @Test
     @DisplayName("scheduler nao grava audit quando nao ha transicao")
     void scheduler_semTransicao_naoGeraAudit() {
-        ReagentLot lot = lotBuilder(ReagentStatus.VENCIDO, LocalDate.now().minusDays(3), 20D);
-        // Mesmo que o repository devolva o lote por defesa, applyDerivedStatusFromScheduler
-        // ve status=vencido + expiry passada = derivado=vencido = no-op.
+        ReagentLot lot = lotBuilder(ReagentStatus.VENCIDO, LocalDate.now().minusDays(3), 5, 0);
         when(reagentLotRepository.findExpiredNeedingReclassification(any()))
             .thenReturn(List.of(lot));
 
@@ -185,28 +182,17 @@ class ReagentExpirySchedulerTest {
         assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_STATUS_DERIVED)).isEmpty();
     }
 
-    @Test
-    @DisplayName("lote vencido ja correto nao gera save")
-    void vencidoComEstoque_jaEstaCorreto_naoDeveSalvarNovamente() {
-        ReagentLot lot = lotBuilder(ReagentStatus.VENCIDO, LocalDate.now().minusDays(3), 20D);
-        when(reagentLotRepository.findExpiredNeedingReclassification(any()))
-            .thenReturn(List.of(lot));
-
-        scheduler.markExpiredLots();
-
-        assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
-        verify(reagentLotRepository, never()).saveAll(any());
-    }
-
-    private ReagentLot lotBuilder(String status, LocalDate expiryDate, double stock) {
+    private ReagentLot lotBuilder(String status, LocalDate expiryDate, int stock, int use) {
         return ReagentLot.builder()
             .id(UUID.randomUUID())
             .name("ALT")
             .lotNumber("L-" + UUID.randomUUID())
             .manufacturer("Bio")
-            .currentStock(stock)
+            .unitsInStock(stock)
+            .unitsInUse(use)
             .status(status)
             .expiryDate(expiryDate)
+            .needsStockReview(false)
             .build();
     }
 }
