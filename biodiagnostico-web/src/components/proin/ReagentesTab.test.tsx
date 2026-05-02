@@ -190,8 +190,8 @@ describe('ReagentesTab v3', () => {
       ],
     })
     renderTab()
-    expect(screen.getByText('Gestão de Reagentes')).toBeInTheDocument()
     expect(await screen.findByText('ALT')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Novo Lote' })).toBeInTheDocument()
   })
 
   it('valida etiqueta antes de cadastrar lote novo', async () => {

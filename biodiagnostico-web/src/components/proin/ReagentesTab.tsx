@@ -397,13 +397,8 @@ export function ReagentesTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xl font-semibold text-neutral-900">Gestão de Reagentes</h3>
-          <p className="text-base text-neutral-500">Controle de lotes, estoque e movimentações</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <VoiceRecorderModal
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <VoiceRecorderModal
             formType="reagente"
             title="Reagente por voz"
             onApply={(data) => {
@@ -425,10 +420,9 @@ export function ReagentesTab() {
               setIsLotModalOpen(true)
             }}
           />
-          <Button onClick={handleOpenCreate} icon={<PackagePlus className="h-4 w-4" />}>
-            Novo Lote
-          </Button>
-        </div>
+        <Button onClick={handleOpenCreate} icon={<PackagePlus className="h-4 w-4" />}>
+          Novo Lote
+        </Button>
       </div>
 
       <ReagentsDashboard
