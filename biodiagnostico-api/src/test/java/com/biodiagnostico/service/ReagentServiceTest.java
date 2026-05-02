@@ -304,7 +304,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         StockMovement mv = reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null));
+            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null, null));
 
         assertThat(lot.getUnitsInStock()).isEqualTo(15);
         assertThat(lot.getUnitsInUse()).isEqualTo(0);
@@ -323,7 +323,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null));
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, null));
 
         assertThat(lot.getUnitsInStock()).isEqualTo(4);
         assertThat(lot.getUnitsInUse()).isEqualTo(1);
@@ -349,7 +349,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null)))
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sem unidades fechadas para abrir");
     }
@@ -361,7 +361,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ABERTURA", 5D, "Ana", "", null, null, null)))
+            new StockMovementRequest("ABERTURA", 5D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("operam unitariamente");
     }
@@ -377,7 +377,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         StockMovement mv = reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null));
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null, null));
 
         assertThat(lot.getUnitsInStock()).isEqualTo(4);
         assertThat(lot.getUnitsInUse()).isEqualTo(1);
@@ -393,7 +393,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null)))
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Sem unidades em uso");
     }
@@ -405,7 +405,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("FECHAMENTO", 2D, "Ana", "", null, null, null)))
+            new StockMovementRequest("FECHAMENTO", 2D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("operam unitariamente");
     }
@@ -421,7 +421,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("CONSUMO", 2D, "Ana", "", "OUTRO", null, null));
+            new StockMovementRequest("CONSUMO", 2D, "Ana", "", "OUTRO", null, null, null));
 
         assertThat(lot.getUnitsInUse()).isEqualTo(0);
         // Status nao reverte para terminal automatico (estoque zero deixou de ser terminal).
@@ -438,7 +438,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null)))
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("CONSUMO em lote vencido exige reason");
     }
@@ -454,7 +454,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("CONSUMO", 1D, "Ana", "", "VENCIMENTO", null, null));
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", "VENCIMENTO", null, null, null));
 
         assertThat(lot.getUnitsInUse()).isEqualTo(4);
         assertThat(lot.getStatus()).isEqualTo(ReagentStatus.VENCIDO);
@@ -470,7 +470,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 0));
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 0, null));
 
         assertThat(lot.getUnitsInStock()).isEqualTo(5);
         assertThat(lot.getUnitsInUse()).isEqualTo(0);
@@ -488,7 +488,7 @@ class ReagentServiceTest {
         when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
 
         reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 2));
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "Recontagem", "CORRECAO", 5, 2, null));
 
         assertThat(lot.getNeedsStockReview()).isFalse();
     }
@@ -500,7 +500,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 0D, "Ana", "", null, 30, 0)))
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "", null, 30, 0, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("AJUSTE exige reason");
     }
@@ -512,7 +512,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("AJUSTE", 0D, "Ana", "", "CORRECAO", null, 0)))
+            new StockMovementRequest("AJUSTE", 0D, "Ana", "", "CORRECAO", null, 0, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("AJUSTE exige targetUnitsInStock e targetUnitsInUse");
     }
@@ -525,7 +525,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 5D, "Ana", "", null, null, null)))
+            new StockMovementRequest("ENTRADA", 5D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("nao aceita ENTRADA");
 
@@ -546,7 +546,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null)))
+            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("nao aceita ENTRADA");
 
@@ -565,7 +565,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null)))
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("nao aceita ABERTURA");
     }
@@ -579,7 +579,7 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null)))
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("nao aceita FECHAMENTO");
     }
@@ -591,9 +591,184 @@ class ReagentServiceTest {
         when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
 
         assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
-            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null)))
+            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null, null)))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("SAIDA descontinuado");
+    }
+
+    // ===== v3.1 — eventDate (data declarada pelo operador) =====
+
+    @Test
+    @DisplayName("ABERTURA com eventDate=2026-04-01 (passada) e openedDate=null grava lot.openedDate=2026-04-01 + movement.eventDate=2026-04-01 + audit.openedDate='2026-04-01'")
+    void abertura_eventDatePassada_sincronizaOpenedDateEMovimento() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        lot.setOpenedDate(null);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        LocalDate declared = LocalDate.of(2026, 4, 1);
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, declared));
+
+        assertThat(lot.getOpenedDate()).isEqualTo(declared);
+        assertThat(mv.getEventDate()).isEqualTo(declared);
+
+        List<RecordingAuditService.Call> derived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_OPENED_DATE_DERIVED);
+        assertThat(derived).hasSize(1);
+        assertThat(derived.getFirst().details())
+            .containsEntry("openedDate", declared.toString())
+            .containsEntry("trigger", ReagentService.AUDIT_TRIGGER_ABERTURA);
+    }
+
+    @Test
+    @DisplayName("ABERTURA sem eventDate (null) mantem comportamento v3: lot.openedDate=today, movement.eventDate=today")
+    void abertura_semEventDate_defaultToday() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        lot.setOpenedDate(null);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, null));
+
+        assertThat(lot.getOpenedDate()).isEqualTo(LocalDate.now());
+        assertThat(mv.getEventDate()).isEqualTo(LocalDate.now());
+
+        List<RecordingAuditService.Call> derived = auditService.callsFor(
+            ReagentService.AUDIT_ACTION_OPENED_DATE_DERIVED);
+        assertThat(derived).hasSize(1);
+        assertThat(derived.getFirst().details())
+            .containsEntry("openedDate", LocalDate.now().toString());
+    }
+
+    @Test
+    @DisplayName("ABERTURA com eventDate futura → 400 BusinessException")
+    void abertura_eventDateFutura_falha() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        LocalDate futura = LocalDate.now().plusDays(1);
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, futura)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Data de abertura não pode ser futura");
+    }
+
+    @Test
+    @DisplayName("ABERTURA quando lot.openedDate ja existe NAO sobrescreve, mas movement.eventDate eh gravada")
+    void abertura_openedDateJaExiste_naoSobrescreveMasGravaEventDate() {
+        ReagentLot lot = lot(5, 1);
+        lot.setStatus(ReagentStatus.EM_USO);
+        LocalDate primeiraAbertura = LocalDate.now().minusDays(10);
+        lot.setOpenedDate(primeiraAbertura);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        LocalDate segundaAbertura = LocalDate.now().minusDays(2);
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, segundaAbertura));
+
+        // openedDate preservado — primeira abertura permanece imutavel.
+        assertThat(lot.getOpenedDate()).isEqualTo(primeiraAbertura);
+        // movement.eventDate carrega a data declarada da segunda abertura.
+        assertThat(mv.getEventDate()).isEqualTo(segundaAbertura);
+
+        // Audit DERIVED NAO emitido — lot.openedDate ja existia.
+        assertThat(auditService.callsFor(ReagentService.AUDIT_ACTION_OPENED_DATE_DERIVED))
+            .isEmpty();
+    }
+
+    @Test
+    @DisplayName("CONSUMO com eventDate=2026-04-15 grava movement.eventDate sem mexer em lot.openedDate")
+    void consumo_eventDatePassada_persisteSemAfetarLot() {
+        ReagentLot lot = lot(0, 5);
+        lot.setStatus(ReagentStatus.EM_USO);
+        LocalDate openedOriginal = LocalDate.now().minusDays(20);
+        lot.setOpenedDate(openedOriginal);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        LocalDate fimUso = LocalDate.of(2026, 4, 15);
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null, fimUso));
+
+        assertThat(mv.getEventDate()).isEqualTo(fimUso);
+        // openedDate NAO eh tocado por CONSUMO.
+        assertThat(lot.getOpenedDate()).isEqualTo(openedOriginal);
+    }
+
+    @Test
+    @DisplayName("CONSUMO com eventDate futura → 400 BusinessException")
+    void consumo_eventDateFutura_falha() {
+        ReagentLot lot = lot(0, 5);
+        lot.setStatus(ReagentStatus.EM_USO);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+
+        LocalDate futura = LocalDate.now().plusDays(2);
+        assertThatThrownBy(() -> reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null, futura)))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Data de fim de uso não pode ser futura");
+    }
+
+    @Test
+    @DisplayName("CONSUMO sem eventDate → movement.eventDate=null (compat com UI antigo)")
+    void consumo_semEventDate_persisteNull() {
+        ReagentLot lot = lot(0, 5);
+        lot.setStatus(ReagentStatus.EM_USO);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("CONSUMO", 1D, "Ana", "", null, null, null, null));
+
+        assertThat(mv.getEventDate()).isNull();
+    }
+
+    @Test
+    @DisplayName("FECHAMENTO com eventDate persiste sem efeito colateral")
+    void fechamento_comEventDate_persisteSemEfeito() {
+        ReagentLot lot = lot(2, 1);
+        lot.setStatus(ReagentStatus.EM_USO);
+        LocalDate openedOriginal = LocalDate.now().minusDays(5);
+        lot.setOpenedDate(openedOriginal);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        LocalDate eventDate = LocalDate.now().minusDays(1);
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("FECHAMENTO", 1D, "Ana", "", null, null, null, eventDate));
+
+        assertThat(mv.getEventDate()).isEqualTo(eventDate);
+        // openedDate NAO alterado por FECHAMENTO.
+        assertThat(lot.getOpenedDate()).isEqualTo(openedOriginal);
+    }
+
+    @Test
+    @DisplayName("ENTRADA com eventDate persiste sem efeito colateral")
+    void entrada_comEventDate_persisteSemEfeito() {
+        ReagentLot lot = lot(5, 0);
+        lot.setStatus(ReagentStatus.EM_ESTOQUE);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+        when(stockMovementRepository.save(any(StockMovement.class))).thenAnswer(i -> i.getArgument(0));
+
+        LocalDate eventDate = LocalDate.now().minusDays(3);
+        StockMovement mv = reagentService.createMovement(lot.getId(),
+            new StockMovementRequest("ENTRADA", 10D, "Ana", "", null, null, null, eventDate));
+
+        assertThat(mv.getEventDate()).isEqualTo(eventDate);
+        assertThat(lot.getUnitsInStock()).isEqualTo(15);
     }
 
     // ===== archive =====

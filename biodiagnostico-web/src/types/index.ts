@@ -387,6 +387,12 @@ export interface StockMovement {
   /** True quando {@code previousStock != null AND previousUnitsInStock == null}. */
   isLegacy?: boolean
   reason?: MovementReason | string | null
+  /**
+   * Data declarada pelo operador para o evento (LocalDate ISO "YYYY-MM-DD").
+   * Refator v3.1: ABERTURA usa para gravar {@code lot.openedDate};
+   * CONSUMO persiste como data de fim de uso. NULL quando nao informado.
+   */
+  eventDate?: string | null
   createdAt: string
 }
 
@@ -399,6 +405,13 @@ export interface StockMovementRequest {
   /** Obrigatorio para AJUSTE; ignorado para outros tipos. */
   targetUnitsInStock?: number
   targetUnitsInUse?: number
+  /**
+   * Refator v3.1: data declarada do evento (LocalDate ISO "YYYY-MM-DD").
+   * - ABERTURA: usado para preencher {@code lot.openedDate} (default = hoje).
+   * - CONSUMO: persiste como data de fim de uso (default = hoje).
+   * Backend valida {@code eventDate <= today}.
+   */
+  eventDate?: string
 }
 
 /**

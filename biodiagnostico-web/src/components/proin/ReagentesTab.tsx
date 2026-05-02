@@ -26,6 +26,7 @@ import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ReagentLotModal, ReagentMovementModal } from './reagentes/ReagentModals'
 import { ArchiveLotModal } from './reagentes/ArchiveLotModal'
 import { DeleteLotModal } from './reagentes/DeleteLotModal'
+import { OpenUnitModal } from './reagentes/OpenUnitModal'
 import { ReagentsContent } from './reagentes/ReagentsContent'
 import { ReagentsDashboard } from './reagentes/ReagentsDashboard'
 import { ReagentsFilters } from './reagentes/ReagentsFilters'
@@ -46,6 +47,7 @@ import {
   type ReagentSortMode,
   type ReagentViewMode,
 } from './reagentes/utils'
+import { todayLocal } from '../../utils/date'
 
 /**
  * Aba de Reagentes pos refator v3.
@@ -88,6 +90,10 @@ export function ReagentesTab() {
   // Modais novos v3
   const [archivingLot, setArchivingLot] = useState<ReagentLot | null>(null)
   const [deletingLot, setDeletingLot] = useState<ReagentLot | null>(null)
+  // Refator v3.1: popup de "Abrir unidade" com seletor de data — confirma a
+  // data declarada (eventDate) antes de disparar o ABERTURA.
+  const [openingUnitFor, setOpeningUnitFor] = useState<ReagentLot | null>(null)
+  const [isOpeningUnitSaving, setIsOpeningUnitSaving] = useState(false)
 
   const {
     data: lots = [],
@@ -172,7 +178,12 @@ export function ReagentesTab() {
 
   const openMovementForLot = (lot: ReagentLot, type: StockMovementRequest['type']) => {
     setExpandedLot(lot)
-    setMovementForm(createMovementForm(responsibleName, type))
+    const baseForm = createMovementForm(responsibleName, type)
+    // Refator v3.1: seed de eventDate=hoje quando o usuario abre o modal de
+    // CONSUMO ("Final de Uso"). Backend persiste no movimento.
+    setMovementForm(
+      type === 'CONSUMO' ? { ...baseForm, eventDate: todayLocal() } : baseForm,
+    )
     setMovementLockType(true)
     setIsMovementModalOpen(true)
   }
@@ -189,7 +200,7 @@ export function ReagentesTab() {
 
   const handleOpenExit = (lot: ReagentLot) => {
     if ((lot.unitsInUse ?? 0) <= 0 && lot.status !== 'vencido') {
-      toast.warning('Sem unidades em uso para registrar consumo.')
+      toast.warning('Sem unidades em uso para registrar fim de uso.')
       return
     }
     openMovementForLot(lot, 'CONSUMO')
@@ -206,21 +217,45 @@ export function ReagentesTab() {
     setIsMovementModalOpen(true)
   }
 
-  const handleOpenUnit = async (lot: ReagentLot) => {
+  /**
+   * Refator v3.1: abrir unidade nao dispara mais ABERTURA imediato. Abre o
+   * {@link OpenUnitModal} para o operador confirmar/editar a {@code eventDate}
+   * (default = hoje, max = hoje). Apos confirmar, chama {@link handleConfirmOpenUnit}.
+   */
+  const handleOpenUnit = (lot: ReagentLot) => {
     if (!canOpenUnit(lot)) {
       toast.warning('Sem unidades em estoque para abrir.')
       return
     }
+    setOpeningUnitFor(lot)
+  }
+
+  const handleConfirmOpenUnit = async (eventDate: string) => {
+    if (!openingUnitFor) return
+    const today = todayLocal()
+    if (!eventDate || eventDate > today) {
+      toast.warning('A data de abertura não pode ser futura.')
+      return
+    }
+    setIsOpeningUnitSaving(true)
     try {
-      await createMovementOnLot(lot, {
+      await createMovementOnLot(openingUnitFor, {
         type: 'ABERTURA',
         quantity: 1,
         responsible: responsibleName,
         reason: null,
+        eventDate,
       })
-      toast.success(`1 unidade aberta. Em uso: ${(lot.unitsInUse ?? 0) + 1}.`)
+      toast.success(
+        `1 unidade aberta. Em uso: ${(openingUnitFor.unitsInUse ?? 0) + 1}.`,
+      )
+      setOpeningUnitFor(null)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível abrir a unidade.')
+      toast.error(
+        error instanceof Error ? error.message : 'Não foi possível abrir a unidade.',
+      )
+    } finally {
+      setIsOpeningUnitSaving(false)
     }
   }
 
@@ -484,7 +519,7 @@ export function ReagentesTab() {
         onOpenExit={handleOpenExit}
         onOpenAjuste={handleOpenAjuste}
         onOpenEdit={handleOpenEdit}
-        onOpenUnit={(lot) => void handleOpenUnit(lot)}
+        onOpenUnit={(lot) => handleOpenUnit(lot)}
         onCloseUnit={(lot) => void handleCloseUnit(lot)}
         onArchiveLot={(lot) => setArchivingLot(lot)}
         onDeleteLot={(lot) => setDeletingLot(lot)}
@@ -531,6 +566,13 @@ export function ReagentesTab() {
         lot={deletingLot}
         onClose={() => setDeletingLot(null)}
         onConfirm={(payload) => void handleDeleteConfirm(payload)}
+      />
+      <OpenUnitModal
+        isOpen={Boolean(openingUnitFor)}
+        isSaving={isOpeningUnitSaving}
+        lot={openingUnitFor}
+        onClose={() => setOpeningUnitFor(null)}
+        onConfirm={(eventDate) => void handleConfirmOpenUnit(eventDate)}
       />
     </div>
   )

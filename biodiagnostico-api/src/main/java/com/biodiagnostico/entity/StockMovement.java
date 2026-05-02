@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -76,6 +77,36 @@ public class StockMovement {
      */
     @Column(length = 32)
     private String reason;
+
+    /**
+     * Refator v3.1 (V15): data DECLARADA pelo operador para o evento real do
+     * movimento — em contraste com {@link #createdAt}, que carimba o instante
+     * do sistema no momento do registro.
+     *
+     * <p>Coexistencia semantica:</p>
+     * <ul>
+     *   <li>{@code eventDate}: quando o operador AFIRMA que o evento ocorreu
+     *       (abertura/fim de uso). Pode ser passado, igual ou anterior a
+     *       {@code createdAt}. Nunca futuro.</li>
+     *   <li>{@code createdAt}: quando o sistema PERSISTIU o registro. Carimbado
+     *       pelo {@code @CreationTimestamp}. Imutavel.</li>
+     * </ul>
+     *
+     * <p>Comportamento por tipo (validacao no service):</p>
+     * <ul>
+     *   <li>ABERTURA: se preenchido, sincroniza {@code lot.openedDate} na primeira
+     *       abertura (audit {@code REAGENT_OPENED_DATE_DERIVED}). Se ausente,
+     *       default = hoje (compatibilidade com v3).</li>
+     *   <li>CONSUMO ("Final de Uso"): rastreabilidade ANVISA RDC 302 art. 49 da
+     *       data real do uso/descarte. Frontend usa {@code createdAt} como
+     *       fallback quando NULL (movimento pre-V15 ou registro sem data).</li>
+     *   <li>ENTRADA/FECHAMENTO/AJUSTE: persistido se enviado, sem efeito colateral.</li>
+     * </ul>
+     *
+     * <p>NULL e estado valido — movimentos pre-V15 nao tem essa coluna preenchida.</p>
+     */
+    @Column(name = "event_date")
+    private LocalDate eventDate;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

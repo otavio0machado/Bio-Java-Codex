@@ -364,6 +364,7 @@ public final class ResponseMapper {
             movement.getPreviousUnitsInUse(),
             isLegacy,
             movement.getReason(),
+            movement.getEventDate(),
             movement.getCreatedAt()
         );
     }

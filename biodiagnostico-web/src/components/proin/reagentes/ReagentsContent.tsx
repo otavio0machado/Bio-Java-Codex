@@ -381,7 +381,6 @@ function ReagentListCard({
   onToggleHistory,
   onOpenEntry,
   onOpenExit,
-  onOpenAjuste,
   onOpenEdit,
   onOpenUnit,
   onCloseUnit,
@@ -503,7 +502,6 @@ function ReagentListCard({
         isHistoryExpanded={isExpanded}
         onOpenEntry={onOpenEntry}
         onOpenExit={onOpenExit}
-        onOpenAjuste={onOpenAjuste}
         onOpenEdit={onOpenEdit}
         onOpenUnit={onOpenUnit}
         onCloseUnit={onCloseUnit}
@@ -526,7 +524,6 @@ function ReagentTagCard({
   onToggleHistory,
   onOpenEntry,
   onOpenExit,
-  onOpenAjuste,
   onOpenEdit,
   onOpenUnit,
   onCloseUnit,
@@ -632,7 +629,6 @@ function ReagentTagCard({
         isHistoryExpanded={isExpanded}
         onOpenEntry={onOpenEntry}
         onOpenExit={onOpenExit}
-        onOpenAjuste={onOpenAjuste}
         onOpenEdit={onOpenEdit}
         onOpenUnit={onOpenUnit}
         onCloseUnit={onCloseUnit}
@@ -648,14 +644,18 @@ function ReagentTagCard({
 }
 
 /**
- * Conjunto canonico de botoes operacionais por card pos refator v3.
+ * Conjunto canonico de botoes operacionais por card pos refator v3.1.
  *
  * Layout:
  * - Operacoes principais (linha 1): Adicionar (ENTRADA), Abrir unidade (ABERTURA),
- *   Voltar ao estoque (FECHAMENTO), Consumir (CONSUMO).
- * - Manutencao (linha 2): Ajuste, Editar, Arquivar | Apagar (admin only),
- *   Histórico.
+ *   Voltar ao estoque (FECHAMENTO), Final de Uso (CONSUMO).
+ * - Manutencao (linha 2): Editar, Arquivar | Apagar (admin only), Histórico.
  * - Em {@code inativo}: substitui as principais por "Reativar".
+ *
+ * Refator v3.1:
+ * - Drop botao "Ajuste" da UI (callback {@code onOpenAjuste} segue na interface
+ *   por compatibilidade — backend ainda aceita AJUSTE, so nao expomos botao).
+ * - Renomeio "Consumir" -> "Final de Uso" (value HTTP CONSUMO inalterado).
  */
 function LotActionButtons({
   lot,
@@ -663,7 +663,6 @@ function LotActionButtons({
   isHistoryExpanded,
   onOpenEntry,
   onOpenExit,
-  onOpenAjuste,
   onOpenEdit,
   onOpenUnit,
   onCloseUnit,
@@ -675,7 +674,7 @@ function LotActionButtons({
   lot: ReagentLot
   canHardDelete: boolean
   isHistoryExpanded: boolean
-} & LotCardCallbacks) {
+} & Omit<LotCardCallbacks, 'onOpenAjuste'>) {
   const isInativo = lot.status === 'inativo'
   const isVencido = lot.status === 'vencido'
   const canEntry = canReceiveEntry(lot)
@@ -749,27 +748,16 @@ function LotActionButtons({
             icon={<Minus className="h-4 w-4" />}
             title={
               canConsume
-                ? 'Registrar consumo (uso real da unidade aberta)'
-                : 'Sem unidades em uso para consumir.'
+                ? 'Registrar fim de uso de uma unidade aberta'
+                : 'Sem unidades em uso para registrar fim de uso.'
             }
           >
-            Consumir
+            Final de Uso
           </Button>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {!isInativo ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onOpenAjuste}
-            icon={<Pencil className="h-4 w-4" />}
-            title="Ajuste manual de Em estoque e Em uso (exige motivo)"
-          >
-            Ajuste
-          </Button>
-        ) : null}
         <Button
           variant="ghost"
           size="sm"
@@ -977,6 +965,13 @@ function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
             }
           })()
 
+          // Refator v3.1: quando movement.eventDate vem preenchido, mostramos
+          // a data declarada do evento ao lado do responsavel. Caso contrario,
+          // a data principal segue sendo {@code createdAt}.
+          const eventDateLabel = movement.eventDate
+            ? formatLongBR(movement.eventDate)
+            : null
+
           return (
             <div key={movement.id} className="rounded-lg bg-white px-3 py-2 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -994,6 +989,17 @@ function MovementHistoryPanel({ movements }: { movements: StockMovement[] }) {
                   ) : null}
                   {movement.responsible ? (
                     <span className="text-neutral-500">por {movement.responsible}</span>
+                  ) : null}
+                  {eventDateLabel ? (
+                    <>
+                      <span className="text-neutral-500">em {eventDateLabel}</span>
+                      <span
+                        className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-800"
+                        title="Data declarada pelo operador (eventDate)"
+                      >
+                        data declarada
+                      </span>
+                    </>
                   ) : null}
                   {reasonLabel ? (
                     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">

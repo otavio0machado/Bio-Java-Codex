@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { ReagentLot, ReagentLotRequest, StockMovementRequest } from '../../../types'
 import { CATEGORIES, REAGENT_STATUS_FORM_OPTIONS, TEMPS } from './constants'
+import { todayLocal } from '../../../utils/date'
 
 interface ValidationResult {
   message: string
@@ -91,14 +92,32 @@ const lotSchema = z
  */
 const movementTypeSchema = z.enum(['ENTRADA', 'ABERTURA', 'FECHAMENTO', 'CONSUMO', 'AJUSTE'])
 
-const movementSchema = z.object({
-  type: movementTypeSchema,
-  quantity: z.number().min(0, 'Quantidade inválida.'),
-  responsible: z.string().trim().min(1, 'Informe o responsável pela movimentação.'),
-  reason: z.string().nullable().optional(),
-  targetUnitsInStock: z.number().int().min(0).optional(),
-  targetUnitsInUse: z.number().int().min(0).optional(),
-})
+const movementSchema = z
+  .object({
+    type: movementTypeSchema,
+    quantity: z.number().min(0, 'Quantidade inválida.'),
+    responsible: z.string().trim().min(1, 'Informe o responsável pela movimentação.'),
+    reason: z.string().nullable().optional(),
+    targetUnitsInStock: z.number().int().min(0).optional(),
+    targetUnitsInUse: z.number().int().min(0).optional(),
+    /**
+     * Refator v3.1: data declarada do evento (LocalDate "YYYY-MM-DD"). Opcional.
+     * Quando preenchida, deve ser <= hoje. Backend tambem valida.
+     */
+    eventDate: z.string().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.eventDate && value.eventDate.trim()) {
+      const today = todayLocal()
+      if (value.eventDate > today) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['eventDate'],
+          message: 'A data não pode ser futura.',
+        })
+      }
+    }
+  })
 
 export function validateLotForm(form: ReagentLotRequest): ValidationResult | null {
   const result = lotSchema.safeParse(form)

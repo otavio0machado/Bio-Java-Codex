@@ -219,7 +219,11 @@ describe('ReagentesTab v3', () => {
     await userEvent.click(fab)
     await userEvent.type(fab, 'NovoFab')
     await userEvent.click(screen.getByText(/\+ Criar novo fabricante/i))
-    await userEvent.selectOptions(screen.getByLabelText('Categoria *'), 'Bioquímica')
+    // Refator v3.1: Categoria virou Combobox fechado (allowCustom=false).
+    // Search-as-you-type por "Bioquí" filtra para 1 resultado, depois Enter.
+    const cat = screen.getByLabelText('Categoria *')
+    await userEvent.click(cat)
+    await userEvent.type(cat, 'Bioquí{Enter}')
     await userEvent.clear(screen.getByLabelText('Em estoque *'))
     await userEvent.type(screen.getByLabelText('Em estoque *'), '3')
     await userEvent.clear(screen.getByLabelText('Em uso *'))
@@ -341,5 +345,92 @@ describe('ReagentesTab v3', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
     const closeBtn = screen.getByRole('button', { name: /Voltar ao estoque/i })
     expect(closeBtn).toBeDisabled()
+  })
+
+  it('card NAO mostra mais botao "Ajuste" (refator v3.1)', async () => {
+    const lot = buildLot({ unitsInStock: 2, unitsInUse: 1 })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    expect(screen.queryByRole('button', { name: /^Ajuste$/i })).not.toBeInTheDocument()
+  })
+
+  it('card mostra "Final de Uso" no lugar de "Consumir" (refator v3.1)', async () => {
+    const lot = buildLot({ unitsInStock: 0, unitsInUse: 2 })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    expect(screen.getByRole('button', { name: /Final de Uso/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Consumir$/i })).not.toBeInTheDocument()
+  })
+
+  it('clicar "Abrir unidade" abre OpenUnitModal sem disparar ABERTURA imediato', async () => {
+    const lot = buildLot({ unitsInStock: 2, unitsInUse: 0 })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getByRole('button', { name: /Abrir unidade/i }))
+    expect(await screen.findByText('Data de abertura *')).toBeInTheDocument()
+    // Ate aqui nao deve ter chamado o service.
+    expect(mockCreateMovementService).not.toHaveBeenCalled()
+  })
+
+  it('confirmar abertura no modal envia ABERTURA com eventDate=hoje (default)', async () => {
+    const lot = buildLot({
+      id: 'lot-open-1',
+      lotNumber: 'OPEN-001',
+      unitsInStock: 2,
+      unitsInUse: 0,
+    })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getByRole('button', { name: /Abrir unidade/i }))
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Confirmar abertura/i }),
+    )
+    await waitFor(() => {
+      expect(mockCreateMovementService).toHaveBeenCalledTimes(1)
+    })
+    const [lotId, request] = mockCreateMovementService.mock.calls[0]
+    expect(lotId).toBe('lot-open-1')
+    expect(request.type).toBe('ABERTURA')
+    expect(request.quantity).toBe(1)
+    // eventDate deve ser uma string ISO LocalDate "YYYY-MM-DD" igual a hoje.
+    expect(request.eventDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('editar a data no OpenUnitModal envia eventDate escolhida', async () => {
+    const lot = buildLot({
+      id: 'lot-open-2',
+      lotNumber: 'OPEN-002',
+      unitsInStock: 1,
+      unitsInUse: 0,
+    })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getByRole('button', { name: /Abrir unidade/i }))
+    const dateInput = (await screen.findByLabelText('Data de abertura *')) as HTMLInputElement
+    fireEvent.change(dateInput, { target: { value: '2025-01-15' } })
+    await userEvent.click(screen.getByRole('button', { name: /Confirmar abertura/i }))
+    await waitFor(() => {
+      expect(mockCreateMovementService).toHaveBeenCalledTimes(1)
+    })
+    const [, request] = mockCreateMovementService.mock.calls[0]
+    expect(request.eventDate).toBe('2025-01-15')
+  })
+
+  it('modal de edicao NAO mostra mais "Status" nem "Data de abertura"', async () => {
+    const lot = buildLot({ id: 'lot-edit-1', lotNumber: 'EDIT-001' })
+    mockUseReagentLots.mockReturnValue({ data: [lot] })
+    renderTab()
+    await userEvent.click(screen.getByRole('button', { name: 'Ver lista' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Editar$/i }))
+    // O modal abre — confirma com a presenca de campos canonicos.
+    expect(await screen.findByLabelText('Validade *')).toBeInTheDocument()
+    // Mas Status e Data de abertura NAO devem mais existir.
+    expect(screen.queryByLabelText(/^Status \*/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/^Data de abertura$/i)).not.toBeInTheDocument()
   })
 })

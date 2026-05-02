@@ -14,7 +14,6 @@ import {
   CATEGORIES,
   MOVEMENT_REASONS,
   MOVEMENT_TYPE_OPTIONS,
-  REAGENT_STATUS_FORM_OPTIONS,
   TEMPS,
 } from './constants'
 import { canReceiveEntry } from './utils'
@@ -34,17 +33,25 @@ interface ReagentLotModalProps {
 }
 
 /**
- * Modal de cadastro/edicao de lote pos-refator v2.
+ * Modal de cadastro/edicao de lote pos-refator v3.1.
  *
- * Layout canonico (contrato 6.1):
- * - Secao 1 (Identificacao): Etiqueta (combobox), Lote, Fabricante, Categoria.
- * - Secao 2 (Estoque & Status): Quantidade, Status, Validade.
+ * Layout canonico:
+ * - Secao 1 (Identificacao): Etiqueta (combobox), Lote, Fabricante, Categoria (combobox fechado).
+ * - Secao 2 (Estoque & Validade): Em estoque, Em uso, Validade.
  * - Secao 3 (Armazenamento): Localizacao, Temperatura.
- * - Secao 4 (Detalhes adicionais — colapsavel): Fornecedor, Recebimento, Abertura.
+ * - Secao 4 (Detalhes adicionais — colapsavel): Fornecedor, Recebimento.
  *
- * Comportamentos chave:
- * - Etiqueta usa {@code Combobox} com {@code allowCustom=true} e
- *   {@code createLabel="+ Criar nova etiqueta"}. Backend cria via POST /api/reagents.
+ * Mudancas v3.1:
+ * - Drop campo "Data de abertura": {@code openedDate} passa a ser sempre gravada
+ *   via popup do botao "Abrir unidade" (movimento ABERTURA com {@code eventDate}).
+ * - Drop select "Status": status e derivado pelo backend (validade x estoque x abertura).
+ *   Para arquivar, usar botao "Arquivar" do card. O state {@code form.status} ainda
+ *   existe para compatibilidade do request, mas no CREATE manda sempre 'em_estoque'
+ *   (default) e no UPDATE o backend rejeita 'inativo'. UI nao expoe mais escolha.
+ * - Categoria vira {@code Combobox} {@code allowCustom=false} alinhado com
+ *   Etiqueta/Fabricante/Localizacao/Fornecedor (search-as-you-type).
+ *
+ * Comportamentos chave preservados:
  * - Banner amarelo quando {@code expiryDate < hoje}: o backend forca status='vencido'.
  * - Trim defensivo no submit (bloqueante audit 4.2.1) — feito via service tambem.
  */
@@ -76,6 +83,11 @@ export function ReagentLotModal({
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [labels],
+  )
+
+  const categoryOptions = useMemo<ComboboxOption[]>(
+    () => CATEGORIES.map((category) => ({ value: category, label: category })),
+    [],
   )
 
   const handleSave = () => {
@@ -145,25 +157,23 @@ export function ReagentLotModal({
               createLabel="+ Criar novo fabricante"
               emptyText="Nenhum fabricante cadastrado"
             />
-            <Select
+            <Combobox
+              id="reagent-category-input"
               label="Categoria *"
+              placeholder="Buscar categoria..."
               value={form.category ?? ''}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, category: event.target.value }))
+              onChange={(value) =>
+                setForm((current) => ({ ...current, category: value }))
               }
-            >
-              <option value="">Selecione...</option>
-              {CATEGORIES.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </Select>
+              options={categoryOptions}
+              allowCustom={false}
+              emptyText="Nenhuma categoria encontrada"
+            />
           </div>
         </FormSection>
 
-        <FormSection title="Estoque & Status">
-          <div className="grid gap-3 sm:grid-cols-2">
+        <FormSection title="Estoque & Validade">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <Input
                 label="Em estoque *"
@@ -200,24 +210,6 @@ export function ReagentLotModal({
                 Unidades já abertas, sendo consumidas.
               </p>
             </div>
-          </div>
-          <div className="mt-2 text-xs text-neutral-500">
-            Total: <strong>{(form.unitsInStock ?? 0) + (form.unitsInUse ?? 0)}</strong> unidade(s)
-          </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Select
-              label="Status *"
-              value={form.status ?? 'em_estoque'}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, status: event.target.value }))
-              }
-            >
-              {REAGENT_STATUS_FORM_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
             <Input
               label="Validade *"
               type="date"
@@ -226,6 +218,9 @@ export function ReagentLotModal({
                 setForm((current) => ({ ...current, expiryDate: event.target.value }))
               }
             />
+          </div>
+          <div className="mt-2 text-xs text-neutral-500">
+            Total: <strong>{(form.unitsInStock ?? 0) + (form.unitsInUse ?? 0)}</strong> unidade(s)
           </div>
           {expiryWillForceVencido ? (
             <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -236,10 +231,6 @@ export function ReagentLotModal({
               </span>
             </div>
           ) : null}
-          <div className="mt-2 text-xs text-neutral-500">
-            Para arquivar como <strong>Inativo</strong>, salve o lote primeiro e use o botão
-            "Arquivar" no card.
-          </div>
         </FormSection>
 
         <FormSection title="Armazenamento">
@@ -293,7 +284,7 @@ export function ReagentLotModal({
               Detalhes adicionais (opcional)
             </span>
             <span className="text-xs text-neutral-500">
-              Fornecedor, recebimento e abertura
+              Fornecedor e recebimento
             </span>
           </button>
           {showAdditional ? (
@@ -319,17 +310,6 @@ export function ReagentLotModal({
                   setForm((current) => ({
                     ...current,
                     receivedDate: event.target.value || undefined,
-                  }))
-                }
-              />
-              <Input
-                label="Data de abertura"
-                type="date"
-                value={form.openedDate ?? ''}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    openedDate: event.target.value || undefined,
                   }))
                 }
               />
@@ -369,14 +349,20 @@ export function ReagentMovementModal({
   lockType = false,
 }: ReagentMovementModalProps) {
   const canUseEntrada = lot ? canReceiveEntry(lot) : true
+  const today = todayLocal()
 
   const titleSuffix = lot ? ` · Lote ${lot.lotNumber}` : ''
+  // Refator v3.1: quando o usuario abriu via "Final de Uso", o titulo
+  // reflete a operacao alvo. Caso contrario fica "Movimentação".
+  const titlePrefix =
+    lockType && form.type === 'CONSUMO' ? 'Final de Uso' : 'Movimentação'
+  const isConsumoLocked = lockType && form.type === 'CONSUMO'
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Movimentação${titleSuffix}`}
+      title={`${titlePrefix}${titleSuffix}`}
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="ghost" onClick={onClose}>
@@ -491,6 +477,30 @@ export function ReagentMovementModal({
             setForm((current) => ({ ...current, notes: event.target.value }))
           }
         />
+        {isConsumoLocked ? (
+          <div>
+            <Input
+              label="Data de fim de uso *"
+              type="date"
+              max={today}
+              value={form.eventDate ?? today}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  eventDate: event.target.value || undefined,
+                }))
+              }
+            />
+            <p className="mt-1 text-xs text-neutral-500">
+              Quando a unidade acabou de fato. Padrão é hoje.
+            </p>
+            {form.eventDate && form.eventDate > today ? (
+              <p className="mt-1 text-xs font-medium text-red-700">
+                A data não pode ser futura.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {(form.type === 'ABERTURA' || form.type === 'FECHAMENTO') ? (

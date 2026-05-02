@@ -91,7 +91,8 @@ export const MOVEMENT_TYPE_OPTIONS: {
   { value: 'ENTRADA', label: 'Entrada', hint: '+ Em estoque (compra/recebimento)' },
   { value: 'ABERTURA', label: 'Abrir unidade', hint: '-1 Em estoque, +1 Em uso' },
   { value: 'FECHAMENTO', label: 'Voltar ao estoque', hint: '-1 Em uso, +1 Em estoque' },
-  { value: 'CONSUMO', label: 'Consumo', hint: '- Em uso (uso real)' },
+  // Refator v3.1: rotulo "Final de Uso" — value 'CONSUMO' permanece (contrato HTTP).
+  { value: 'CONSUMO', label: 'Final de Uso', hint: 'Encerrar uma unidade aberta — registra a data' },
   { value: 'AJUSTE', label: 'Ajuste manual', hint: 'Define os dois contadores' },
 ]
 
@@ -99,7 +100,8 @@ export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   ENTRADA: 'Entrada',
   ABERTURA: 'Abertura',
   FECHAMENTO: 'Fechamento',
-  CONSUMO: 'Consumo',
+  // Refator v3.1: label da UI vira "Final de Uso" (value HTTP CONSUMO inalterado).
+  CONSUMO: 'Final de Uso',
   AJUSTE: 'Ajuste',
   SAIDA: 'Saída (legado)',
 }

@@ -570,6 +570,19 @@ public class ReagentService {
                 "ABERTURA e FECHAMENTO operam unitariamente (quantity=1 implícito). Recebido: " + quantity + ".");
         }
 
+        // v3.1 — eventDate (data declarada pelo operador) nunca pode ser futura.
+        // Validacao precoce, antes do branch por tipo, para mensagem unificada.
+        LocalDate requestedEventDate = request.eventDate();
+        if (requestedEventDate != null && requestedEventDate.isAfter(LocalDate.now())) {
+            if (MovementType.ABERTURA.equals(type)) {
+                throw new BusinessException("Data de abertura não pode ser futura.");
+            }
+            if (MovementType.CONSUMO.equals(type)) {
+                throw new BusinessException("Data de fim de uso não pode ser futura.");
+            }
+            throw new BusinessException("Data do evento não pode ser futura.");
+        }
+
         String reason = MovementReason.normalize(request.reason());
         String trigger;
 
@@ -670,11 +683,27 @@ public class ReagentService {
 
         LocalDate today = LocalDate.now();
 
-        // ABERTURA: grava openedDate=today se null + audit REAGENT_OPENED_DATE_DERIVED (v3).
+        // v3.1 — Resolucao da data efetiva do movimento. A primeira abertura
+        // de um lote sincroniza lot.openedDate; aberturas subsequentes (lote ja
+        // tem openedDate) NAO sobrescrevem (preserva primeira abertura), mas
+        // ainda assim gravam a data declarada em movement.eventDate.
+        LocalDate effectiveEventDate;
+        if (MovementType.ABERTURA.equals(type)) {
+            // Em ABERTURA, sempre temos uma data — operador informou ou default = hoje.
+            effectiveEventDate = requestedEventDate != null ? requestedEventDate : today;
+        } else {
+            // Outros tipos: respeita o que veio (NULL aceitavel).
+            effectiveEventDate = requestedEventDate;
+        }
+
+        // ABERTURA: grava openedDate=effectiveEventDate se null + audit
+        // REAGENT_OPENED_DATE_DERIVED (v3 / v3.1). Aberturas subsequentes em
+        // lote que ja tem openedDate NAO sobrescrevem — primeira abertura
+        // permanece imutavel (auditoria).
         if (MovementType.ABERTURA.equals(type) && lot.getOpenedDate() == null) {
-            lot.setOpenedDate(today);
+            lot.setOpenedDate(effectiveEventDate);
             Map<String, Object> auditDetails = new LinkedHashMap<>();
-            auditDetails.put("openedDate", today.toString());
+            auditDetails.put("openedDate", effectiveEventDate.toString());
             auditDetails.put("trigger", AUDIT_TRIGGER_ABERTURA);
             auditDetails.put("fromStatus", currentStatus);
             auditDetails.put("toStatus", ReagentStatus.EM_USO);
@@ -713,6 +742,9 @@ public class ReagentService {
             .previousStock(null) // pos-V14 sempre NULL (campo legado read-only)
             .previousUnitsInStock(prevStock)
             .previousUnitsInUse(prevUse)
+            // v3.1 — eventDate declarado pelo operador. ABERTURA sempre preenche
+            // (default = today se ausente). Outros tipos: passa o que veio (NULL ok).
+            .eventDate(effectiveEventDate)
             .build();
         return stockMovementRepository.save(movement);
     }

@@ -244,7 +244,7 @@ class ReagentControllerTest {
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null, null, null));
+            new StockMovementRequest("ENTRADA", 20D, "Ana", "", null, null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
@@ -258,6 +258,55 @@ class ReagentControllerTest {
     }
 
     @Test
+    @DisplayName("v3.1: POST /api/reagents/{id}/movements ABERTURA + eventDate → 200 com response.eventDate populado")
+    void createMovement_aberturaComEventDate_retornaResponseComEventDate() throws Exception {
+        LocalDate declared = LocalDate.of(2026, 4, 1);
+        StockMovement movement = StockMovement.builder()
+            .id(UUID.randomUUID())
+            .type("ABERTURA")
+            .quantity(1D)
+            .responsible("Ana")
+            .notes("")
+            .previousUnitsInStock(5)
+            .previousUnitsInUse(0)
+            .eventDate(declared)
+            .build();
+        reagentService.createMovementResponse = movement;
+
+        UUID lotId = UUID.randomUUID();
+        String body = objectMapper.writeValueAsString(
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, declared));
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.type").value("ABERTURA"))
+            .andExpect(jsonPath("$.eventDate").value(declared.toString()));
+    }
+
+    @Test
+    @DisplayName("v3.1: POST /movements com eventDate futura → 400")
+    void createMovement_eventDateFutura_retorna400() throws Exception {
+        reagentService.createMovementException = new BusinessException(
+            "Data de abertura não pode ser futura.");
+
+        UUID lotId = UUID.randomUUID();
+        LocalDate futura = LocalDate.now().plusDays(1);
+        String body = objectMapper.writeValueAsString(
+            new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, futura));
+
+        mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("não pode ser futura")));
+    }
+
+    @Test
     @DisplayName("createMovement com type=SAIDA retorna 400 (descontinuado em v3)")
     void createMovement_saidaDescontinuada_deveRetornar400() throws Exception {
         reagentService.createMovementException =
@@ -265,7 +314,7 @@ class ReagentControllerTest {
 
         UUID lotId = UUID.randomUUID();
         String body = objectMapper.writeValueAsString(
-            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null));
+            new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
                 .with(user("ana").roles("FUNCIONARIO"))
