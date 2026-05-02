@@ -175,6 +175,14 @@ public class ReportDefinitionRegistry {
                 "examIds", ReportFilterFieldType.UUID_LIST, false, null,
                 "Exames", "Opcional - filtra apenas pelos exames informados"
             ),
+            new ReportFilterField(
+                "includeDailyHistory", ReportFilterFieldType.BOOLEAN, false, null,
+                "Incluir historico diario",
+                "Quando ligado (default), adiciona uma secao no fim do PDF com cabecalho "
+                + "de cada dia que teve registros + tabela cronologica completa daquele dia + "
+                + "sub-resumo (total, aprovados, alertas, reprovados). Tambem entra no "
+                + "REGULATORIO_PACOTE."
+            ),
             includeAiCommentary(), includeComparison()
         );
         return new ReportDefinition(

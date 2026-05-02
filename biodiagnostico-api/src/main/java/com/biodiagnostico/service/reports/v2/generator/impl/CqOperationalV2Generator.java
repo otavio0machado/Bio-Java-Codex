@@ -285,7 +285,12 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 renderComparison(document, rf, summary);
             }
 
-            // 8. Comentario IA
+            // 8. Historico diario — uma sub-secao por dia com TODOS os registros
+            if (rf.includeDailyHistory) {
+                renderDailyHistory(document, rf);
+            }
+
+            // 9. Comentario IA
             if (rf.includeAiCommentary) {
                 renderAiCommentary(document, rf, summary, ctx);
             }
@@ -610,6 +615,239 @@ public class CqOperationalV2Generator implements ReportGenerator {
         );
     }
 
+    /**
+     * Renderiza o historico cronologico do periodo, agrupado por dia.
+     * Para cada dia que teve registros: cabecalho com a data + tabela com TODOS
+     * os registros daquele dia + sub-resumo (total, aprovados, alertas, reprovados).
+     *
+     * Suporta as 3 estrategias por area: bioquimica/genericas via QcRecord ou
+     * AreaQcMeasurement; hematologia consolida QcMeasurement + BioRecord.
+     *
+     * Pedido do laboratorio: a vigilancia precisa ver "o que aconteceu em cada dia".
+     * Tambem entra automaticamente no REGULATORIO_PACOTE (que herda CQ).
+     */
+    private void renderDailyHistory(Document document, ResolvedFilters rf) throws DocumentException {
+        document.newPage();
+        document.add(ReportV2PdfTheme.section("Historico diario"));
+        Paragraph intro = new Paragraph(
+            "Cada dia abaixo tem um cabecalho com a data e uma tabela cronologica "
+            + "com todos os registros lancados naquele dia, seguida de um sub-resumo (total, "
+            + "aprovados, alertas, reprovados).",
+            ReportV2PdfTheme.META_FONT);
+        intro.setSpacingAfter(8F);
+        document.add(intro);
+
+        switch (rf.area) {
+            case "hematologia" -> renderDailyHistoryHematologia(document, rf);
+            case "imunologia", "parasitologia", "microbiologia", "uroanalise" ->
+                renderDailyHistoryGenerica(document, rf);
+            default -> renderDailyHistoryBioquimica(document, rf);
+        }
+    }
+
+    private void renderDailyHistoryBioquimica(Document document, ResolvedFilters rf)
+            throws DocumentException {
+        java.util.List<QcRecord> records = qcRecordRepository
+            .findByAreaAndDateRange(rf.area, rf.start, rf.end);
+        if (rf.examIds != null && !rf.examIds.isEmpty()) {
+            records = records.stream()
+                .filter(r -> r.getReference() != null
+                    && r.getReference().getExam() != null
+                    && rf.examIds.contains(r.getReference().getExam().getId()))
+                .collect(java.util.stream.Collectors.toList());
+        }
+        if (records.isEmpty()) {
+            renderEmptyDailyHistory(document);
+            return;
+        }
+        java.util.Map<LocalDate, java.util.List<QcRecord>> byDay = records.stream()
+            .filter(r -> r.getDate() != null)
+            .collect(java.util.stream.Collectors.groupingBy(QcRecord::getDate,
+                java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()));
+
+        java.util.List<LocalDate> days = byDay.keySet().stream()
+            .sorted(java.util.Comparator.reverseOrder())
+            .collect(java.util.stream.Collectors.toList());
+
+        for (LocalDate day : days) {
+            java.util.List<QcRecord> dayRecs = byDay.get(day);
+            renderDayHeader(document, day, dayRecs.size(),
+                dayRecs.stream().map(QcRecord::getStatus).collect(java.util.stream.Collectors.toList()));
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.2F});
+            ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
+                "Z-score", "Equipamento", "Status");
+            boolean alt = false;
+            java.util.List<QcRecord> sorted = dayRecs.stream()
+                .sorted(java.util.Comparator.comparing(QcRecord::getCreatedAt,
+                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                .collect(java.util.stream.Collectors.toList());
+            for (QcRecord r : sorted) {
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    ReportV2PdfTheme.safe(r.getExamName()),
+                    ReportV2PdfTheme.safe(r.getLevel()),
+                    ReportV2PdfTheme.safe(r.getLotNumber()),
+                    ReportV2PdfTheme.formatDecimal(r.getValue()),
+                    ReportV2PdfTheme.formatDecimal(r.getTargetValue()),
+                    ReportV2PdfTheme.formatDecimal(r.getCv()),
+                    ReportV2PdfTheme.formatDecimal(r.getZScore()),
+                    ReportV2PdfTheme.safe(r.getEquipment()),
+                    ReportV2PdfTheme.safe(r.getStatus()));
+                alt = !alt;
+            }
+            document.add(t);
+        }
+    }
+
+    private void renderDailyHistoryGenerica(Document document, ResolvedFilters rf)
+            throws DocumentException {
+        java.util.List<com.biodiagnostico.entity.AreaQcMeasurement> meds = areaQcMeasurementRepository
+            .findByAreaAndDataMedicaoBetweenOrderByDataMedicaoDesc(rf.area, rf.start, rf.end);
+        if (meds.isEmpty()) {
+            renderEmptyDailyHistory(document);
+            return;
+        }
+        java.util.Map<LocalDate, java.util.List<com.biodiagnostico.entity.AreaQcMeasurement>> byDay = meds.stream()
+            .filter(m -> m.getDataMedicao() != null)
+            .collect(java.util.stream.Collectors.groupingBy(
+                com.biodiagnostico.entity.AreaQcMeasurement::getDataMedicao,
+                java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()));
+
+        java.util.List<LocalDate> days = byDay.keySet().stream()
+            .sorted(java.util.Comparator.reverseOrder())
+            .collect(java.util.stream.Collectors.toList());
+
+        for (LocalDate day : days) {
+            java.util.List<com.biodiagnostico.entity.AreaQcMeasurement> dayRecs = byDay.get(day);
+            renderDayHeader(document, day, dayRecs.size(), dayRecs.stream()
+                .map(com.biodiagnostico.entity.AreaQcMeasurement::getStatus)
+                .collect(java.util.stream.Collectors.toList()));
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {2F, 1F, 1F, 1F, 1F, 1.2F, 1.2F});
+            ReportV2PdfTheme.headerRow(t, "Analito", "Valor", "Min", "Max", "Modo",
+                "Equipamento", "Status");
+            boolean alt = false;
+            for (com.biodiagnostico.entity.AreaQcMeasurement m : dayRecs) {
+                String equipamento = m.getParameter() == null ? "—"
+                    : ReportV2PdfTheme.safe(m.getParameter().getEquipamento());
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    ReportV2PdfTheme.safe(m.getAnalito()),
+                    ReportV2PdfTheme.formatDecimal(m.getValorMedido()),
+                    ReportV2PdfTheme.formatDecimal(m.getMinAplicado()),
+                    ReportV2PdfTheme.formatDecimal(m.getMaxAplicado()),
+                    ReportV2PdfTheme.safe(m.getModoUsado()),
+                    equipamento,
+                    ReportV2PdfTheme.safe(m.getStatus()));
+                alt = !alt;
+            }
+            document.add(t);
+        }
+    }
+
+    private void renderDailyHistoryHematologia(Document document, ResolvedFilters rf)
+            throws DocumentException {
+        java.util.List<com.biodiagnostico.entity.HematologyQcMeasurement> qc = hematologyQcMeasurementRepository
+            .findByDataMedicaoBetweenOrderByDataMedicaoDesc(rf.start, rf.end);
+        java.util.List<com.biodiagnostico.entity.HematologyBioRecord> bio = hematologyBioRecordRepository
+            .findByDataBioBetweenOrderByDataBioDesc(rf.start, rf.end);
+        if (qc.isEmpty() && bio.isEmpty()) {
+            renderEmptyDailyHistory(document);
+            return;
+        }
+        java.util.TreeSet<LocalDate> allDays = new java.util.TreeSet<>(java.util.Comparator.reverseOrder());
+        qc.forEach(m -> { if (m.getDataMedicao() != null) allDays.add(m.getDataMedicao()); });
+        bio.forEach(b -> { if (b.getDataBio() != null) allDays.add(b.getDataBio()); });
+
+        for (LocalDate day : allDays) {
+            java.util.List<com.biodiagnostico.entity.HematologyQcMeasurement> dayQc = qc.stream()
+                .filter(m -> day.equals(m.getDataMedicao()))
+                .collect(java.util.stream.Collectors.toList());
+            java.util.List<com.biodiagnostico.entity.HematologyBioRecord> dayBio = bio.stream()
+                .filter(b -> day.equals(b.getDataBio()))
+                .collect(java.util.stream.Collectors.toList());
+            int totalDay = dayQc.size() + dayBio.size();
+            renderDayHeader(document, day, totalDay,
+                dayQc.stream().map(com.biodiagnostico.entity.HematologyQcMeasurement::getStatus)
+                    .collect(java.util.stream.Collectors.toList()));
+            if (!dayQc.isEmpty()) {
+                document.add(ReportV2PdfTheme.subsection("Controle de qualidade (" + dayQc.size() + ")"));
+                PdfPTable t = ReportV2PdfTheme.table(new float[] {2F, 1F, 1F, 1F, 1F, 1.4F});
+                ReportV2PdfTheme.headerRow(t, "Analito", "Valor", "Min", "Max", "Modo", "Status");
+                boolean alt = false;
+                for (com.biodiagnostico.entity.HematologyQcMeasurement m : dayQc) {
+                    ReportV2PdfTheme.bodyRow(t, alt,
+                        ReportV2PdfTheme.safe(m.getAnalito()),
+                        ReportV2PdfTheme.formatDecimal(m.getValorMedido()),
+                        ReportV2PdfTheme.formatDecimal(m.getMinAplicado()),
+                        ReportV2PdfTheme.formatDecimal(m.getMaxAplicado()),
+                        ReportV2PdfTheme.safe(m.getModoUsado()),
+                        ReportV2PdfTheme.safe(m.getStatus()));
+                    alt = !alt;
+                }
+                document.add(t);
+            }
+            if (!dayBio.isEmpty()) {
+                document.add(ReportV2PdfTheme.subsection("Bio (" + dayBio.size() + ")"));
+                PdfPTable t = ReportV2PdfTheme.table(new float[] {1F, 1F, 1F, 1F, 1F, 1F});
+                ReportV2PdfTheme.headerRow(t, "Hemacias", "Hemoglobina", "Leucocitos", "Plaquetas", "RDW", "VPM");
+                boolean alt = false;
+                for (com.biodiagnostico.entity.HematologyBioRecord b : dayBio) {
+                    ReportV2PdfTheme.bodyRow(t, alt,
+                        ReportV2PdfTheme.formatDecimal(b.getBioHemacias()),
+                        ReportV2PdfTheme.formatDecimal(b.getBioHemoglobina()),
+                        ReportV2PdfTheme.formatDecimal(b.getBioLeucocitos()),
+                        ReportV2PdfTheme.formatDecimal(b.getBioPlaquetas()),
+                        ReportV2PdfTheme.formatDecimal(b.getBioRdw()),
+                        ReportV2PdfTheme.formatDecimal(b.getBioVpm()));
+                    alt = !alt;
+                }
+                document.add(t);
+            }
+        }
+    }
+
+    private void renderDayHeader(Document document, LocalDate day, int total, java.util.List<String> statuses)
+            throws DocumentException {
+        long aprov = statuses.stream().filter(s -> "APROVADO".equalsIgnoreCase(s)).count();
+        long alerta = statuses.stream().filter(s -> "ALERTA".equalsIgnoreCase(s)).count();
+        long reprov = statuses.stream().filter(s -> "REPROVADO".equalsIgnoreCase(s)).count();
+
+        String dayName = day.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
+        Paragraph header = new Paragraph();
+        header.add(new com.lowagie.text.Chunk(capitalize(dayName) + ", ",
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 11, ReportV2PdfTheme.BRAND_DARK)));
+        header.add(new com.lowagie.text.Chunk(ReportV2PdfTheme.formatDate(day),
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 11, ReportV2PdfTheme.BRAND_DARK)));
+        header.add(new com.lowagie.text.Chunk("    " + total + " registros",
+            ReportV2PdfTheme.META_FONT));
+        if (aprov > 0) {
+            header.add(new com.lowagie.text.Chunk("    " + aprov + " aprovados",
+                com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA, 9, ReportV2PdfTheme.STATUS_APROVADO)));
+        }
+        if (alerta > 0) {
+            header.add(new com.lowagie.text.Chunk("    " + alerta + " alertas",
+                com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA, 9, ReportV2PdfTheme.STATUS_ALERTA)));
+        }
+        if (reprov > 0) {
+            header.add(new com.lowagie.text.Chunk("    " + reprov + " reprovados",
+                com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA, 9, ReportV2PdfTheme.STATUS_REPROVADO)));
+        }
+        header.setSpacingBefore(10F);
+        header.setSpacingAfter(4F);
+        document.add(header);
+    }
+
+    private void renderEmptyDailyHistory(Document document) throws DocumentException {
+        Paragraph empty = new Paragraph(
+            "Nenhum registro encontrado no periodo para popular o historico diario.",
+            ReportV2PdfTheme.META_FONT);
+        empty.setSpacingAfter(8F);
+        document.add(empty);
+    }
+
     private void renderAiCommentary(Document document, ResolvedFilters rf, PeriodSummary summary, GenerationContext ctx)
         throws DocumentException {
         document.add(ReportV2PdfTheme.section("Analise executiva"));
@@ -697,6 +935,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
         List<UUID> examIds = filters.getUuidList("examIds").orElse(List.of());
         boolean includeAi = filters.getBoolean("includeAiCommentary").orElse(false);
         boolean includeComp = filters.getBoolean("includeComparison").orElse(false);
+        boolean includeDailyHist = filters.getBoolean("includeDailyHistory").orElse(true);
 
         LocalDate today = LocalDate.now();
         LocalDate start;
@@ -748,6 +987,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
         rf.examIds = examIds;
         rf.includeAiCommentary = includeAi;
         rf.includeComparison = includeComp;
+        rf.includeDailyHistory = includeDailyHist;
         return rf;
     }
 
@@ -814,6 +1054,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
         List<UUID> examIds = List.of();
         boolean includeAiCommentary;
         boolean includeComparison;
+        boolean includeDailyHistory;
 
         ResolvedPeriod toResolvedPeriod() {
             return new ResolvedPeriod(periodType, start, end, periodLabel);

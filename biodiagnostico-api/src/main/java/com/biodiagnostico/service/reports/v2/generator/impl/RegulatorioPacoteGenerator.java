@@ -311,13 +311,16 @@ public class RegulatorioPacoteGenerator implements ReportGenerator {
     // ---------- filtros forward ----------
 
     private ReportFilters forwardCqFilters(ReportFilters base) {
-        // Forward periodo + ativa IA por default nao (decisao de governanca)
-        return new ReportFilters(java.util.Map.of(
-            "area", base.getString("areas").map(a -> "bioquimica").orElse("bioquimica"),
-            "periodType", base.getString("periodType").orElse("current-month"),
-            "month", base.getInteger("month").orElse(LocalDate.now().getMonthValue()),
-            "year", base.getInteger("year").orElse(LocalDate.now().getYear())
-        ));
+        // Forward periodo + IA off por default (governanca: pacote regulatorio nao usa IA);
+        // historico diario LIGADO por default — vigilancia precisa ver "o que aconteceu em
+        // cada dia" no pacote ANVISA.
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("area", base.getString("areas").map(a -> "bioquimica").orElse("bioquimica"));
+        m.put("periodType", base.getString("periodType").orElse("current-month"));
+        m.put("month", base.getInteger("month").orElse(LocalDate.now().getMonthValue()));
+        m.put("year", base.getInteger("year").orElse(LocalDate.now().getYear()));
+        m.put("includeDailyHistory", true);
+        return new ReportFilters(m);
     }
 
     private ReportFilters forwardWestgardFilters(ReportFilters base) {
