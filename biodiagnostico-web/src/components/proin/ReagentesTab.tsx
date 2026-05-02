@@ -14,7 +14,6 @@ import {
 } from '../../hooks/useReagents'
 import { useAuth } from '../../hooks/useAuth'
 import { reagentService } from '../../services/reagentService'
-import { reportService } from '../../services/reportService'
 import type {
   ReagentLabelSummary,
   ReagentLot,
@@ -396,31 +395,6 @@ export function ReagentesTab() {
     }
   }
 
-  const handlePdf = async () => {
-    try {
-      const blob = await reportService.getReagentsPdf()
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = 'reagentes.pdf'
-      link.click()
-    } catch {
-      toast.error('Erro ao gerar PDF.')
-    }
-  }
-
-  const handleCsv = async () => {
-    try {
-      const blob = await reagentService.exportCsv(category || undefined, status || undefined)
-      const link = document.createElement('a')
-      link.href = URL.createObjectURL(blob)
-      link.download = 'reagentes.csv'
-      link.click()
-      URL.revokeObjectURL(link.href)
-    } catch {
-      toast.error('Erro ao exportar CSV.')
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -429,12 +403,6 @@ export function ReagentesTab() {
           <p className="text-base text-neutral-500">Controle de lotes, estoque e movimentações</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => void handlePdf()}>
-            PDF
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => void handleCsv()}>
-            CSV
-          </Button>
           <VoiceRecorderModal
             formType="reagente"
             title="Reagente por voz"
