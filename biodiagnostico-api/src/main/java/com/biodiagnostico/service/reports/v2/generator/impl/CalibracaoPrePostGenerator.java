@@ -186,6 +186,37 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                 }
             }
 
+            // Detalhamento por exame — uma secao completa por exame, agrupando suas calibracoes
+            if (rf.detailEachExam && !records.isEmpty()) {
+                doc.newPage();
+                doc.add(ReportV2PdfTheme.section("Detalhamento por exame"));
+                Paragraph intro = new Paragraph(
+                    "Cada exame abaixo aparece em sua propria secao com todas as calibracoes "
+                    + "do periodo (antes/depois, delta CV, classificacao).",
+                    ReportV2PdfTheme.META_FONT);
+                intro.setSpacingAfter(8F);
+                doc.add(intro);
+
+                java.util.Map<String, java.util.List<com.biodiagnostico.entity.PostCalibrationRecord>> byExam =
+                    records.stream()
+                        .filter(r -> r.getExamName() != null && !r.getExamName().isBlank())
+                        .collect(java.util.stream.Collectors.groupingBy(
+                            com.biodiagnostico.entity.PostCalibrationRecord::getExamName,
+                            java.util.LinkedHashMap::new,
+                            java.util.stream.Collectors.toList()));
+                java.util.List<java.util.Map.Entry<String, java.util.List<com.biodiagnostico.entity.PostCalibrationRecord>>> sorted =
+                    byExam.entrySet().stream()
+                        .sorted(java.util.Map.Entry.comparingByKey())
+                        .collect(java.util.stream.Collectors.toList());
+
+                boolean first = true;
+                for (java.util.Map.Entry<String, java.util.List<com.biodiagnostico.entity.PostCalibrationRecord>> e : sorted) {
+                    if (!first) doc.newPage();
+                    first = false;
+                    renderExamCalibrationDetail(doc, e.getKey(), e.getValue());
+                }
+            }
+
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
                 String structured = "Periodo: " + rf.periodLabel + "\nTotal calibracoes: " + records.size()
@@ -220,6 +251,7 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
             .filter(s -> !s.isEmpty())
             .orElse(null);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
+        r.detailEachExam = filters.getBoolean("detailEachExam").orElse(true);
         String periodType = filters.getString("periodType")
             .map(s -> s.trim().toLowerCase(Locale.ROOT)).orElse("current-month");
         LocalDate today = LocalDate.now();
@@ -277,5 +309,74 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
         LocalDate end;
         String periodLabel;
         boolean includeAiCommentary;
+        boolean detailEachExam;
+    }
+
+    /**
+     * Renderiza UMA secao por exame com TODAS suas calibracoes do periodo.
+     */
+    private void renderExamCalibrationDetail(Document doc, String examName,
+            java.util.List<com.biodiagnostico.entity.PostCalibrationRecord> events) throws DocumentException {
+        Paragraph h = new Paragraph(examName,
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
+        h.setSpacingBefore(4F); h.setSpacingAfter(6F);
+        doc.add(h);
+
+        // Stats deste exame
+        long eficazes = events.stream().filter(r -> {
+            if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
+            return "EFICAZ".equals(classifyCalibrationDelta(r.getPostCalibrationCv() - r.getOriginalCv()));
+        }).count();
+        long pioraram = events.stream().filter(r -> {
+            if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
+            return "PIOROU".equals(classifyCalibrationDelta(r.getPostCalibrationCv() - r.getOriginalCv()));
+        }).count();
+        long semEf = events.size() - eficazes - pioraram;
+
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1});
+        cards.setWidthPercentage(100F);
+        cards.setSpacingAfter(8F);
+        cards.addCell(card("Total no periodo", String.valueOf(events.size()), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(card("Eficazes", String.valueOf(eficazes), ReportV2PdfTheme.STATUS_APROVADO));
+        cards.addCell(card("Sem efeito", String.valueOf(semEf), ReportV2PdfTheme.MUTED));
+        cards.addCell(card("Pioraram", String.valueOf(pioraram), ReportV2PdfTheme.STATUS_REPROVADO));
+        doc.add(cards);
+
+        // Tabela cronologica
+        doc.add(ReportV2PdfTheme.subsection("Eventos de calibracao"));
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {1.1F, 1.2F, 1.2F, 1.2F, 1.2F, 1F, 1.3F, 1.6F, 2.5F});
+        ReportV2PdfTheme.headerRow(t, "Data", "CV antes", "CV depois", "Valor antes", "Valor depois",
+            "Delta CV", "Status", "Analista", "Notas");
+        boolean alt = false;
+        java.util.List<com.biodiagnostico.entity.PostCalibrationRecord> sorted = events.stream()
+            .sorted(java.util.Comparator.comparing(
+                com.biodiagnostico.entity.PostCalibrationRecord::getDate,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+            .collect(java.util.stream.Collectors.toList());
+        for (com.biodiagnostico.entity.PostCalibrationRecord r : sorted) {
+            double oCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
+            double pCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
+            double delta = pCv - oCv;
+            String st = r.getOriginalCv() == null || r.getPostCalibrationCv() == null
+                ? "—" : classifyCalibrationDelta(delta);
+            ReportV2PdfTheme.bodyRow(t, alt,
+                ReportV2PdfTheme.formatDate(r.getDate()),
+                ReportV2PdfTheme.formatDecimal(oCv),
+                ReportV2PdfTheme.formatDecimal(pCv),
+                ReportV2PdfTheme.formatDecimal(r.getOriginalValue()),
+                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationValue()),
+                String.format(PT_BR, "%+.2f", delta),
+                st,
+                ReportV2PdfTheme.safe(r.getAnalyst()),
+                truncate(ReportV2PdfTheme.safe(r.getNotes()), 60));
+            alt = !alt;
+        }
+        doc.add(t);
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "—";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 }

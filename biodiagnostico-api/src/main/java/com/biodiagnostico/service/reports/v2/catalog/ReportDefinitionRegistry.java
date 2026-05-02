@@ -207,6 +207,12 @@ public class ReportDefinitionRegistry {
                 List.of("ADVERTENCIA", "REJEICAO"),
                 "Severidade", "ADVERTENCIA (1-2s) ou REJEICAO (demais)"
             ),
+            new ReportFilterField(
+                "detailEachExam", ReportFilterFieldType.BOOLEAN, false, null,
+                "Detalhar cada exame",
+                "Quando ligado (default), gera uma secao por exame com violacoes (cards, "
+                + "regras, historico cronologico)"
+            ),
             includeAiCommentary()
         );
         return new ReportDefinition(
@@ -279,6 +285,12 @@ public class ReportDefinitionRegistry {
             ),
             periodTypeField(), monthField(), yearField(),
             dateFromField(), dateToField(),
+            new ReportFilterField(
+                "detailEachEquipment", ReportFilterFieldType.BOOLEAN, false, null,
+                "Detalhar cada equipamento",
+                "Quando ligado (default), gera uma secao por equipamento com historico, MTBF, "
+                + "tecnicos, proxima manutencao e atrasadas"
+            ),
             includeAiCommentary(), includeComparison()
         );
         return new ReportDefinition(
@@ -306,6 +318,12 @@ public class ReportDefinitionRegistry {
             ),
             periodTypeField(), monthField(), yearField(),
             dateFromField(), dateToField(),
+            new ReportFilterField(
+                "detailEachExam", ReportFilterFieldType.BOOLEAN, false, null,
+                "Detalhar cada exame",
+                "Quando ligado (default), gera uma secao por exame com todas as calibracoes "
+                + "do periodo (cards de eficacia + tabela cronologica completa)"
+            ),
             includeAiCommentary()
         );
         return new ReportDefinition(
@@ -332,6 +350,12 @@ public class ReportDefinitionRegistry {
             ),
             periodTypeField(), monthField(), yearField(),
             dateFromField(), dateToField(),
+            new ReportFilterField(
+                "detailEachArea", ReportFilterFieldType.BOOLEAN, false, null,
+                "Detalhar cada area",
+                "Quando ligado (default), gera uma secao por area com cards, top exames "
+                + "problematicos e violacoes Westgard"
+            ),
             includeAiCommentary()
         );
         return new ReportDefinition(

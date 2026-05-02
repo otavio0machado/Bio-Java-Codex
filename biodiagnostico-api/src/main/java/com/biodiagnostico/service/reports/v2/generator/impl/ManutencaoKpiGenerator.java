@@ -198,6 +198,32 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
                 doc.add(wrap);
             }
 
+            // Detalhamento por equipamento — uma secao completa por equipamento
+            if (rf.detailEachEquipment && !records.isEmpty()) {
+                doc.newPage();
+                doc.add(ReportV2PdfTheme.section("Detalhamento por equipamento"));
+                Paragraph intro = new Paragraph(
+                    "Cada equipamento abaixo aparece em sua propria secao com historico cronologico completo, "
+                    + "MTBF, distribuicao por tipo, tecnicos envolvidos e proxima manutencao agendada.",
+                    ReportV2PdfTheme.META_FONT);
+                intro.setSpacingAfter(8F);
+                doc.add(intro);
+
+                Map<String, List<MaintenanceRecord>> byEquipment = records.stream()
+                    .filter(r -> r.getEquipment() != null && !r.getEquipment().isBlank())
+                    .collect(Collectors.groupingBy(MaintenanceRecord::getEquipment, LinkedHashMap::new, Collectors.toList()));
+                List<Map.Entry<String, List<MaintenanceRecord>>> sorted = byEquipment.entrySet().stream()
+                    .sorted(Comparator.comparing(e -> e.getKey().toLowerCase(Locale.ROOT)))
+                    .collect(Collectors.toList());
+
+                boolean first = true;
+                for (Map.Entry<String, List<MaintenanceRecord>> entry : sorted) {
+                    if (!first) doc.newPage();
+                    first = false;
+                    renderEquipmentDetail(doc, entry.getKey(), entry.getValue(), today);
+                }
+            }
+
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
                 String structured = "Periodo: " + rf.periodLabel + "\nTotal: " + records.size()
@@ -219,6 +245,130 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
         } catch (DocumentException | java.io.IOException ex) {
             throw new IllegalStateException("Falha ao gerar PDF manutencao", ex);
         }
+    }
+
+    /**
+     * Renderiza UMA secao por equipamento. Inclui:
+     * - Cabecalho com nome do equipamento
+     * - Cards: total no periodo, preventivas, corretivas, calibracoes, MTBF
+     * - Proxima manutencao agendada (se existe)
+     * - Atrasadas neste equipamento (se existe)
+     * - Tecnicos envolvidos (top 5)
+     * - Tabela cronologica de todas as manutencoes
+     */
+    private void renderEquipmentDetail(Document doc, String equipment, List<MaintenanceRecord> recs, LocalDate today)
+            throws DocumentException {
+        // Cabecalho
+        Paragraph h = new Paragraph(equipment,
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
+        h.setSpacingBefore(4F); h.setSpacingAfter(6F);
+        doc.add(h);
+
+        // Stats deste equipamento
+        long prev = recs.stream().filter(r -> isPreventiva(r.getType())).count();
+        long corr = recs.stream().filter(r -> isCorretiva(r.getType())).count();
+        long cal = recs.stream().filter(r -> isCalibracao(r.getType())).count();
+
+        // Sort por data ASC para MTBF correto
+        List<MaintenanceRecord> chrono = recs.stream()
+            .sorted(Comparator.comparing(MaintenanceRecord::getDate, Comparator.nullsLast(Comparator.naturalOrder())))
+            .collect(Collectors.toList());
+        String mtbf = computeMtbf(chrono);
+
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1, 1});
+        cards.setWidthPercentage(100F);
+        cards.setSpacingAfter(6F);
+        cards.addCell(card("Total", String.valueOf(recs.size()), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(card("Preventivas", String.valueOf(prev), ReportV2PdfTheme.STATUS_APROVADO));
+        cards.addCell(card("Corretivas", String.valueOf(corr), ReportV2PdfTheme.STATUS_REPROVADO));
+        cards.addCell(card("Calibracoes", String.valueOf(cal), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(card("MTBF (dias)", mtbf, ReportV2PdfTheme.MUTED));
+        doc.add(cards);
+
+        // Proxima e atrasadas
+        java.util.Optional<MaintenanceRecord> nextScheduled = recs.stream()
+            .filter(r -> r.getNextDate() != null && !r.getNextDate().isBefore(today))
+            .min(Comparator.comparing(MaintenanceRecord::getNextDate));
+        java.util.List<MaintenanceRecord> overdue = recs.stream()
+            .filter(r -> r.getNextDate() != null && r.getNextDate().isBefore(today))
+            .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
+            .collect(Collectors.toList());
+        Paragraph schedule = new Paragraph();
+        if (nextScheduled.isPresent()) {
+            LocalDate nd = nextScheduled.get().getNextDate();
+            long daysUntil = ChronoUnit.DAYS.between(today, nd);
+            schedule.add(new com.lowagie.text.Chunk("Proxima manutencao: ", ReportV2PdfTheme.BODY_BOLD_FONT));
+            schedule.add(new com.lowagie.text.Chunk(
+                ReportV2PdfTheme.formatDate(nd) + " (em " + daysUntil + " dias)",
+                com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
+                    daysUntil <= 7 ? ReportV2PdfTheme.STATUS_ALERTA : ReportV2PdfTheme.STATUS_APROVADO)));
+        } else {
+            schedule.add(new com.lowagie.text.Chunk("Sem proxima manutencao agendada.",
+                ReportV2PdfTheme.META_FONT));
+        }
+        if (!overdue.isEmpty()) {
+            schedule.add(com.lowagie.text.Chunk.NEWLINE);
+            schedule.add(new com.lowagie.text.Chunk(
+                "ATENCAO: " + overdue.size() + " manutencao(oes) atrasada(s)",
+                com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
+                    ReportV2PdfTheme.STATUS_REPROVADO)));
+        }
+        schedule.setSpacingAfter(8F);
+        doc.add(schedule);
+
+        // Tecnicos envolvidos (top 5)
+        Map<String, Long> tecnicos = recs.stream()
+            .filter(r -> r.getTechnician() != null && !r.getTechnician().isBlank())
+            .collect(Collectors.groupingBy(MaintenanceRecord::getTechnician, Collectors.counting()));
+        if (!tecnicos.isEmpty()) {
+            doc.add(ReportV2PdfTheme.subsection("Tecnicos envolvidos"));
+            String techStr = tecnicos.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(5)
+                .map(e -> e.getKey() + " (" + e.getValue() + ")")
+                .collect(Collectors.joining(", "));
+            Paragraph tp = new Paragraph(techStr, ReportV2PdfTheme.BODY_FONT);
+            tp.setSpacingAfter(8F);
+            doc.add(tp);
+        }
+
+        // Tabela cronologica completa (mais recentes primeiro)
+        doc.add(ReportV2PdfTheme.subsection("Historico de manutencoes"));
+        List<MaintenanceRecord> sortedDesc = recs.stream()
+            .sorted(Comparator.comparing(MaintenanceRecord::getDate,
+                Comparator.nullsLast(Comparator.reverseOrder())))
+            .collect(Collectors.toList());
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {1.1F, 1.4F, 1.6F, 1.2F, 3F});
+        ReportV2PdfTheme.headerRow(t, "Data", "Tipo", "Tecnico", "Proxima", "Observacoes");
+        boolean alt = false;
+        for (MaintenanceRecord r : sortedDesc) {
+            ReportV2PdfTheme.bodyRow(t, alt,
+                ReportV2PdfTheme.formatDate(r.getDate()),
+                ReportV2PdfTheme.safe(r.getType()),
+                ReportV2PdfTheme.safe(r.getTechnician()),
+                ReportV2PdfTheme.formatDate(r.getNextDate()),
+                truncate(ReportV2PdfTheme.safe(r.getNotes()), 80));
+            alt = !alt;
+        }
+        doc.add(t);
+    }
+
+    private static boolean isPreventiva(String t) {
+        return t != null && t.toLowerCase(Locale.ROOT).contains("prevent");
+    }
+
+    private static boolean isCorretiva(String t) {
+        return t != null && t.toLowerCase(Locale.ROOT).contains("corret");
+    }
+
+    private static boolean isCalibracao(String t) {
+        return t != null && t.toLowerCase(Locale.ROOT).contains("calib");
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "—";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 
     private String computeMtbf(List<MaintenanceRecord> recs) {
@@ -249,6 +399,7 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
             .filter(s -> !s.isEmpty())
             .orElse(null);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
+        r.detailEachEquipment = filters.getBoolean("detailEachEquipment").orElse(true);
         String periodType = filters.getString("periodType")
             .map(s -> s.trim().toLowerCase(Locale.ROOT)).orElse("current-month");
         LocalDate today = LocalDate.now();
@@ -306,5 +457,6 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
         String equipment;
         String type;
         boolean includeAiCommentary;
+        boolean detailEachEquipment;
     }
 }

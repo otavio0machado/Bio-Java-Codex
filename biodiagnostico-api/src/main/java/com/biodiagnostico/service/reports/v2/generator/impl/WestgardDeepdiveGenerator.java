@@ -300,6 +300,36 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
             }
             doc.add(detail);
 
+            // Detalhamento por exame — uma secao completa por exame com violacoes
+            if (rf.detailEachExam && !violations.isEmpty()) {
+                doc.newPage();
+                doc.add(ReportV2PdfTheme.section("Detalhamento por exame"));
+                Paragraph intro = new Paragraph(
+                    "Cada exame com violacoes no periodo aparece em sua propria secao com "
+                    + "estatisticas, distribuicao por regra e historico cronologico completo.",
+                    ReportV2PdfTheme.META_FONT);
+                intro.setSpacingAfter(8F);
+                doc.add(intro);
+
+                Map<String, java.util.List<WestgardViolation>> byExamFull = violations.stream()
+                    .filter(v -> v.getQcRecord() != null && v.getQcRecord().getExamName() != null)
+                    .collect(Collectors.groupingBy(
+                        v -> v.getQcRecord().getExamName(),
+                        LinkedHashMap::new,
+                        Collectors.toList()));
+                List<Map.Entry<String, java.util.List<WestgardViolation>>> sortedExams =
+                    byExamFull.entrySet().stream()
+                        .sorted(Map.Entry.<String, java.util.List<WestgardViolation>>comparingByKey())
+                        .collect(Collectors.toList());
+
+                boolean first = true;
+                for (Map.Entry<String, java.util.List<WestgardViolation>> e : sortedExams) {
+                    if (!first) doc.newPage();
+                    first = false;
+                    renderExamWestgardDetail(doc, e.getKey(), e.getValue());
+                }
+            }
+
             // Comentario IA
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
@@ -386,6 +416,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
         }
         r.rules = filters.getStringList("rules").orElse(null);
         r.severity = filters.getString("severity").orElse(null);
+        r.detailEachExam = filters.getBoolean("detailEachExam").orElse(true);
         return r;
     }
 
@@ -402,5 +433,83 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
         List<String> rules;
         String severity;
         boolean includeAiCommentary;
+        boolean detailEachExam;
+    }
+
+    /**
+     * Renderiza UMA secao por exame com violacoes Westgard. Inclui:
+     * - Cabecalho com nome do exame
+     * - Cards: total violacoes, rejeicoes, advertencias, taxa
+     * - Distribuicao por regra (top regras com contagem)
+     * - Distribuicao temporal compacta (ultimas 12 datas)
+     * - Tabela cronologica completa de violacoes
+     */
+    private void renderExamWestgardDetail(Document doc, String examName,
+            java.util.List<WestgardViolation> viols) throws DocumentException {
+        Paragraph h = new Paragraph(examName,
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
+        h.setSpacingBefore(4F); h.setSpacingAfter(6F);
+        doc.add(h);
+
+        long rej = viols.stream().filter(v -> {
+            String s = v.getSeverity() == null ? "" : v.getSeverity().toUpperCase(Locale.ROOT);
+            return s.startsWith("REJ") || "CRITICAL".equals(s);
+        }).count();
+        long adv = viols.size() - rej;
+
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1});
+        cards.setWidthPercentage(100F); cards.setSpacingAfter(8F);
+        cards.addCell(summaryCell("Total violacoes", String.valueOf(viols.size()), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(summaryCell("Rejeicoes", String.valueOf(rej), ReportV2PdfTheme.STATUS_REPROVADO));
+        cards.addCell(summaryCell("Advertencias", String.valueOf(adv), ReportV2PdfTheme.STATUS_ALERTA));
+        java.util.Set<java.time.LocalDate> distinctDates = viols.stream()
+            .map(v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate())
+            .filter(java.util.Objects::nonNull)
+            .collect(Collectors.toSet());
+        cards.addCell(summaryCell("Dias afetados", String.valueOf(distinctDates.size()), ReportV2PdfTheme.MUTED));
+        doc.add(cards);
+
+        // Distribuicao por regra
+        Map<String, Long> byRule = viols.stream()
+            .filter(v -> v.getRule() != null)
+            .collect(Collectors.groupingBy(WestgardViolation::getRule, Collectors.counting()));
+        if (!byRule.isEmpty()) {
+            doc.add(ReportV2PdfTheme.subsection("Regras violadas"));
+            String rulesStr = byRule.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .map(e -> e.getKey() + " (" + e.getValue() + ")")
+                .collect(Collectors.joining(", "));
+            Paragraph rp = new Paragraph(rulesStr, ReportV2PdfTheme.BODY_FONT);
+            rp.setSpacingAfter(8F);
+            doc.add(rp);
+        }
+
+        // Tabela cronologica
+        doc.add(ReportV2PdfTheme.subsection("Historico de violacoes"));
+        java.util.List<WestgardViolation> sorted = viols.stream()
+            .sorted(java.util.Comparator.<WestgardViolation, java.time.LocalDate>comparing(
+                v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
+            .collect(Collectors.toList());
+        PdfPTable t = ReportV2PdfTheme.table(new float[] {1F, 1F, 1.3F, 1.4F, 1F, 3F});
+        ReportV2PdfTheme.headerRow(t, "Data", "Regra", "Severidade", "Lote", "Nivel", "Descricao");
+        boolean alt = false;
+        for (WestgardViolation v : sorted) {
+            ReportV2PdfTheme.bodyRow(t, alt,
+                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
+                ReportV2PdfTheme.safe(v.getRule()),
+                ReportV2PdfTheme.safe(v.getSeverity()),
+                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
+                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLevel()),
+                truncate(ReportV2PdfTheme.safe(v.getDescription()), 80));
+            alt = !alt;
+        }
+        doc.add(t);
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "—";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 }

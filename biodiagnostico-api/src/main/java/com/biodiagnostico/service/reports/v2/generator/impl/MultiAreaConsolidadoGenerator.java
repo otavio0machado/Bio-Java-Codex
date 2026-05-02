@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -196,6 +197,26 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
             ReportV2PdfTheme.bodyRow(alertTable, false, "Manutencoes atrasadas", String.valueOf(manutAtrasadas));
             doc.add(alertTable);
 
+            // Detalhamento por area — uma secao completa por area
+            if (rf.detailEachArea && !areas.isEmpty()) {
+                doc.newPage();
+                doc.add(ReportV2PdfTheme.section("Detalhamento por area"));
+                Paragraph intro = new Paragraph(
+                    "Cada area abaixo aparece em sua propria secao com taxa de aprovacao, "
+                    + "top exames problematicos, distribuicao por status e violacoes Westgard "
+                    + "no periodo.",
+                    ReportV2PdfTheme.META_FONT);
+                intro.setSpacingAfter(8F);
+                doc.add(intro);
+
+                boolean first = true;
+                for (String area : areas) {
+                    if (!first) doc.newPage();
+                    first = false;
+                    renderAreaDetail(doc, area, rf);
+                }
+            }
+
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Visao executiva"));
                 StringBuilder sb = new StringBuilder();
@@ -226,6 +247,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
         Resolved r = new Resolved();
         r.areas = filters.getStringList("areas").orElse(null);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
+        r.detailEachArea = filters.getBoolean("detailEachArea").orElse(true);
         String periodType = filters.getString("periodType")
             .map(s -> s.trim().toLowerCase(Locale.ROOT)).orElse("current-month");
         LocalDate today = LocalDate.now();
@@ -267,5 +289,118 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
         LocalDate end;
         String periodLabel;
         boolean includeAiCommentary;
+        boolean detailEachArea;
+    }
+
+    private PdfPCell summaryCell(String label, String value, java.awt.Color color) {
+        PdfPCell cell = new PdfPCell();
+        cell.setPadding(8F);
+        cell.setBorderColor(ReportV2PdfTheme.BORDER);
+        Paragraph l = new Paragraph(label, ReportV2PdfTheme.META_FONT);
+        l.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(l);
+        Paragraph v = new Paragraph(value,
+            com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, color));
+        v.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(v);
+        return cell;
+    }
+
+    /**
+     * Renderiza UMA secao por area com:
+     * - Cabecalho com nome da area
+     * - Cards: total registros, aprovados, alertas, reprovados, taxa
+     * - Top 5 exames com pior taxa de aprovacao
+     * - Distribuicao de violacoes Westgard por regra
+     * - Tabela de exames mais ativos (com taxa de aprovacao)
+     */
+    private void renderAreaDetail(Document doc, String area, Resolved rf) throws DocumentException {
+        Paragraph h = new Paragraph(capitalize(area),
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
+        h.setSpacingBefore(4F); h.setSpacingAfter(6F);
+        doc.add(h);
+
+        java.util.List<com.biodiagnostico.entity.QcRecord> recs =
+            qcRecordRepository.findByAreaAndDateRange(area, rf.start, rf.end);
+
+        long total = recs.size();
+        long aprov = recs.stream().filter(r -> "APROVADO".equalsIgnoreCase(r.getStatus())).count();
+        long alerta = recs.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
+        long reprov = recs.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
+        double taxa = total == 0 ? 0 : (aprov * 100.0 / total);
+
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1, 1});
+        cards.setWidthPercentage(100F); cards.setSpacingAfter(8F);
+        cards.addCell(summaryCell("Total", String.valueOf(total), ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(summaryCell("Aprovados", String.valueOf(aprov), ReportV2PdfTheme.STATUS_APROVADO));
+        cards.addCell(summaryCell("Alertas", String.valueOf(alerta), ReportV2PdfTheme.STATUS_ALERTA));
+        cards.addCell(summaryCell("Reprovados", String.valueOf(reprov), ReportV2PdfTheme.STATUS_REPROVADO));
+        cards.addCell(summaryCell("Taxa aprov.", String.format(PT_BR, "%.1f%%", taxa),
+            taxa >= 90 ? ReportV2PdfTheme.STATUS_APROVADO
+                : (taxa >= 70 ? ReportV2PdfTheme.STATUS_ALERTA : ReportV2PdfTheme.STATUS_REPROVADO)));
+        doc.add(cards);
+
+        if (recs.isEmpty()) {
+            Paragraph empty = new Paragraph(
+                "Sem registros de CQ desta area no periodo selecionado.",
+                ReportV2PdfTheme.META_FONT);
+            empty.setSpacingAfter(8F);
+            doc.add(empty);
+            return;
+        }
+
+        // Top exames por taxa de reprovacao
+        Map<String, long[]> byExam = new LinkedHashMap<>();  // [total, reprovados]
+        for (com.biodiagnostico.entity.QcRecord r : recs) {
+            String key = r.getExamName() == null ? "—" : r.getExamName();
+            long[] counts = byExam.computeIfAbsent(key, k -> new long[2]);
+            counts[0]++;
+            if (!"APROVADO".equalsIgnoreCase(r.getStatus())) counts[1]++;
+        }
+
+        doc.add(ReportV2PdfTheme.subsection("Exames mais ativos"));
+        java.util.List<Map.Entry<String, long[]>> examList = byExam.entrySet().stream()
+            .sorted((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]))
+            .limit(15)
+            .collect(Collectors.toList());
+        PdfPTable et = ReportV2PdfTheme.table(new float[] {2.5F, 1F, 1F, 1F, 1.2F});
+        ReportV2PdfTheme.headerRow(et, "Exame", "Total", "Nao-aprovados", "Taxa rejeicao", "Status");
+        boolean alt = false;
+        for (Map.Entry<String, long[]> e : examList) {
+            long t = e.getValue()[0];
+            long bad = e.getValue()[1];
+            double rej = t == 0 ? 0 : (bad * 100.0 / t);
+            String status = rej > 20 ? "ATENCAO" : (rej > 10 ? "Monitorar" : "OK");
+            ReportV2PdfTheme.bodyRow(et, alt,
+                ReportV2PdfTheme.safe(e.getKey()),
+                String.valueOf(t),
+                String.valueOf(bad),
+                String.format(PT_BR, "%.1f%%", rej),
+                status);
+            alt = !alt;
+        }
+        doc.add(et);
+
+        // Violacoes Westgard desta area
+        java.util.List<com.biodiagnostico.entity.WestgardViolation> viols =
+            violationRepository.findByAreaAndPeriod(area, rf.start, rf.end);
+        if (!viols.isEmpty()) {
+            doc.add(ReportV2PdfTheme.subsection("Violacoes Westgard ("
+                + viols.size() + " no periodo)"));
+            Map<String, Long> byRule = viols.stream()
+                .filter(v -> v.getRule() != null)
+                .collect(Collectors.groupingBy(
+                    com.biodiagnostico.entity.WestgardViolation::getRule, Collectors.counting()));
+            String rulesStr = byRule.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .map(e -> e.getKey() + " (" + e.getValue() + ")")
+                .collect(Collectors.joining(", "));
+            Paragraph rp = new Paragraph(
+                rulesStr.isEmpty() ? "Sem regras categorizadas." : rulesStr,
+                ReportV2PdfTheme.BODY_FONT);
+            rp.setSpacingAfter(8F);
+            doc.add(rp);
+        }
     }
 }
