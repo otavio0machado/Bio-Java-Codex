@@ -330,12 +330,7 @@ export function ManutencaoTab() {
 
   return (
     <div className="space-y-6">
-      {/* Cabecalho */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-neutral-900">Manutenção</h3>
-          <p className="text-sm text-neutral-500">Revisões preventivas, corretivas e calibração dos equipamentos.</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button onClick={handleOpenCreate}>Nova Manutenção</Button>
       </div>
 
