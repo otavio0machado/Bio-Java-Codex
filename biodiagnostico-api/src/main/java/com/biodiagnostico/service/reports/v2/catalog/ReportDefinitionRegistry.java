@@ -242,6 +242,12 @@ public class ReportDefinitionRegistry {
                 "expiryHorizonDays", ReportFilterFieldType.INTEGER, false, null,
                 "Horizonte de vencimento (dias)", "Default 90 dias para secao de vencimentos proximos"
             ),
+            new ReportFilterField(
+                "detailEachLot", ReportFilterFieldType.BOOLEAN, false, null,
+                "Detalhar cada lote",
+                "Quando ligado (default), gera uma secao por etiqueta com todas as informacoes "
+                + "(identificacao, validade, estoque, movimentacoes, uso em CQ, rastreabilidade)"
+            ),
             includeAiCommentary()
         );
         return new ReportDefinition(

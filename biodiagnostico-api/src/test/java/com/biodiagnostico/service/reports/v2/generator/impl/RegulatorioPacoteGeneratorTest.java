@@ -107,7 +107,7 @@ class RegulatorioPacoteGeneratorTest {
     }
 
     static ReagentesRastreabilidadeGenerator reagStub(final java.util.function.Supplier<ReportArtifact> behavior) {
-        return new ReagentesRastreabilidadeGenerator(null, null, null, null, null, null) {
+        return new ReagentesRastreabilidadeGenerator(null, null, null, null, null, null, null, null) {
             @Override
             public ReportArtifact generate(ReportFilters filters, GenerationContext ctx) {
                 return behavior.get();

@@ -25,10 +25,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class ReagentesRastreabilidadeGeneratorTest {
 
     @Mock ReagentLotRepository lotRepository;
+    @Mock com.biodiagnostico.repository.StockMovementRepository movementRepository;
+    @Mock com.biodiagnostico.repository.QcRecordRepository qcRecordRepository;
 
     private ReagentesRastreabilidadeGenerator generator() {
+        // Stubs default: lote sem movimentos, sem usos em CQ. Generators robustos a vazios.
+        org.mockito.Mockito.lenient().when(movementRepository.findByReagentLotIdOrderByCreatedAtDesc(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(java.util.List.of());
+        org.mockito.Mockito.lenient().when(qcRecordRepository.findAll())
+            .thenReturn(java.util.List.of());
         return new ReagentesRastreabilidadeGenerator(
             lotRepository,
+            movementRepository,
+            qcRecordRepository,
             GeneratorTestSupport.stubNumbering(),
             new JFreeChartRenderer(),
             new LabHeaderRenderer(),

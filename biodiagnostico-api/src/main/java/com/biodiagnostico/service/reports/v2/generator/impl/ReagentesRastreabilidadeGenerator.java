@@ -1,8 +1,12 @@
 package com.biodiagnostico.service.reports.v2.generator.impl;
 
 import com.biodiagnostico.entity.LabSettings;
+import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.ReagentLot;
+import com.biodiagnostico.entity.StockMovement;
+import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
+import com.biodiagnostico.repository.StockMovementRepository;
 import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
@@ -29,8 +33,11 @@ import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfWriter;
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +66,8 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
     private static final Logger LOG = LoggerFactory.getLogger(ReagentesRastreabilidadeGenerator.class);
 
     private final ReagentLotRepository lotRepository;
+    private final StockMovementRepository movementRepository;
+    private final QcRecordRepository qcRecordRepository;
     private final ReportNumberingService reportNumberingService;
     private final ChartRenderer chartRenderer;
     private final LabHeaderRenderer headerRenderer;
@@ -67,6 +76,8 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
 
     public ReagentesRastreabilidadeGenerator(
         ReagentLotRepository lotRepository,
+        StockMovementRepository movementRepository,
+        QcRecordRepository qcRecordRepository,
         ReportNumberingService reportNumberingService,
         ChartRenderer chartRenderer,
         LabHeaderRenderer headerRenderer,
@@ -74,6 +85,8 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
         ReportAiCommentator aiCommentator
     ) {
         this.lotRepository = lotRepository;
+        this.movementRepository = movementRepository;
+        this.qcRecordRepository = qcRecordRepository;
         this.reportNumberingService = reportNumberingService;
         this.chartRenderer = chartRenderer;
         this.headerRenderer = headerRenderer;
@@ -206,6 +219,35 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
             // Secao removida em refator-v2 (audit §1.11). Para regenerar consumo, derivar de
             // StockMovement agregando SAIDA por categoria/janela 30/60/90 dias — issue separada.
 
+            // Detalhamento por etiqueta — uma secao completa por lote
+            if (rf.detailEachLot && !all.isEmpty()) {
+                doc.newPage();
+                doc.add(ReportV2PdfTheme.section("Detalhamento por etiqueta"));
+                Paragraph intro = new Paragraph(
+                    "Cada lote abaixo aparece em sua propria secao com identificacao, validade, "
+                    + "estoque, movimentacoes registradas, uso em CQ e status de rastreabilidade.",
+                    ReportV2PdfTheme.META_FONT);
+                intro.setSpacingAfter(8F);
+                doc.add(intro);
+
+                // Ordenar: ativos primeiro (em_estoque, em_uso), depois vencidos com estoque,
+                // depois vencidos sem estoque, depois inativos. Dentro de cada bucket, por nome.
+                List<ReagentLot> sortedLots = all.stream()
+                    .sorted(Comparator
+                        .<ReagentLot>comparingInt(l -> sortRank(l, today))
+                        .thenComparing(l -> safeLower(l.getName()))
+                        .thenComparing(l -> safeLower(l.getLotNumber()))
+                    )
+                    .collect(Collectors.toList());
+
+                boolean first = true;
+                for (ReagentLot lot : sortedLots) {
+                    if (!first) doc.newPage();
+                    first = false;
+                    renderLotDetail(doc, lot, today);
+                }
+            }
+
             // Comentario IA
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
@@ -259,8 +301,244 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
         r.includeInactive = filters.getBoolean("includeInactive").orElse(false);
         r.expiryHorizonDays = filters.getInteger("expiryHorizonDays").orElse(90);
         r.includeAiCommentary = filters.getBoolean("includeAiCommentary").orElse(false);
+        // Default true: usuario pediu detalhamento por etiqueta com TODAS as informacoes.
+        r.detailEachLot = filters.getBoolean("detailEachLot").orElse(true);
         r.periodLabel = "Recorte atual";
         return r;
+    }
+
+    /**
+     * Ordem de relevancia para apresentacao no PDF:
+     * 0 = vencidos com estoque (acao urgente — caixa vermelha em cima)
+     * 1 = em uso (lote aberto)
+     * 2 = em estoque (cadastrado, nao aberto)
+     * 3 = vencidos sem estoque (acabou e expirou — historico)
+     * 4 = inativos (descartados/arquivados)
+     * 5 = qualquer outro estado
+     */
+    private static int sortRank(ReagentLot l, LocalDate today) {
+        boolean expired = l.getExpiryDate() != null && l.getExpiryDate().isBefore(today);
+        int total = (l.getUnitsInStock() == null ? 0 : l.getUnitsInStock())
+                  + (l.getUnitsInUse() == null ? 0 : l.getUnitsInUse());
+        String s = l.getStatus() == null ? "" : l.getStatus().toLowerCase(Locale.ROOT);
+        if (expired && total > 0) return 0;
+        if ("em_uso".equals(s)) return 1;
+        if ("em_estoque".equals(s)) return 2;
+        if ("vencido".equals(s) || expired) return 3;
+        if ("inativo".equals(s)) return 4;
+        return 5;
+    }
+
+    private static String safeLower(String s) {
+        return s == null ? "" : s.toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Renderiza UMA secao completa por etiqueta (lote). Inclui:
+     * - Cabecalho com nome + status + lote + fabricante
+     * - Bloco "Identificacao" (categoria, fornecedor, localizacao, temperatura)
+     * - Bloco "Validade & Estoque" (cards: validade, dias restantes, em estoque, em uso)
+     * - Bloco "Datas chave" (criado, atualizado, recebido, aberto, arquivado)
+     * - Bloco "Rastreabilidade" (campos faltantes ou completo)
+     * - Tabela "Movimentacoes registradas" cronologica
+     * - Tabela "Uso em CQ" (registros que usaram este lotNumber)
+     */
+    private void renderLotDetail(Document doc, ReagentLot lot, LocalDate today) throws DocumentException {
+        // Cabecalho da secao da etiqueta
+        Paragraph h = new Paragraph(
+            ReportV2PdfTheme.safe(lot.getName()) + "  ",
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
+        h.add(new com.lowagie.text.Chunk("[" + ReportV2PdfTheme.safe(lot.getLotNumber()) + "]",
+            ReportV2PdfTheme.META_FONT));
+        h.setSpacingBefore(4F);
+        h.setSpacingAfter(4F);
+        doc.add(h);
+
+        Paragraph statusLine = new Paragraph();
+        statusLine.add(new com.lowagie.text.Chunk("Status: ", ReportV2PdfTheme.BODY_BOLD_FONT));
+        statusLine.add(new com.lowagie.text.Chunk(
+            humanStatus(lot.getStatus()),
+            com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
+                ReportV2PdfTheme.colorForStatus(lot.getStatus()))));
+        statusLine.add(new com.lowagie.text.Chunk("    Fabricante: " + ReportV2PdfTheme.safe(lot.getManufacturer()),
+            ReportV2PdfTheme.BODY_FONT));
+        statusLine.setSpacingAfter(8F);
+        doc.add(statusLine);
+
+        // Identificacao
+        doc.add(ReportV2PdfTheme.subsection("Identificacao"));
+        PdfPTable id = ReportV2PdfTheme.table(new float[] {1, 2, 1, 2});
+        ReportV2PdfTheme.bodyRow(id, false, "Categoria", ReportV2PdfTheme.safe(lot.getCategory()),
+            "Fornecedor", ReportV2PdfTheme.safe(lot.getSupplier()));
+        ReportV2PdfTheme.bodyRow(id, true, "Localizacao", ReportV2PdfTheme.safe(lot.getLocation()),
+            "Temperatura", ReportV2PdfTheme.safe(lot.getStorageTemp()));
+        doc.add(id);
+
+        // Validade & Estoque (4 cards)
+        doc.add(ReportV2PdfTheme.subsection("Validade & Estoque"));
+        long daysLeft = lot.getExpiryDate() == null ? Long.MIN_VALUE
+            : java.time.temporal.ChronoUnit.DAYS.between(today, lot.getExpiryDate());
+        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1});
+        cards.setWidthPercentage(100F);
+        cards.setSpacingAfter(6F);
+        cards.addCell(summaryCell("Validade", ReportV2PdfTheme.formatDate(lot.getExpiryDate()),
+            daysLeft < 0 ? ReportV2PdfTheme.STATUS_REPROVADO : ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(summaryCell("Dias restantes",
+            daysLeft == Long.MIN_VALUE ? "n/d" : (daysLeft < 0 ? "VENCIDO ha " + (-daysLeft) + " dias" : daysLeft + " dias"),
+            daysLeft < 0 ? ReportV2PdfTheme.STATUS_REPROVADO
+                : (daysLeft <= 30 ? ReportV2PdfTheme.STATUS_ALERTA : ReportV2PdfTheme.STATUS_APROVADO)));
+        cards.addCell(summaryCell("Em estoque",
+            String.valueOf(lot.getUnitsInStock() == null ? 0 : lot.getUnitsInStock()),
+            ReportV2PdfTheme.BRAND_PRIMARY));
+        cards.addCell(summaryCell("Em uso",
+            String.valueOf(lot.getUnitsInUse() == null ? 0 : lot.getUnitsInUse()),
+            ReportV2PdfTheme.BRAND_PRIMARY));
+        doc.add(cards);
+
+        // Datas chave
+        doc.add(ReportV2PdfTheme.subsection("Datas chave"));
+        PdfPTable d = ReportV2PdfTheme.table(new float[] {1, 1.5F, 1, 1.5F, 1, 1.5F});
+        DateTimeFormatter dt = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm").withZone(ZoneId.of("America/Sao_Paulo"));
+        ReportV2PdfTheme.bodyRow(d, false,
+            "Recebido em", ReportV2PdfTheme.formatDate(lot.getReceivedDate()),
+            "Aberto em", ReportV2PdfTheme.formatDate(lot.getOpenedDate()),
+            "Arquivado em", ReportV2PdfTheme.formatDate(lot.getArchivedAt()));
+        ReportV2PdfTheme.bodyRow(d, true,
+            "Criado em", lot.getCreatedAt() == null ? "—" : dt.format(lot.getCreatedAt()),
+            "Atualizado em", lot.getUpdatedAt() == null ? "—" : dt.format(lot.getUpdatedAt()),
+            "Arquivado por", ReportV2PdfTheme.safe(lot.getArchivedBy()));
+        doc.add(d);
+
+        // Rastreabilidade
+        doc.add(ReportV2PdfTheme.subsection("Rastreabilidade"));
+        java.util.List<String> issues = new java.util.ArrayList<>();
+        if (isBlank(lot.getManufacturer())) issues.add("fabricante");
+        if (isBlank(lot.getLocation())) issues.add("localizacao");
+        if (isBlank(lot.getSupplier())) issues.add("fornecedor");
+        if (lot.getReceivedDate() == null) issues.add("data de recebimento");
+        Paragraph traceability = new Paragraph();
+        if (issues.isEmpty()) {
+            traceability.add(new com.lowagie.text.Chunk("OK ", com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 9, ReportV2PdfTheme.STATUS_APROVADO)));
+            traceability.add(new com.lowagie.text.Chunk("Todos os campos obrigatorios cadastrados.",
+                ReportV2PdfTheme.BODY_FONT));
+        } else {
+            traceability.add(new com.lowagie.text.Chunk("PENDENTE ", com.lowagie.text.FontFactory.getFont(
+                com.lowagie.text.FontFactory.HELVETICA_BOLD, 9, ReportV2PdfTheme.STATUS_ALERTA)));
+            traceability.add(new com.lowagie.text.Chunk("Campos faltantes: " + String.join(", ", issues),
+                ReportV2PdfTheme.BODY_FONT));
+        }
+        if (Boolean.TRUE.equals(lot.getNeedsStockReview())) {
+            traceability.add(com.lowagie.text.Chunk.NEWLINE);
+            traceability.add(new com.lowagie.text.Chunk("Estoque marcado para revisao operacional.",
+                com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_OBLIQUE, 9,
+                    ReportV2PdfTheme.STATUS_ALERTA)));
+        }
+        traceability.setSpacingAfter(8F);
+        doc.add(traceability);
+
+        // Movimentacoes
+        doc.add(ReportV2PdfTheme.subsection("Movimentacoes registradas"));
+        java.util.List<StockMovement> movs = movementRepository
+            .findByReagentLotIdOrderByCreatedAtDesc(lot.getId());
+        if (movs.isEmpty()) {
+            Paragraph empty = new Paragraph("Sem movimentacoes registradas para este lote.",
+                ReportV2PdfTheme.META_FONT);
+            empty.setSpacingAfter(8F);
+            doc.add(empty);
+        } else {
+            PdfPTable m = ReportV2PdfTheme.table(new float[] {1.2F, 1.1F, 1F, 0.8F, 1F, 1.4F, 2F});
+            ReportV2PdfTheme.headerRow(m,
+                "Quando", "Tipo", "Qtd", "Motivo", "Responsavel", "Estoque (antes)", "Observacoes");
+            boolean alt = false;
+            for (StockMovement mv : movs) {
+                String when = mv.getCreatedAt() == null ? "—" : dt.format(mv.getCreatedAt());
+                String prev = "stock=" + (mv.getPreviousUnitsInStock() == null ? "—" : mv.getPreviousUnitsInStock())
+                    + " uso=" + (mv.getPreviousUnitsInUse() == null ? "—" : mv.getPreviousUnitsInUse());
+                ReportV2PdfTheme.bodyRow(m, alt,
+                    when,
+                    ReportV2PdfTheme.safe(mv.getType()),
+                    mv.getQuantity() == null ? "—" : ReportV2PdfTheme.formatDecimal(mv.getQuantity()),
+                    ReportV2PdfTheme.safe(mv.getReason()),
+                    ReportV2PdfTheme.safe(mv.getResponsible()),
+                    prev,
+                    truncate(ReportV2PdfTheme.safe(mv.getNotes()), 80));
+                alt = !alt;
+            }
+            doc.add(m);
+        }
+
+        // Uso em CQ
+        doc.add(ReportV2PdfTheme.subsection("Uso em CQ"));
+        try {
+            String lotKey = lot.getLotNumber() == null ? null : lot.getLotNumber().trim().toLowerCase(Locale.ROOT);
+            java.util.List<QcRecord> qcUses = lotKey == null || lotKey.isEmpty()
+                ? java.util.List.of()
+                : qcRecordRepository.findAll().stream()
+                    .filter(qc -> qc.getLotNumber() != null
+                        && qc.getLotNumber().trim().toLowerCase(Locale.ROOT).equals(lotKey))
+                    .sorted(Comparator.comparing(QcRecord::getDate, Comparator.nullsLast(Comparator.reverseOrder())))
+                    .limit(50)
+                    .collect(Collectors.toList());
+            if (qcUses.isEmpty()) {
+                Paragraph empty = new Paragraph("Nenhum registro de CQ encontrado com este lote.",
+                    ReportV2PdfTheme.META_FONT);
+                doc.add(empty);
+            } else {
+                Paragraph summary = new Paragraph(
+                    "Total de registros de CQ que usaram este lote: " + qcUses.size()
+                    + "  (mostrando os " + Math.min(50, qcUses.size()) + " mais recentes)",
+                    ReportV2PdfTheme.META_FONT);
+                summary.setSpacingAfter(4F);
+                doc.add(summary);
+                PdfPTable q = ReportV2PdfTheme.table(new float[] {1.2F, 1.6F, 1.4F, 0.8F, 1F, 1F, 1.2F});
+                ReportV2PdfTheme.headerRow(q, "Data", "Exame", "Area", "Nivel", "Valor", "Z-score", "Status");
+                boolean alt = false;
+                for (QcRecord qc : qcUses) {
+                    ReportV2PdfTheme.bodyRow(q, alt,
+                        ReportV2PdfTheme.formatDate(qc.getDate()),
+                        ReportV2PdfTheme.safe(qc.getExamName()),
+                        ReportV2PdfTheme.safe(qc.getArea()),
+                        ReportV2PdfTheme.safe(qc.getLevel()),
+                        ReportV2PdfTheme.formatDecimal(qc.getValue()),
+                        ReportV2PdfTheme.formatDecimal(qc.getZScore()),
+                        ReportV2PdfTheme.safe(qc.getStatus()));
+                    alt = !alt;
+                }
+                doc.add(q);
+            }
+        } catch (RuntimeException ex) {
+            LOG.warn("Falha ao buscar uso em CQ do lote {}", lot.getLotNumber(), ex);
+            Paragraph err = new Paragraph(
+                "Nao foi possivel carregar uso em CQ deste lote (consulte logs).",
+                ReportV2PdfTheme.META_FONT);
+            doc.add(err);
+        }
+    }
+
+    private static String humanStatus(String s) {
+        if (s == null) return "—";
+        return switch (s.toLowerCase(Locale.ROOT)) {
+            case "em_estoque" -> "Em estoque";
+            case "em_uso" -> "Em uso";
+            case "vencido" -> "Vencido";
+            case "inativo" -> "Inativo";
+            case "fora_de_estoque" -> "Fora de estoque";
+            case "quarentena" -> "Quarentena";
+            case "ativo" -> "Ativo";
+            default -> s;
+        };
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static String truncate(String s, int max) {
+        if (s == null) return "—";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
     }
 
     private PdfPCell summaryCell(String label, String value, java.awt.Color color) {
@@ -282,6 +560,7 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
         boolean includeInactive;
         int expiryHorizonDays;
         boolean includeAiCommentary;
+        boolean detailEachLot;
         String periodLabel;
     }
 }
