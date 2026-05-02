@@ -73,16 +73,22 @@ export function RelatoriosPage() {
     )
   }
 
+  const totalCount = catalog.definitions.length
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
-      <header>
-        <h1 className="text-3xl font-bold text-neutral-900">Relatorios</h1>
-        <p className="text-base text-neutral-500">
-          Catalogo V2 com assinatura digital e historico completo.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-neutral-900">Relatórios</h1>
+          <p className="mt-1 text-sm text-neutral-500">
+            Gere, assine e baixe relatórios oficiais do laboratório com histórico completo.
+          </p>
+        </div>
+        <span className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 shadow-sm">
+          {totalCount} {totalCount === 1 ? 'relatório disponível' : 'relatórios disponíveis'}
+        </span>
       </header>
 
-      <div className="flex flex-wrap gap-1 rounded-2xl bg-neutral-100 p-1">
+      <div className="inline-flex flex-wrap gap-1 rounded-2xl border border-neutral-200 bg-neutral-50 p-1">
         <TabButton active={activeTab === 'catalog'} onClick={() => setActiveTab('catalog')} icon={<LayoutGrid className="h-4 w-4" />}>
           Catalogo V2
         </TabButton>
@@ -115,7 +121,9 @@ function TabButton({ active, onClick, icon, children }: TabButtonProps) {
       onClick={onClick}
       className={cn(
         'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition',
-        active ? 'bg-white text-green-900 shadow-sm' : 'text-neutral-600 hover:text-neutral-900',
+        active
+          ? 'bg-white text-green-900 shadow-sm ring-1 ring-neutral-200'
+          : 'text-neutral-600 hover:bg-white/60 hover:text-neutral-900',
       )}
       aria-pressed={active}
     >

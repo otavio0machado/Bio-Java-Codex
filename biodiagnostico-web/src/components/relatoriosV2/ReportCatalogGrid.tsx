@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Beaker,
+  CalendarClock,
   Crosshair,
   FileCheck2,
   FileText,
@@ -10,13 +11,12 @@ import {
   HeartPulse,
   LayoutDashboard,
   ShieldCheck,
-  Sparkles,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { ReportCategory, ReportDefinition } from '../../types/reportsV2'
-import { Button, Card, EmptyState } from '../ui'
+import { Card, EmptyState } from '../ui'
 
 interface ReportCatalogGridProps {
   definitions: ReportDefinition[]
@@ -93,21 +93,24 @@ export function ReportCatalogGrid({ definitions }: ReportCatalogGridProps) {
   ]
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-8">
       {orderedCategories.map((category) => {
         const items = groups.get(category) ?? []
         const Icon = CATEGORY_ICON[category] ?? FileText
         const label = CATEGORY_LABEL[category] ?? category
+        const countLabel = items.length === 1 ? '1 relatório' : `${items.length} relatórios`
         return (
-          <section key={category} className="space-y-4">
-            <header className="flex items-center gap-3">
-              <div className="rounded-xl bg-green-100 p-2 text-green-800">
-                <Icon className="h-5 w-5" />
+          <section key={category} className="space-y-3">
+            <header className="flex items-center gap-3 border-b border-neutral-200/70 pb-2">
+              <div className="rounded-lg bg-green-100 p-1.5 text-green-800">
+                <Icon className="h-4 w-4" />
               </div>
-              <h2 className="text-xl font-semibold text-neutral-900">{label}</h2>
-              <span className="text-sm text-neutral-500">{items.length} disponivel{items.length > 1 ? 'is' : ''}</span>
+              <h2 className="text-base font-semibold text-neutral-900">{label}</h2>
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">
+                {countLabel}
+              </span>
             </header>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {items.map((def) => (
                 <DefinitionCard
                   key={def.code}
@@ -133,62 +136,60 @@ function DefinitionCard({ definition, onOpen }: DefinitionCardProps) {
     (definition.icon ? ICON_MAP[definition.icon] : undefined) ??
     CATEGORY_ICON[String(definition.category)] ??
     FileText
+  const summary = definition.subtitle?.trim() || definition.description
+  const retentionLabel = formatRetention(definition.retentionDays)
   return (
     <Card
-      className="flex flex-col gap-4"
+      className="group relative flex h-full flex-col gap-4 p-5 hover:-translate-y-0.5 hover:shadow-elevated"
       onClick={onOpen}
       role="button"
       aria-label={`Abrir relatorio ${definition.name}`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl bg-green-50 p-3 text-green-800">
-            <Icon className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-neutral-900">{definition.name}</h3>
-            {definition.subtitle ? (
-              <p className="mt-0.5 text-xs font-medium text-green-800">{definition.subtitle}</p>
-            ) : null}
-            <p className="mt-1 text-sm text-neutral-600 line-clamp-2">{definition.description}</p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded-xl bg-green-50 p-2.5 text-green-800 ring-1 ring-green-100 transition-colors group-hover:bg-green-100">
+          <Icon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-semibold leading-tight text-neutral-900">
+            {definition.name}
+          </h3>
+          <p className="mt-1.5 line-clamp-2 text-sm leading-snug text-neutral-600">{summary}</p>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {definition.supportedFormats.map((format) => (
-          <span
-            key={format}
-            className="rounded-full border border-neutral-200 bg-white px-2 py-0.5 text-xs font-medium text-neutral-700"
-          >
-            {format}
+
+      <div className="mt-auto flex items-end justify-between gap-3 border-t border-neutral-100 pt-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+          <span className="inline-flex items-center gap-1 font-medium text-neutral-700">
+            {definition.supportedFormats.join(' · ')}
           </span>
-        ))}
-        {definition.signatureRequired ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-800">
-            <ShieldCheck className="h-3 w-3" />
-            Assinatura
+          <span className="inline-flex items-center gap-1">
+            <CalendarClock className="h-3 w-3" />
+            {retentionLabel}
           </span>
-        ) : null}
-        {definition.aiCommentaryCapable ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
-            <Sparkles className="h-3 w-3" />
-            IA
-          </span>
-        ) : null}
-      </div>
-      <div className="mt-auto flex items-center justify-between pt-2">
-        <span className="text-xs text-neutral-500">Retenção: {definition.retentionDays} dias</span>
-        <Button
-          size="sm"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpen()
-          }}
-          icon={<ArrowRight className="h-4 w-4" />}
-        >
+          {definition.signatureRequired ? (
+            <span className="inline-flex items-center gap-1 font-medium text-purple-700">
+              <ShieldCheck className="h-3 w-3" />
+              Assinatura
+            </span>
+          ) : null}
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1 text-sm font-semibold text-green-800 transition-transform group-hover:translate-x-0.5">
           Gerar
-        </Button>
+          <ArrowRight className="h-4 w-4" />
+        </span>
       </div>
     </Card>
   )
+}
+
+function formatRetention(days: number): string {
+  if (!days || days <= 0) return 'Sem retenção'
+  if (days < 30) return `${days} dias`
+  if (days < 365) {
+    const months = Math.round(days / 30)
+    return `${months} ${months === 1 ? 'mês' : 'meses'}`
+  }
+  const years = Math.round((days / 365) * 10) / 10
+  const rounded = Number.isInteger(years) ? years.toFixed(0) : years.toFixed(1)
+  return `${rounded} ${years === 1 ? 'ano' : 'anos'}`
 }
