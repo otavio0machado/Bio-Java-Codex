@@ -294,9 +294,14 @@ function ReagentLabelsView({
     )
   }
 
-  const tagLots = lots.filter(
-    (lot) => lot.label === expandedTag && (tagStatusTab === 'todos' || lot.status === tagStatusTab),
-  )
+  // Refator v3.1: "Todos" oculta inativos (lotes arquivados). O usuario ve
+  // inativos apenas ao clicar explicitamente na aba "Inativo". Mantem
+  // arquivamento como estado terminal sem poluir a visao operacional.
+  const tagLots = lots.filter((lot) => {
+    if (lot.label !== expandedTag) return false
+    if (tagStatusTab === 'todos') return lot.status !== 'inativo'
+    return lot.status === tagStatusTab
+  })
 
   return (
     <div>
