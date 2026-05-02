@@ -176,7 +176,7 @@ export function ReagentLotModal({
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <Input
-                label="Em estoque *"
+                label="Entrada *"
                 type="number"
                 min="0"
                 step="1"
@@ -189,7 +189,7 @@ export function ReagentLotModal({
                 }
               />
               <p className="mt-1 text-xs text-neutral-500">
-                Unidades fechadas, prontas para abrir.
+                Quantidade recebida — unidades fechadas, prontas para abrir.
               </p>
             </div>
             <div>
