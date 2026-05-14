@@ -29,7 +29,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @WebMvcTest(HematologyController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, HematologyControllerTest.NoOpJwtFilterConfig.class})
@@ -52,7 +54,7 @@ class HematologyControllerTest {
         hematologyQcService.createMeasurementResponse = measurementResponse("APROVADO");
 
         mockMvc.perform(post("/api/hematology/measurements")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(qcWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validMeasurementRequest())))
             .andExpect(status().isCreated())
@@ -70,7 +72,7 @@ class HematologyControllerTest {
         hematologyQcService.createParameterResponse = parameterResponse();
 
         mockMvc.perform(post("/api/hematology/parameters")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(qcWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validParameterRequest())))
             .andExpect(status().isCreated())
@@ -110,6 +112,23 @@ class HematologyControllerTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validMeasurementRequest())))
             .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("deve retornar 403 ao registrar medição sem QC_WRITE")
+    void shouldReturn403WhenCreatingMeasurementWithoutQcWrite() throws Exception {
+        mockMvc.perform(post("/api/hematology/measurements")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(validMeasurementRequest())))
+            .andExpect(status().isForbidden());
+    }
+
+    private RequestPostProcessor qcWriter() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("QC_WRITE")
+        );
     }
 
     @TestConfiguration

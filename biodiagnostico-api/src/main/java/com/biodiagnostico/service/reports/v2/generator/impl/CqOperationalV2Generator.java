@@ -31,6 +31,7 @@ import com.biodiagnostico.service.reports.v2.generator.comparison.ResolvedPeriod
 import com.biodiagnostico.service.reports.v2.generator.pdf.LabHeaderRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.PdfFooterRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.ReportV2PdfTheme;
+import com.biodiagnostico.service.reports.v2.util.WestgardSeverity;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
@@ -356,18 +357,19 @@ public class CqOperationalV2Generator implements ReportGenerator {
             document.add(new Paragraph("Nenhum registro encontrado no periodo selecionado.", ReportV2PdfTheme.BODY_FONT));
             return;
         }
-        Map<String, List<QcRecord>> byExamLevel = records.stream().collect(Collectors.groupingBy(
-            r -> safe(r.getExamName()) + " | " + safe(r.getLevel()) + " | " + safe(r.getLotNumber()),
-            LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<QcRecord>> byReference = records.stream().collect(Collectors.groupingBy(
+            this::referenceGroupingKey,
+            LinkedHashMap::new,
+            Collectors.toList()));
         PdfPTable table = ReportV2PdfTheme.table(new float[] {2.4F, 1.2F, 1.6F, 1.5F, 1.5F, 1.3F, 1.2F, 1.6F, 1.0F});
         ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
         boolean alt = false;
-        for (Map.Entry<String, List<QcRecord>> entry : byExamLevel.entrySet()) {
+        for (Map.Entry<String, List<QcRecord>> entry : byReference.entrySet()) {
             List<QcRecord> group = entry.getValue();
-            String[] parts = entry.getKey().split(" \\| ");
-            String exam = parts.length > 0 ? parts[0] : "-";
-            String level = parts.length > 1 ? parts[1] : "-";
-            String lot = parts.length > 2 ? parts[2] : "-";
+            QcRecord first = group.getFirst();
+            String exam = safe(first.getExamName());
+            String level = safe(first.getLevel());
+            String lot = safe(first.getLotNumber());
             // T6: usa Statistics (BigDecimal interno) — estabilidade numerica
             // em series longas. Apresentacao final continua em double/%.2f.
             List<Double> values = group.stream()
@@ -476,11 +478,12 @@ public class CqOperationalV2Generator implements ReportGenerator {
     private void renderLeveyJenningsCharts(Document document, ResolvedFilters rf) throws DocumentException {
         List<QcRecord> records = loadBioquimicaRecords(rf);
         if (records.isEmpty()) return;
-        Map<String, List<QcRecord>> byExamLevel = records.stream().collect(Collectors.groupingBy(
-            r -> safe(r.getExamName()) + "|" + safe(r.getLevel()),
-            LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<QcRecord>> byReference = records.stream().collect(Collectors.groupingBy(
+            this::referenceGroupingKey,
+            LinkedHashMap::new,
+            Collectors.toList()));
 
-        List<Map.Entry<String, List<QcRecord>>> top = byExamLevel.entrySet().stream()
+        List<Map.Entry<String, List<QcRecord>>> top = byReference.entrySet().stream()
             .filter(e -> e.getValue().size() >= 5)
             .sorted(Comparator.<Map.Entry<String, List<QcRecord>>>comparingInt(e -> e.getValue().size()).reversed())
             .limit(MAX_LJ_CHARTS)
@@ -505,7 +508,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 .map(r -> new ChartRenderer.LjPoint(r.getDate(), r.getValue() == null ? 0 : r.getValue(),
                     safe(r.getStatus())))
                 .collect(Collectors.toList());
-            String title = entry.getKey().replace('|', ' ');
+            String title = chartTitle(group.getFirst());
             try {
                 byte[] png = chartRenderer.renderLeveyJennings(points, target, sd, title);
                 Image img = Image.getInstance(png);
@@ -535,7 +538,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             if (count >= MAX_VIOLATIONS_ROWS) break;
             ReportV2PdfTheme.bodyRow(t, alt,
                 ReportV2PdfTheme.safe(v.getRule()),
-                ReportV2PdfTheme.safe(v.getSeverity()),
+                ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
                 ReportV2PdfTheme.safe(v.getQcRecord().getExamName()),
                 ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
                 ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
@@ -875,6 +878,24 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 .collect(Collectors.toList());
         }
         return records;
+    }
+
+    private String referenceGroupingKey(QcRecord record) {
+        if (record.getReference() != null && record.getReference().getId() != null) {
+            return "REF:" + record.getReference().getId();
+        }
+        return "LEGACY:"
+            + safe(record.getExamName()) + "|"
+            + safe(record.getLevel()) + "|"
+            + safe(record.getLotNumber());
+    }
+
+    private String chartTitle(QcRecord record) {
+        String title = safe(record.getExamName()) + " " + safe(record.getLevel());
+        if (record.getReference() != null && record.getReference().getName() != null) {
+            return title + " Ref. " + record.getReference().getName();
+        }
+        return title;
     }
 
     private PeriodSummary gatherSummary(ResolvedFilters rf) {

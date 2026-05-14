@@ -19,7 +19,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @WebMvcTest(ReportController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, ReportControllerTest.NoOpJwtFilterConfig.class})
@@ -41,7 +43,7 @@ class ReportControllerTest {
         mockMvc.perform(get("/api/reports/qc-pdf")
                 .param("area", "bioquimica")
                 .param("periodType", "current-month")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(funcionarioComDownload()))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "application/pdf"))
             .andExpect(content().bytes("qc".getBytes()));
@@ -52,10 +54,20 @@ class ReportControllerTest {
     void shouldReturnReagentsPdf() throws Exception {
         pdfReportService.reagentsPdf = "reag".getBytes();
 
-        mockMvc.perform(get("/api/reports/reagents-pdf").with(user("ana").roles("FUNCIONARIO")))
+        mockMvc.perform(get("/api/reports/reagents-pdf").with(funcionarioComDownload()))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "application/pdf"))
             .andExpect(content().bytes("reag".getBytes()));
+    }
+
+    @Test
+    @DisplayName("deve negar relatório para funcionário sem DOWNLOAD")
+    void shouldDenyFuncionarioWithoutDownload() throws Exception {
+        mockMvc.perform(get("/api/reports/qc-pdf")
+                .param("area", "bioquimica")
+                .param("periodType", "current-month")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -63,6 +75,13 @@ class ReportControllerTest {
     void shouldRequireAuthentication() throws Exception {
         mockMvc.perform(get("/api/reports/qc-pdf"))
             .andExpect(status().isUnauthorized());
+    }
+
+    private static RequestPostProcessor funcionarioComDownload() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("DOWNLOAD")
+        );
     }
 
     @TestConfiguration

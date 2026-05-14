@@ -1,6 +1,7 @@
 package com.biodiagnostico.controller;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -43,6 +44,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -99,9 +102,22 @@ class ReportV2ControllerTest {
         mockMvc.perform(post("/api/reports/v2/generate")
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(Map.of("code", "CQ_OPERATIONAL_V2")))
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(funcionarioComDownload()))
             .andExpect(status().isUnprocessableEntity())
             .andExpect(jsonPath("$.violations").isArray());
+    }
+
+    @Test
+    @DisplayName("POST /generate FUNCIONARIO sem DOWNLOAD -> 403")
+    void generateRequiresDownloadForFuncionario() throws Exception {
+        mockMvc.perform(post("/api/reports/v2/generate")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(Map.of(
+                    "code", "CQ_OPERATIONAL_V2",
+                    "filters", Map.of("area", "bioquimica", "periodType", "current-month")
+                )))
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -123,7 +139,7 @@ class ReportV2ControllerTest {
                     "code", "CQ_OPERATIONAL_V2",
                     "filters", Map.of("area", "bioquimica", "periodType", "current-month")
                 )))
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(funcionarioComDownload()))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.reportNumber").value("BIO-202604-000001"));
     }
@@ -138,7 +154,7 @@ class ReportV2ControllerTest {
                     "code", "CQ_OPERATIONAL_V2",
                     "filters", Map.of("area", "bioquimica", "periodType", "current-month")
                 )))
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(funcionarioComDownload()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.html").value("<div>preview</div>"));
     }
@@ -158,6 +174,25 @@ class ReportV2ControllerTest {
         mockMvc.perform(post("/api/reports/v2/executions/" + UUID.randomUUID() + "/sign")
                 .with(user("admin").roles("ADMIN")))
             .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("DELETE /executions/{id} ADMIN cancela execucao")
+    void cancelExecutionOk() throws Exception {
+        UUID id = UUID.randomUUID();
+        service.nextCancelResponse = new ReportExecutionResponse(
+            id, "CQ_OPERATIONAL_V2", "PDF", "CANCELLED",
+            "BIO-202604-000001", "a".repeat(64), null, null, 100L, 1, "ana",
+            Instant.now(), null, Instant.now().plusSeconds(3600),
+            "/api/reports/v2/executions/xxx/download",
+            "http://localhost:5173/r/verify/abc",
+            "Abril/2026",
+            List.of()
+        );
+        mockMvc.perform(delete("/api/reports/v2/executions/" + id)
+                .with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("CANCELLED"));
     }
 
     @Test
@@ -204,6 +239,13 @@ class ReportV2ControllerTest {
             .andExpect(header().exists("Retry-After"));
     }
 
+    private static RequestPostProcessor funcionarioComDownload() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("DOWNLOAD")
+        );
+    }
+
     // ---------- Stub manual de ReportServiceV2 ----------
 
     static class StubReportServiceV2 extends ReportServiceV2 {
@@ -213,6 +255,8 @@ class ReportV2ControllerTest {
         RuntimeException nextPreviewThrows;
         ReportExecutionResponse nextSignResponse;
         RuntimeException nextSignThrows;
+        ReportExecutionResponse nextCancelResponse;
+        RuntimeException nextCancelThrows;
         VerifyReportResponse nextVerifyResponse;
         RuntimeException nextVerifyThrows;
         AtomicInteger verifyCalls = new AtomicInteger();
@@ -228,6 +272,8 @@ class ReportV2ControllerTest {
             nextPreviewThrows = null;
             nextSignResponse = null;
             nextSignThrows = null;
+            nextCancelResponse = null;
+            nextCancelThrows = null;
             nextVerifyResponse = null;
             nextVerifyThrows = null;
             verifyCalls.set(0);
@@ -254,6 +300,12 @@ class ReportV2ControllerTest {
         public ReportExecutionResponse sign(UUID executionId, SignReportV2Request request, Authentication auth) {
             if (nextSignThrows != null) throw nextSignThrows;
             return nextSignResponse;
+        }
+
+        @Override
+        public ReportExecutionResponse cancel(UUID executionId) {
+            if (nextCancelThrows != null) throw nextCancelThrows;
+            return nextCancelResponse;
         }
 
         @Override

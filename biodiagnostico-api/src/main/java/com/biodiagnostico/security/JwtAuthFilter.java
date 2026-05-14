@@ -5,6 +5,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -49,11 +50,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (jwtTokenProvider.isAccessTokenValid(token)) {
                 JwtTokenProvider.TokenDetails details = jwtTokenProvider.validateAccessToken(token);
                 if (!accessTokenBlacklistService.isBlacklisted(details.tokenId())) {
+                    List<SimpleGrantedAuthority> authorities = new ArrayList<>();
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + details.role()));
+                    details.permissions().stream()
+                        .map(SimpleGrantedAuthority::new)
+                        .forEach(authorities::add);
                     UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
                             details.username(),
                             null,
-                            List.of(new SimpleGrantedAuthority("ROLE_" + details.role()))
+                            authorities
                         );
                     authentication.setDetails(details.userId());
                     SecurityContextHolder.getContext().setAuthentication(authentication);

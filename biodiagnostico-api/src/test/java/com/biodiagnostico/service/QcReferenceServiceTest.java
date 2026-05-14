@@ -85,6 +85,29 @@ class QcReferenceServiceTest {
     }
 
     @Test
+    @DisplayName("deve assumir nível Normal quando o request não informar nível")
+    void shouldDefaultMissingLevelToNormal() {
+        QcReferenceValue generic = reference(null, LocalDate.of(2026, 4, 1), null);
+
+        when(qcReferenceValueRepository.findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(
+            "Glicose",
+            "bioquimica",
+            "Normal"
+        )).thenReturn(List.of(generic));
+
+        QcReferenceValue resolved = qcReferenceService.resolveApplicableReference(
+            "Glicose",
+            "bioquimica",
+            null,
+            LocalDate.of(2026, 4, 3),
+            null,
+            null
+        );
+
+        assertThat(resolved.getId()).isEqualTo(generic.getId());
+    }
+
+    @Test
     @DisplayName("deve bloquear conflito entre múltiplas referências do mesmo lote")
     void shouldRejectWhenMoreThanOneLotSpecificReferenceMatches() {
         QcReferenceValue first = reference("LOT-01", LocalDate.of(2026, 4, 1), null);
@@ -105,12 +128,12 @@ class QcReferenceServiceTest {
             null
         ))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("mesmo exame, área, nível e lote");
+            .hasMessageContaining("mais de uma referência ativa");
     }
 
     @Test
-    @DisplayName("deve exigir lote quando só existirem referências vigentes dependentes de lote")
-    void shouldRejectWhenOnlyLotSpecificReferencesExistAndLotIsMissing() {
+    @DisplayName("deve usar referência única mesmo quando ela possui lote legado e o lote não foi informado")
+    void shouldResolveSingleLotSpecificReferenceWhenLotIsMissing() {
         QcReferenceValue lotSpecific = reference("LOT-01", LocalDate.of(2026, 4, 1), null);
 
         when(qcReferenceValueRepository.findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(
@@ -119,16 +142,40 @@ class QcReferenceServiceTest {
             "Normal"
         )).thenReturn(List.of(lotSpecific));
 
-        assertThatThrownBy(() -> qcReferenceService.resolveApplicableReference(
+        QcReferenceValue resolved = qcReferenceService.resolveApplicableReference(
             "Glicose",
             "bioquimica",
             "Normal",
             LocalDate.of(2026, 4, 3),
             null,
             null
+        );
+
+        assertThat(resolved.getId()).isEqualTo(lotSpecific.getId());
+    }
+
+    @Test
+    @DisplayName("deve bloquear quando houver mais de uma referência vigente sem seleção operacional")
+    void shouldRejectWhenMoreThanOneReferenceIsApplicableWithoutOperationalSelection() {
+        QcReferenceValue first = reference("LOT-01", LocalDate.of(2026, 4, 1), null);
+        QcReferenceValue second = reference(null, LocalDate.of(2026, 3, 15), null);
+
+        when(qcReferenceValueRepository.findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(
+            "Glicose",
+            "bioquimica",
+            "Normal"
+        )).thenReturn(List.of(first, second));
+
+        assertThatThrownBy(() -> qcReferenceService.resolveApplicableReference(
+            "Glicose",
+            "bioquimica",
+            null,
+            LocalDate.of(2026, 4, 3),
+            null,
+            null
         ))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("dependentes de lote");
+            .hasMessageContaining("mais de uma referência ativa");
     }
 
     @Test

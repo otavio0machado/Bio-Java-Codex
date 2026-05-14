@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,16 +35,19 @@ public class QcExamController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<QcExam> createExam(@Valid @RequestBody QcExamRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(qcExamService.createExam(request));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<QcExam> updateExam(@PathVariable UUID id, @Valid @RequestBody QcExamRequest request) {
         return ResponseEntity.ok(qcExamService.updateExam(id, request));
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteExam(@PathVariable UUID id) {
         qcExamService.deleteExam(id);
         return ResponseEntity.noContent().build();

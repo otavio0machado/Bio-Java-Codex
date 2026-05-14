@@ -11,6 +11,7 @@ import com.biodiagnostico.dto.reports.v2.SetReportLabelsRequest;
 import com.biodiagnostico.dto.reports.v2.SignReportV2Request;
 import com.biodiagnostico.dto.reports.v2.VerifyReportResponse;
 import com.biodiagnostico.entity.LabSettings;
+import com.biodiagnostico.entity.Permission;
 import com.biodiagnostico.entity.ReportRun;
 import com.biodiagnostico.entity.ReportSignatureLog;
 import com.biodiagnostico.entity.Role;
@@ -71,6 +72,7 @@ public class ReportServiceV2 {
 
     private static final Logger LOG = LoggerFactory.getLogger(ReportServiceV2.class);
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("America/Sao_Paulo");
+    private static final String REPORT_DOWNLOAD_AUTHORITY = Permission.DOWNLOAD.name();
 
     private final ReportDefinitionRegistry definitionRegistry;
     private final ReportGeneratorRegistry generatorRegistry;
@@ -124,6 +126,9 @@ public class ReportServiceV2 {
 
     public List<ReportDefinitionResponse> listCatalog(Authentication auth) {
         Set<String> roles = extractRoles(auth);
+        if (!hasReportAccess(auth, roles)) {
+            return List.of();
+        }
         return definitionRegistry.forUserRoles(roles).stream()
             .map(ReportV2Mapper::toResponse)
             .collect(Collectors.toUnmodifiableList());
@@ -131,6 +136,7 @@ public class ReportServiceV2 {
 
     public ReportDefinitionResponse getDefinition(ReportCode code, Authentication auth) {
         Set<String> roles = extractRoles(auth);
+        requireReportAccess(auth, roles, "acessar catalogo de relatorios");
         if (!definitionRegistry.canAccess(code, roles)) {
             throw new AccessDeniedException("Role nao autorizada a acessar " + code);
         }
@@ -145,6 +151,7 @@ public class ReportServiceV2 {
             throw new InvalidFilterException("Campo 'code' obrigatorio");
         }
         Set<String> roles = extractRoles(auth);
+        requireReportAccess(auth, roles, "gerar relatorios");
         if (!definitionRegistry.canAccess(request.code(), roles)) {
             throw new AccessDeniedException("Role nao autorizada a gerar " + request.code());
         }
@@ -212,6 +219,7 @@ public class ReportServiceV2 {
             throw new InvalidFilterException("Campo 'code' obrigatorio");
         }
         Set<String> roles = extractRoles(auth);
+        requireReportAccess(auth, roles, "visualizar preview de relatorios");
         if (!definitionRegistry.canAccess(request.code(), roles)) {
             throw new AccessDeniedException("Role nao autorizada a preview " + request.code());
         }
@@ -488,9 +496,15 @@ public class ReportServiceV2 {
     ) {
         String codeFilter = code == null ? null : code.name();
         Set<String> roles = extractRoles(auth);
-        String usernameFilter = roles.contains("ADMIN") || roles.contains("VIGILANCIA_SANITARIA")
-            ? null
-            : (auth == null ? null : auth.getName());
+        requireReportAccess(auth, roles, "listar execucoes de relatorios");
+        boolean privileged = roles.contains("ADMIN") || roles.contains("VIGILANCIA_SANITARIA");
+        String usernameFilter = null;
+        if (!privileged) {
+            usernameFilter = auth == null ? null : auth.getName();
+            if (usernameFilter == null || usernameFilter.isBlank()) {
+                throw new AccessDeniedException("Usuario autenticado necessario para listar execucoes proprias");
+            }
+        }
         Page<ReportRun> runs = reportRunRepository.findAll(
             executionsSpecification(codeFilter, status, usernameFilter, from, to),
             pageable
@@ -614,6 +628,7 @@ public class ReportServiceV2 {
         ReportRun run = reportRunRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Execucao V2 nao encontrada: " + id));
         Set<String> roles = extractRoles(auth);
+        requireReportAccess(auth, roles, "acessar execucao de relatorio");
         if (!roles.contains("ADMIN") && !roles.contains("VIGILANCIA_SANITARIA")) {
             String authName = auth == null ? null : auth.getName();
             if (authName == null || run.getUsername() == null || !run.getUsername().equals(authName)) {
@@ -621,6 +636,26 @@ public class ReportServiceV2 {
             }
         }
         return run;
+    }
+
+    @Transactional
+    public ReportExecutionResponse cancel(UUID executionId) {
+        ReportRun run = reportRunRepository.findById(executionId)
+            .orElseThrow(() -> new ResourceNotFoundException("Execucao V2 nao encontrada: " + executionId));
+        if (run.getReportCode() == null) {
+            throw new ResourceNotFoundException("Execucao nao e V2 (sem reportCode)");
+        }
+        if (ReportRunService.STATUS_SIGNED.equals(run.getStatus())
+            || run.getSignatureHash() != null
+            || run.getSignedAt() != null
+            || run.getSignedStorageKey() != null) {
+            throw new ReportAlreadySignedException("Relatorio assinado nao pode ser cancelado: " + executionId);
+        }
+        if (!ReportRunService.STATUS_CANCELLED.equals(run.getStatus())) {
+            run.setStatus(ReportRunService.STATUS_CANCELLED);
+            run = reportRunRepository.save(run);
+        }
+        return ReportV2Mapper.toResponse(run, properties.getPublicBaseUrl());
     }
 
     private Specification<ReportRun> executionsSpecification(
@@ -699,6 +734,26 @@ public class ReportServiceV2 {
             }
         }
         return Set.copyOf(roles);
+    }
+
+    private boolean hasReportAccess(Authentication auth, Set<String> roles) {
+        if (roles.contains("ADMIN") || roles.contains("VIGILANCIA_SANITARIA")) {
+            return true;
+        }
+        return roles.contains("FUNCIONARIO") && hasAuthority(auth, REPORT_DOWNLOAD_AUTHORITY);
+    }
+
+    private void requireReportAccess(Authentication auth, Set<String> roles, String action) {
+        if (!hasReportAccess(auth, roles)) {
+            throw new AccessDeniedException("Permissao DOWNLOAD necessaria para " + action);
+        }
+    }
+
+    private boolean hasAuthority(Authentication auth, String authority) {
+        if (auth == null || authority == null) return false;
+        Collection<? extends GrantedAuthority> authorities = auth.getAuthorities();
+        if (authorities == null) return false;
+        return authorities.stream().anyMatch(a -> authority.equals(a.getAuthority()));
     }
 
     private String yearMonthFromReportNumber(String number) {

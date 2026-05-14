@@ -160,7 +160,7 @@ export function ManutencaoTab() {
 
   // KPIs — derivados da lista completa, independente dos filtros
   const kpis = useMemo(() => {
-    let total = records.length
+    const total = records.length
     let overdue = 0
     let next7 = 0
     let scheduled = 0
@@ -727,4 +727,3 @@ function EquipmentHistoryModal({ equipment, records, onClose }: EquipmentHistory
     </Modal>
   )
 }
-

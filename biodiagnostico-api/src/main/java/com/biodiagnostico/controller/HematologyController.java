@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,6 +40,7 @@ public class HematologyController {
     }
 
     @PostMapping("/parameters")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyParameterResponse> createParameter(
         @Valid @RequestBody HematologyParameterRequest request
     ) {
@@ -46,6 +48,7 @@ public class HematologyController {
     }
 
     @PutMapping("/parameters/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyParameterResponse> updateParameter(
         @PathVariable UUID id,
         @Valid @RequestBody HematologyParameterRequest request
@@ -54,6 +57,7 @@ public class HematologyController {
     }
 
     @DeleteMapping("/parameters/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteParameter(@PathVariable UUID id) {
         hematologyQcService.deleteParameter(id);
         return ResponseEntity.noContent().build();
@@ -65,6 +69,7 @@ public class HematologyController {
     }
 
     @PostMapping("/measurements")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyMeasurementResponse> createMeasurement(
         @Valid @RequestBody HematologyMeasurementRequest request
     ) {
@@ -81,6 +86,7 @@ public class HematologyController {
     }
 
     @PostMapping("/bio-records")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyBioRecordResponse> createBioRecord(
         @Valid @RequestBody HematologyBioRequest request
     ) {

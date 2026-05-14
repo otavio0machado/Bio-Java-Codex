@@ -1,15 +1,14 @@
 import { lazy, Suspense, useMemo } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Card, Skeleton } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
-import { canImport, canWriteQc } from '../lib/permissions'
+import { canWriteQc } from '../lib/permissions'
 import { cn } from '../utils/cn'
 
 const DashboardTab = lazy(() => import('../components/proin/DashboardTab').then((module) => ({ default: module.DashboardTab })))
 const HematologiaArea = lazy(() =>
   import('../components/proin/HematologiaArea').then((module) => ({ default: module.HematologiaArea })),
 )
-const ImportarTab = lazy(() => import('../components/proin/ImportarTab').then((module) => ({ default: module.ImportarTab })))
 const ImunologiaArea = lazy(() =>
   import('../components/proin/ImunologiaArea').then((module) => ({ default: module.ImunologiaArea })),
 )
@@ -40,21 +39,32 @@ const allTabs = [
   { value: 'dashboard', label: 'Dashboard CQ' },
   { value: 'registro', label: 'Registro CQ' },
   { value: 'referencias', label: 'Referências' },
-  { value: 'importar', label: 'Importar' },
 ]
+
+const legacyTabRedirects: Record<string, string> = {
+  configuracao: '/config',
+  reagentes: '/reagentes',
+  manutencao: '/manutencao',
+  relatorios: '/relatorios',
+  importar: '/qc?area=bioquimica&tab=registro',
+}
 
 export function ProinPage() {
   const { user } = useAuth()
   const tabs = useMemo(() => {
     return allTabs.filter((tab) => {
       if (tab.value === 'registro') return canWriteQc(user)
-      if (tab.value === 'importar') return canImport(user)
       return true
     })
   }, [user])
   const [searchParams, setSearchParams] = useSearchParams()
   const currentArea = searchParams.get('area') ?? 'bioquimica'
   const currentTab = currentArea === 'bioquimica' ? (searchParams.get('tab') ?? 'dashboard') : 'registro'
+  const legacyRedirect = currentArea === 'bioquimica' ? legacyTabRedirects[currentTab] : undefined
+
+  if (legacyRedirect) {
+    return <Navigate to={legacyRedirect} replace />
+  }
 
   const handleTabChange = (tab: string) => {
     setSearchParams((current) => {
@@ -89,8 +99,6 @@ export function ProinPage() {
         return <RegistroTab key={`registro-${currentArea}`} area={currentArea} />
       case 'referencias':
         return <ReferenciasTab area={currentArea} />
-      case 'importar':
-        return <ImportarTab area={currentArea} />
       default:
         return <DashboardTab area={currentArea} />
     }
@@ -130,12 +138,16 @@ export function ProinPage() {
       {currentArea !== 'bioquimica' ? (
         <div className="space-y-6">
           <Card className="bg-gradient-to-r from-white to-green-50">
-            <h2 className="text-xl font-semibold text-neutral-900">
-              Área: {areas.find((item) => item.value === currentArea)?.label}
-            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-xl font-semibold text-neutral-900">
+                Área: {areas.find((item) => item.value === currentArea)?.label}
+              </h2>
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Alpha
+              </span>
+            </div>
             <p className="mt-2 max-w-3xl text-base text-neutral-600">
-              O fluxo abaixo traz o módulo especializado desta área, com parâmetros próprios, histórico operacional
-              e exportação de relatório.
+              Módulo em validação alpha. Use para conferência interna; a produção oficial permanece no fluxo de Bioquímica.
             </p>
           </Card>
           <Suspense fallback={<ProinContentFallback />}>{renderSpecializedArea()}</Suspense>

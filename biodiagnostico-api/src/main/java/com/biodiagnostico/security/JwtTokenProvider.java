@@ -9,7 +9,9 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +31,7 @@ public class JwtTokenProvider {
         UUID familyId,
         String username,
         String role,
+        List<String> permissions,
         TokenType tokenType,
         Instant expiration
     ) {
@@ -64,6 +67,7 @@ public class JwtTokenProvider {
             .issuer(issuer)
             .claim("username", user.getUsername())
             .claim("role", user.getRole().name())
+            .claim("permissions", user.getPermissions().stream().map(Enum::name).sorted().toList())
             .claim("token_type", TokenType.ACCESS.name())
             .id(tokenId.toString())
             .issuedAt(Date.from(now))
@@ -140,6 +144,7 @@ public class JwtTokenProvider {
             familyId == null ? null : UUID.fromString(familyId),
             claims.get("username", String.class),
             claims.get("role", String.class),
+            extractPermissions(claims),
             TokenType.valueOf(tokenType),
             claims.getExpiration().toInstant()
         );
@@ -147,6 +152,17 @@ public class JwtTokenProvider {
 
     private Claims parseClaims(String token) {
         return jwtParser.parseSignedClaims(token).getPayload();
+    }
+
+    private List<String> extractPermissions(Claims claims) {
+        Object rawPermissions = claims.get("permissions");
+        if (!(rawPermissions instanceof Collection<?> collection)) {
+            return List.of();
+        }
+        return collection.stream()
+            .filter(String.class::isInstance)
+            .map(String.class::cast)
+            .toList();
     }
 
     private SecretKey buildKey(String secret) {

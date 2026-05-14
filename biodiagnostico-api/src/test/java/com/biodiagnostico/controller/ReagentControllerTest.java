@@ -36,7 +36,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
  * Tests do ReagentController apos refator-reagentes-v3:
@@ -99,7 +101,7 @@ class ReagentControllerTest {
         String body = objectMapper.writeValueAsString(sampleRequest());
 
         mockMvc.perform(post("/api/reagents")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isCreated())
@@ -113,6 +115,18 @@ class ReagentControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/reagents sem REAGENT_WRITE retorna 403")
+    void createLot_semPermissaoReagentWrite_retorna403() throws Exception {
+        String body = objectMapper.writeValueAsString(sampleRequest());
+
+        mockMvc.perform(post("/api/reagents")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(body))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
     @DisplayName("POST /api/reagents sem location retorna 400")
     void createLot_semLocation_deveRetornar400() throws Exception {
         ReagentLotRequest req = new ReagentLotRequest(
@@ -123,7 +137,7 @@ class ReagentControllerTest {
         );
 
         mockMvc.perform(post("/api/reagents")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(req)))
             .andExpect(status().isBadRequest());
@@ -142,7 +156,7 @@ class ReagentControllerTest {
         );
 
         mockMvc.perform(post("/api/reagents")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(req)))
             .andExpect(status().isBadRequest())
@@ -157,7 +171,7 @@ class ReagentControllerTest {
 
         mockMvc.perform(get("/api/reagents")
                 .param("status", "ativo")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value(
                 org.hamcrest.Matchers.containsString("Status legado nao suportado")));
@@ -170,7 +184,7 @@ class ReagentControllerTest {
 
         mockMvc.perform(get("/api/reagents")
                 .param("status", "em_estoque")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk());
     }
 
@@ -182,7 +196,7 @@ class ReagentControllerTest {
         );
 
         mockMvc.perform(get("/api/reagents/labels")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].label").value("Glicose HK"))
             .andExpect(jsonPath("$[0].total").value(12))
@@ -203,7 +217,7 @@ class ReagentControllerTest {
         // O importante: o endpoint nao retorna 200 com payload — quem chamava
         // legacymente nao recebe mais shape ReagentTagSummary.
         var result = mockMvc.perform(get("/api/reagents/tags")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andReturn();
         int statusCode = result.getResponse().getStatus();
         org.assertj.core.api.Assertions.assertThat(statusCode)
@@ -217,7 +231,7 @@ class ReagentControllerTest {
         reagentService.getLotsResponse = List.of();
 
         var result = mockMvc.perform(get("/api/reagents/export/csv")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk())
             .andExpect(content().contentType("text/csv; charset=UTF-8"))
             .andReturn();
@@ -247,7 +261,7 @@ class ReagentControllerTest {
             new StockMovementRequest("ENTRADA", 20D, "Ana", "", null, null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isCreated())
@@ -278,7 +292,7 @@ class ReagentControllerTest {
             new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, declared));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isCreated())
@@ -298,7 +312,7 @@ class ReagentControllerTest {
             new StockMovementRequest("ABERTURA", 1D, "Ana", "", null, null, null, futura));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest())
@@ -317,7 +331,7 @@ class ReagentControllerTest {
             new StockMovementRequest("SAIDA", 5D, "Ana", "", null, null, null, null));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/movements")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest())
@@ -335,7 +349,7 @@ class ReagentControllerTest {
 
         mockMvc.perform(get("/api/reagents/by-lot-number")
                 .param("lotNumber", "L123")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(2))
             .andExpect(jsonPath("$[0].lotNumber").value("L123"));
@@ -348,7 +362,7 @@ class ReagentControllerTest {
         String body = objectMapper.writeValueAsString(new DeleteReagentLotRequest("L123"));
 
         mockMvc.perform(delete("/api/reagents/" + lotId)
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isForbidden());
@@ -414,7 +428,7 @@ class ReagentControllerTest {
             new ArchiveReagentLotRequest(LocalDate.now(), "ana"));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isOk())
@@ -430,7 +444,7 @@ class ReagentControllerTest {
         String body = "{\"archivedAt\":\"" + LocalDate.now() + "\",\"archivedBy\":\"\"}";
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest());
@@ -447,7 +461,7 @@ class ReagentControllerTest {
             new ArchiveReagentLotRequest(LocalDate.now().plusDays(1), "ana"));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/archive")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isBadRequest());
@@ -467,7 +481,7 @@ class ReagentControllerTest {
             new UnarchiveReagentLotRequest("voltou ao operacional"));
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/unarchive")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(reagentWriter())
                 .contentType("application/json")
                 .content(body))
             .andExpect(status().isOk())
@@ -484,7 +498,7 @@ class ReagentControllerTest {
         UUID lotId = UUID.randomUUID();
 
         mockMvc.perform(post("/api/reagents/" + lotId + "/unarchive")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk());
     }
 
@@ -497,7 +511,7 @@ class ReagentControllerTest {
         );
 
         mockMvc.perform(get("/api/users/responsibles")
-                .with(user("ana").roles("FUNCIONARIO")))
+                .with(reagentWriter()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(2))
             .andExpect(jsonPath("$[0].name").value("Ana Silva"))
@@ -545,6 +559,13 @@ class ReagentControllerTest {
         ) {
             return new JwtAuthFilter(jwtTokenProvider, accessTokenBlacklistService);
         }
+    }
+
+    private RequestPostProcessor reagentWriter() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("REAGENT_WRITE")
+        );
     }
 
     static class StubReagentService extends ReagentService {

@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { AlertTriangle, ShieldCheck } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useLabSettings } from '../../hooks/useLabSettings'
 import { useSignReportV2 } from '../../hooks/useReportsV2'
 import type { ReportExecutionResponse } from '../../types/reportsV2'
@@ -26,17 +26,14 @@ export function SignReportModal({ execution, onClose, onSigned }: SignReportModa
   const settingsQuery = useLabSettings()
   const signMutation = useSignReportV2()
 
-  const [signerName, setSignerName] = useState('')
-  const [signerRegistration, setSignerRegistration] = useState('')
+  const [signerNameOverride, setSignerNameOverride] = useState<string | null>(null)
+  const [signerRegistrationOverride, setSignerRegistrationOverride] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isInvalidSigner, setIsInvalidSigner] = useState(false)
 
-  useEffect(() => {
-    const data = settingsQuery.data
-    if (!data) return
-    setSignerName((current) => current || data.responsibleName || '')
-    setSignerRegistration((current) => current || data.responsibleRegistration || '')
-  }, [settingsQuery.data])
+  const signerName = signerNameOverride ?? settingsQuery.data?.responsibleName ?? ''
+  const signerRegistration =
+    signerRegistrationOverride ?? settingsQuery.data?.responsibleRegistration ?? ''
 
   const handleSign = async () => {
     setError(null)
@@ -88,13 +85,13 @@ export function SignReportModal({ execution, onClose, onSigned }: SignReportModa
         <Input
           label="Nome do responsavel"
           value={signerName}
-          onChange={(event) => setSignerName(event.target.value)}
+          onChange={(event) => setSignerNameOverride(event.target.value)}
           placeholder="Nome completo"
         />
         <Input
           label="Registro profissional (CRBM/CRM)"
           value={signerRegistration}
-          onChange={(event) => setSignerRegistration(event.target.value)}
+          onChange={(event) => setSignerRegistrationOverride(event.target.value)}
           placeholder="Ex: CRBM-X 00000"
         />
 

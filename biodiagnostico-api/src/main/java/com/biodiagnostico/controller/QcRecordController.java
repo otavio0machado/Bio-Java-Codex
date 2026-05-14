@@ -63,13 +63,13 @@ public class QcRecordController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<QcRecordResponse> createRecord(@Valid @RequestBody QcRecordRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(qcService.createRecord(request));
     }
 
     @PostMapping("/batch")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<List<QcRecordResponse>> createRecordsBatch(
         @Valid @RequestBody List<QcRecordRequest> requests
     ) {
@@ -83,7 +83,7 @@ public class QcRecordController {
      * Modo ATOMIC: comportamento legado — qualquer falha aborta o lote inteiro.
      */
     @PostMapping("/batch-v2")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('IMPORT')")
     public ResponseEntity<BatchImportResult> createRecordsBatchV2(
         @RequestBody List<QcRecordRequest> requests,
         @RequestParam(required = false, defaultValue = "partial") String mode,
@@ -96,7 +96,7 @@ public class QcRecordController {
     }
 
     @GetMapping("/import-history")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('IMPORT')")
     public ResponseEntity<List<ImportRunResponse>> importHistory(
         @RequestParam(required = false, defaultValue = "20") int limit
     ) {
@@ -109,7 +109,7 @@ public class QcRecordController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<QcRecordResponse> updateRecord(
         @PathVariable UUID id,
         @Valid @RequestBody QcRecordRequest request
@@ -118,7 +118,7 @@ public class QcRecordController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteRecord(@PathVariable UUID id) {
         qcService.deleteRecord(id);
         return ResponseEntity.noContent().build();
@@ -147,7 +147,7 @@ public class QcRecordController {
     }
 
     @PostMapping("/{id}/post-calibration")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<PostCalibrationRecord> createPostCalibration(
         @PathVariable UUID id,
         @Valid @RequestBody PostCalibrationRequest request

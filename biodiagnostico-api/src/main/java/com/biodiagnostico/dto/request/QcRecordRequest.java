@@ -10,7 +10,7 @@ public record QcRecordRequest(
     @NotBlank String examName,
     @NotBlank String area,
     @NotNull LocalDate date,
-    @NotBlank String level,
+    String level,
     String lotNumber,
     @NotNull Double value,
     @NotNull Double targetValue,

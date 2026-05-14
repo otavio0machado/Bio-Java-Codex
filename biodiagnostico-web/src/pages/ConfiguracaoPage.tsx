@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState, type SetStateAction } from 'react'
 import { Save, Trash2, Plus } from 'lucide-react'
 import { Button, Card, Input, Select, useToast } from '../components/ui'
 import {
@@ -41,13 +41,18 @@ export function ConfiguracaoPage() {
   const toggleEmail = useToggleLabReportEmail()
   const removeEmail = useRemoveLabReportEmail()
 
-  const [form, setForm] = useState<LabSettings>(emptySettings)
+  const settingsKey = settings ? JSON.stringify(settings) : ''
+  const [formState, setFormState] = useState<{ sourceKey: string; value: LabSettings } | null>(null)
+  const form = formState?.sourceKey === settingsKey ? formState.value : (settings ?? emptySettings)
+  const setForm = (next: SetStateAction<LabSettings>) => {
+    setFormState((current) => {
+      const currentValue = current?.sourceKey === settingsKey ? current.value : (settings ?? emptySettings)
+      const value = typeof next === 'function' ? next(currentValue) : next
+      return { sourceKey: settingsKey, value }
+    })
+  }
   const [newEmail, setNewEmail] = useState('')
   const [newEmailName, setNewEmailName] = useState('')
-
-  useEffect(() => {
-    if (settings) setForm(settings)
-  }, [settings])
 
   const handleSave = async () => {
     // Validação cliente-side para campos institucionais opcionais

@@ -18,6 +18,7 @@ import com.biodiagnostico.service.reports.v2.generator.chart.ChartRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.LabHeaderRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.PdfFooterRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.ReportV2PdfTheme;
+import com.biodiagnostico.service.reports.v2.util.WestgardSeverity;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
@@ -142,9 +143,9 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
             // Resumo
             doc.add(ReportV2PdfTheme.section("Resumo"));
             long advertencias = violations.stream()
-                .filter(v -> "ADVERTENCIA".equalsIgnoreCase(v.getSeverity())).count();
+                .filter(v -> WestgardSeverity.isWarning(v.getSeverity())).count();
             long rejeicoes = violations.stream()
-                .filter(v -> "REJEICAO".equalsIgnoreCase(v.getSeverity()) || "REJECTION".equalsIgnoreCase(v.getSeverity())).count();
+                .filter(v -> WestgardSeverity.isRejection(v.getSeverity())).count();
             long exames = violations.stream()
                 .filter(v -> v.getQcRecord() != null)
                 .map(v -> v.getQcRecord().getExamName()).filter(java.util.Objects::nonNull).distinct().count();
@@ -232,8 +233,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 LocalDate d = v.getQcRecord().getDate();
                 int dow = d.getDayOfWeek().getValue() - 1; // 0..6 (Seg..Dom)
                 int week = Math.min(4, (d.getDayOfMonth() - 1) / 7);
-                String sev = v.getSeverity() == null ? "" : v.getSeverity().toUpperCase(Locale.ROOT);
-                if (sev.startsWith("REJ") || "CRITICAL".equals(sev)) {
+                if (WestgardSeverity.isRejection(v.getSeverity())) {
                     matrixRej[dow][week]++;
                     countRej++;
                 } else {
@@ -290,7 +290,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 WestgardViolation v = violations.get(i);
                 ReportV2PdfTheme.bodyRow(detail, alt,
                     ReportV2PdfTheme.safe(v.getRule()),
-                    ReportV2PdfTheme.safe(v.getSeverity()),
+                    ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
                     v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getExamName()),
                     v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
                     v.getQcRecord() == null ? "-" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
@@ -359,8 +359,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
         List<WestgardViolation> base = violationRepository.findByAreaAndPeriod(rf.area, rf.start, rf.end);
         return base.stream()
             .filter(v -> rf.rules == null || rf.rules.isEmpty() || rf.rules.contains(v.getRule()))
-            .filter(v -> rf.severity == null || rf.severity.isBlank()
-                || (v.getSeverity() != null && v.getSeverity().equalsIgnoreCase(rf.severity)))
+            .filter(v -> WestgardSeverity.matchesFilter(v.getSeverity(), rf.severity))
             .sorted(Comparator.comparing((WestgardViolation v) -> v.getQcRecord().getDate()).reversed())
             .collect(Collectors.toList());
     }
@@ -453,8 +452,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
         doc.add(h);
 
         long rej = viols.stream().filter(v -> {
-            String s = v.getSeverity() == null ? "" : v.getSeverity().toUpperCase(Locale.ROOT);
-            return s.startsWith("REJ") || "CRITICAL".equals(s);
+            return WestgardSeverity.isRejection(v.getSeverity());
         }).count();
         long adv = viols.size() - rej;
 
@@ -499,7 +497,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
             ReportV2PdfTheme.bodyRow(t, alt,
                 v.getQcRecord() == null ? "—" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
                 ReportV2PdfTheme.safe(v.getRule()),
-                ReportV2PdfTheme.safe(v.getSeverity()),
+                ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
                 v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
                 v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLevel()),
                 truncate(ReportV2PdfTheme.safe(v.getDescription()), 80));

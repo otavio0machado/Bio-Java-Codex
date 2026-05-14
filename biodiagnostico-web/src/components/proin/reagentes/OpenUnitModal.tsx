@@ -1,5 +1,5 @@
 import { Unlock } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReagentLot } from '../../../types'
 import { Button, Input, Modal } from '../../ui'
 import { todayLocal } from '../../../utils/date'
@@ -35,12 +35,6 @@ export function OpenUnitModal({
 }: OpenUnitModalProps) {
   const today = todayLocal()
   const [eventDate, setEventDate] = useState<string>(today)
-
-  useEffect(() => {
-    if (isOpen) {
-      setEventDate(today)
-    }
-  }, [isOpen, today])
 
   const isFuture = Boolean(eventDate) && eventDate > today
   const isValid = Boolean(eventDate) && !isFuture

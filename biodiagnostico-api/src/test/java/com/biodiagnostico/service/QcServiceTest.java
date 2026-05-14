@@ -76,6 +76,28 @@ class QcServiceTest {
     }
 
     @Test
+    @DisplayName("deve assumir nível Normal quando o registro vier sem nível")
+    void shouldDefaultRecordLevelToNormal() {
+        QcRecordRequest request = new QcRecordRequest(
+            "Glicose", "bioquimica", LocalDate.now(), null, "", 105D, 100D, 5D, 10D, "AU680", "Ana", null
+        );
+        mockExam();
+        when(referenceRepository.findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(
+            "Glicose",
+            "bioquimica",
+            "Normal"
+        )).thenReturn(List.of(reference()));
+        when(recordRepository.findWestgardHistory(any(), any(), any(), any(), any(), any(), any(Pageable.class)))
+            .thenReturn(List.of());
+        when(recordRepository.save(any(QcRecord.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = qcService.createRecord(request);
+
+        assertThat(response.level()).isEqualTo("Normal");
+        assertThat(response.lotNumber()).isNull();
+    }
+
+    @Test
     @DisplayName("deve criar registro reprovado quando Westgard rejeita")
     void shouldCreateRecordWithRejectedStatusWhenWestgardFails() {
         QcRecordRequest request = new QcRecordRequest(
@@ -263,8 +285,8 @@ class QcServiceTest {
     }
 
     @Test
-    @DisplayName("deve propagar o lote da referência quando o request vier sem lote")
-    void shouldUseReferenceLotWhenRequestLotIsBlank() {
+    @DisplayName("não deve propagar lote legado da referência quando o request vier sem lote")
+    void shouldNotUseReferenceLotWhenRequestLotIsBlank() {
         QcRecordRequest request = new QcRecordRequest(
             "Glicose",
             "bioquimica",
@@ -290,7 +312,7 @@ class QcServiceTest {
 
         var response = qcService.createRecord(request);
 
-        assertThat(response.lotNumber()).isEqualTo("REF-LOT-01");
+        assertThat(response.lotNumber()).isNull();
         assertThat(response.referenceId()).isEqualTo(reference.getId());
     }
 

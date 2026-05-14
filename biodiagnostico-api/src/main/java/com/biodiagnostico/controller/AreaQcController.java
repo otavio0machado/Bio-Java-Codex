@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -41,6 +42,7 @@ public class AreaQcController {
     }
 
     @PostMapping("/parameters")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcParameterResponse> createParameter(
         @PathVariable String area,
         @Valid @RequestBody AreaQcParameterRequest request
@@ -49,6 +51,7 @@ public class AreaQcController {
     }
 
     @PutMapping("/parameters/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcParameterResponse> updateParameter(
         @PathVariable String area,
         @PathVariable UUID id,
@@ -58,6 +61,7 @@ public class AreaQcController {
     }
 
     @DeleteMapping("/parameters/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteParameter(@PathVariable String area, @PathVariable UUID id) {
         areaQcService.deleteParameter(area, id);
         return ResponseEntity.noContent().build();
@@ -74,6 +78,7 @@ public class AreaQcController {
     }
 
     @PostMapping("/measurements")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcMeasurementResponse> createMeasurement(
         @PathVariable String area,
         @Valid @RequestBody AreaQcMeasurementRequest request

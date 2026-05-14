@@ -328,36 +328,6 @@ export interface ReportRun {
   createdAt: string
 }
 
-export interface ImportRun {
-  id: string
-  source: 'QC_RECORDS' | string
-  mode: 'ATOMIC' | 'PARTIAL' | string
-  totalRows: number
-  successRows: number
-  failureRows: number
-  durationMs?: number | null
-  status: 'SUCCESS' | 'PARTIAL' | 'FAILURE' | string
-  errorSummary?: string | null
-  username?: string | null
-  createdAt: string
-}
-
-export interface BatchImportRowResult {
-  rowIndex: number
-  success: boolean
-  message?: string | null
-  record?: QcRecord | null
-}
-
-export interface BatchImportResult {
-  runId: string
-  mode: 'ATOMIC' | 'PARTIAL' | string
-  total: number
-  successCount: number
-  failureCount: number
-  results: BatchImportRowResult[]
-}
-
 /**
  * Tipos de movimento aceitos em escrita pos refator v3.
  *
@@ -639,8 +609,4 @@ export interface AreaQcMeasurementRequest {
   loteControle?: string
   nivelControle?: string
   observacao?: string
-}
-
-export interface ImportedQcPreviewRow extends QcRecordRequest {
-  previewId: string
 }

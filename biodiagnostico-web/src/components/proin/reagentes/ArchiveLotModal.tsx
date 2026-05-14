@@ -1,5 +1,5 @@
 import { Archive } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReagentLot, ResponsibleSummary } from '../../../types'
 import { Button, Combobox, Input, Modal, type ComboboxOption } from '../../ui'
 import { todayLocal } from '../../../utils/date'
@@ -37,13 +37,6 @@ export function ArchiveLotModal({
   const [archivedAt, setArchivedAt] = useState<string>(today)
   const [archivedBy, setArchivedBy] = useState<string>('')
 
-  useEffect(() => {
-    if (isOpen) {
-      setArchivedAt(today)
-      setArchivedBy('')
-    }
-  }, [isOpen, today])
-
   const responsibleOptions = useMemo<ComboboxOption[]>(
     () =>
       responsibles
@@ -75,9 +68,7 @@ export function ArchiveLotModal({
             Cancelar
           </Button>
           <Button
-            onClick={() =>
-              onConfirm({ archivedAt, archivedBy: archivedBy.trim() })
-            }
+            onClick={() => onConfirm({ archivedAt, archivedBy: archivedBy.trim() })}
             disabled={!isValid}
             loading={isSaving}
             icon={<Archive className="h-4 w-4" />}

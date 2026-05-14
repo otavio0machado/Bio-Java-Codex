@@ -143,6 +143,41 @@ function renderTab(authValue: AuthContextValue = authValueAdmin) {
   )
 }
 
+async function fillValidLotForm({
+  label = 'NovaEt',
+  lotNumber = 'NEW-100',
+  manufacturer = 'NovoFab',
+}: {
+  label?: string
+  lotNumber?: string
+  manufacturer?: string
+} = {}) {
+  const labelCombobox = screen.getByLabelText('Etiqueta *')
+  await userEvent.click(labelCombobox)
+  await userEvent.type(labelCombobox, label)
+  await userEvent.click(screen.getByText(/\+ Criar nova etiqueta/i))
+
+  await userEvent.type(screen.getByLabelText('Nº do Lote *'), lotNumber)
+  const fab = screen.getByLabelText('Fabricante *')
+  await userEvent.click(fab)
+  await userEvent.type(fab, manufacturer)
+  await userEvent.click(screen.getByText(/\+ Criar novo fabricante/i))
+
+  const cat = screen.getByLabelText('Categoria *')
+  await userEvent.click(cat)
+  await userEvent.type(cat, 'Bioquí{Enter}')
+  await userEvent.clear(screen.getByLabelText('Entrada *'))
+  await userEvent.type(screen.getByLabelText('Entrada *'), '3')
+  await userEvent.clear(screen.getByLabelText('Em uso *'))
+  await userEvent.type(screen.getByLabelText('Em uso *'), '1')
+  await userEvent.type(screen.getByLabelText('Validade *'), '2027-01-01')
+  const loc = screen.getByLabelText('Localização *')
+  await userEvent.click(loc)
+  await userEvent.type(loc, 'NovaLoc')
+  await userEvent.click(screen.getByText(/\+ Criar nova localização/i))
+  await userEvent.selectOptions(screen.getByLabelText('Temperatura *'), '2-8°C')
+}
+
 beforeEach(() => {
   createLotMutation.mutateAsync.mockReset()
   updateLotMutation.mutateAsync.mockReset()
@@ -209,31 +244,7 @@ describe('ReagentesTab v3', () => {
     renderTab()
 
     await userEvent.click(screen.getByRole('button', { name: 'Novo Lote' }))
-    const labelCombobox = screen.getByLabelText('Etiqueta *')
-    await userEvent.click(labelCombobox)
-    await userEvent.type(labelCombobox, 'NovaEt')
-    await userEvent.click(screen.getByText(/\+ Criar nova etiqueta/i))
-
-    await userEvent.type(screen.getByLabelText('Nº do Lote *'), 'NEW-100')
-    const fab = screen.getByLabelText('Fabricante *')
-    await userEvent.click(fab)
-    await userEvent.type(fab, 'NovoFab')
-    await userEvent.click(screen.getByText(/\+ Criar novo fabricante/i))
-    // Refator v3.1: Categoria virou Combobox fechado (allowCustom=false).
-    // Search-as-you-type por "Bioquí" filtra para 1 resultado, depois Enter.
-    const cat = screen.getByLabelText('Categoria *')
-    await userEvent.click(cat)
-    await userEvent.type(cat, 'Bioquí{Enter}')
-    await userEvent.clear(screen.getByLabelText('Entrada *'))
-    await userEvent.type(screen.getByLabelText('Entrada *'), '3')
-    await userEvent.clear(screen.getByLabelText('Em uso *'))
-    await userEvent.type(screen.getByLabelText('Em uso *'), '1')
-    await userEvent.type(screen.getByLabelText('Validade *'), '2027-01-01')
-    const loc = screen.getByLabelText('Localização *')
-    await userEvent.click(loc)
-    await userEvent.type(loc, 'NovaLoc')
-    await userEvent.click(screen.getByText(/\+ Criar nova localização/i))
-    await userEvent.selectOptions(screen.getByLabelText('Temperatura *'), '2-8°C')
+    await fillValidLotForm()
 
     await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
 
@@ -244,6 +255,33 @@ describe('ReagentesTab v3', () => {
     expect(sentRequest.label).toBe('NovaEt')
     expect(sentRequest.unitsInStock).toBe(3)
     expect(sentRequest.unitsInUse).toBe(1)
+  })
+
+  it('orienta usar Adicionar no lote existente quando cadastro novo duplica lote e fabricante', async () => {
+    mockUseReagentLots.mockReturnValue({ data: [] })
+    createLotMutation.mutateAsync.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 400'), {
+        response: {
+          data: { message: 'Já existe um lote com este número e fabricante' },
+        },
+      }),
+    )
+    renderTab()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Novo Lote' }))
+    await fillValidLotForm({
+      label: 'CK NAC',
+      lotNumber: '202506ID01',
+      manufacturer: 'CICLA',
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
+
+    expect(
+      await screen.findByText(/Este lote já existe para este fabricante/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/clique em Adicionar dentro do próprio lote/i),
+    ).toBeInTheDocument()
   })
 
   it('exibe banner amarelo quando expiryDate < hoje', async () => {

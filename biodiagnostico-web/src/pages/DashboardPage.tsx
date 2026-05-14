@@ -121,7 +121,7 @@ export function DashboardPage() {
             <button
               type="button"
               className="inline-flex items-center gap-1 text-base font-medium text-green-800"
-              onClick={() => navigate('/qc?tab=registro')}
+              onClick={() => navigate('/qc?area=bioquimica&tab=registro')}
             >
               Ver todos <ChevronRight className="h-4 w-4" />
             </button>
@@ -159,7 +159,7 @@ export function DashboardPage() {
       {/* === ACOES RAPIDAS — cards grandes e claros === */}
       <section className="grid gap-4 md:grid-cols-3">
         <Card
-          onClick={() => navigate('/qc?tab=registro')}
+          onClick={() => navigate('/qc?area=bioquimica&tab=registro')}
           className="animate-fadeIn border-l-4 border-green-600 bg-green-50 hover:shadow-elevated transition-shadow cursor-pointer"
         >
           <div className="flex items-center gap-4">
@@ -174,7 +174,7 @@ export function DashboardPage() {
         </Card>
 
         <Card
-          onClick={() => navigate('/qc?tab=configuracao')}
+          onClick={() => navigate('/config')}
           className="animate-fadeIn hover:shadow-elevated transition-shadow cursor-pointer"
         >
           <div className="flex items-center gap-4">
@@ -189,7 +189,7 @@ export function DashboardPage() {
         </Card>
 
         <Card
-          onClick={() => navigate('/qc?tab=relatorios')}
+          onClick={() => navigate('/relatorios')}
           className="animate-fadeIn hover:shadow-elevated transition-shadow cursor-pointer"
         >
           <div className="flex items-center gap-4">
@@ -198,7 +198,7 @@ export function DashboardPage() {
             </div>
             <div>
               <h3 className="text-xl font-semibold text-neutral-900">Relatórios</h3>
-              <p className="mt-1 text-base text-neutral-600">Gerar PDF e importar planilhas</p>
+              <p className="mt-1 text-base text-neutral-600">Gerar PDFs e acompanhar histórico</p>
             </div>
           </div>
         </Card>

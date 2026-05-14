@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class QcReferenceService {
 
+    static final String DEFAULT_LEVEL = "Normal";
+
     private final QcReferenceValueRepository qcReferenceValueRepository;
     private final QcExamRepository qcExamRepository;
 
@@ -62,7 +64,7 @@ public class QcReferenceService {
     ) {
         String normalizedExamName = normalizeRequired(examName, "exame");
         String normalizedArea = normalizeRequired(area, "área");
-        String normalizedLevel = normalizeRequired(level, "nível");
+        String normalizedLevel = normalizeLevel(level);
         String normalizedLotNumber = normalizeNullable(lotNumber);
         LocalDate effectiveDate = referenceDate != null ? referenceDate : LocalDate.now();
 
@@ -87,10 +89,6 @@ public class QcReferenceService {
             .filter(reference -> isApplicableOnDate(reference, effectiveDate))
             .toList();
 
-        List<QcReferenceValue> genericCandidates = validCandidates.stream()
-            .filter(this::isLotAgnostic)
-            .toList();
-
         if (normalizedLotNumber != null) {
             List<QcReferenceValue> exactLotCandidates = validCandidates.stream()
                 .filter(reference -> lotMatches(reference, normalizedLotNumber))
@@ -98,47 +96,34 @@ public class QcReferenceService {
             if (!exactLotCandidates.isEmpty()) {
                 return requireSingleCandidate(
                     exactLotCandidates,
-                    "Existe mais de uma referência ativa e vigente para o mesmo exame, área, nível e lote informados."
+                    "Existe mais de uma referência ativa e vigente para este exame na data informada. Revise as referências antes de registrar."
                 );
             }
-            if (!genericCandidates.isEmpty()) {
-                return requireSingleCandidate(
-                    genericCandidates,
-                    "Existe mais de uma referência ativa e vigente para o mesmo exame, área e nível informados sem distinção de lote."
-                );
-            }
-            throw new BusinessException(
-                "Nenhuma referência válida foi encontrada para o exame, área, nível, lote e data informados."
-            );
         }
 
-        if (!genericCandidates.isEmpty()) {
-            return requireSingleCandidate(
-                genericCandidates,
-                "Existe mais de uma referência ativa e vigente para o mesmo exame, área e nível informados."
-            );
-        }
         if (!validCandidates.isEmpty()) {
-            throw new BusinessException(
-                "Existem referências vigentes dependentes de lote para o exame, área e nível informados. Informe o lote do controle ou selecione uma referência explícita."
+            return requireSingleCandidate(
+                validCandidates,
+                "Existe mais de uma referência ativa e vigente para este exame na data informada. Revise as referências antes de registrar."
             );
         }
         throw new BusinessException(
-            "Nenhuma referência válida foi encontrada para o exame, área, nível e data informados."
+            "Nenhuma referência válida foi encontrada para este exame na data informada. Cadastre uma referência antes de registrar."
         );
     }
 
     @Transactional
     public QcReferenceValue createReference(QcReferenceRequest request) {
         validateReferenceRequest(request);
-        closePreviousReference(request.examId(), request.level(), request.validFrom());
-        checkOverlap(request.examId(), request.level(), request.validFrom(), request.validUntil(), null);
+        String level = normalizeLevel(request.level());
+        closePreviousReference(request.examId(), level, request.validFrom());
+        checkOverlap(request.examId(), level, request.validFrom(), request.validUntil(), null);
         QcExam exam = qcExamRepository.findById(request.examId())
             .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
         QcReferenceValue reference = QcReferenceValue.builder()
             .exam(exam)
             .name(request.name())
-            .level(request.level())
+            .level(level)
             .lotNumber(normalizeNullable(request.lotNumber()))
             .manufacturer(request.manufacturer())
             .targetValue(request.targetValue())
@@ -170,14 +155,15 @@ public class QcReferenceService {
     @Transactional
     public QcReferenceValue updateReference(UUID id, QcReferenceRequest request) {
         validateReferenceRequest(request);
-        checkOverlap(request.examId(), request.level(), request.validFrom(), request.validUntil(), id);
+        String level = normalizeLevel(request.level());
+        checkOverlap(request.examId(), level, request.validFrom(), request.validUntil(), id);
         QcReferenceValue reference = qcReferenceValueRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Referência não encontrada"));
         QcExam exam = qcExamRepository.findById(request.examId())
             .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
         reference.setExam(exam);
         reference.setName(request.name());
-        reference.setLevel(request.level());
+        reference.setLevel(level);
         reference.setLotNumber(normalizeNullable(request.lotNumber()));
         reference.setManufacturer(request.manufacturer());
         reference.setTargetValue(request.targetValue());
@@ -220,8 +206,8 @@ public class QcReferenceService {
         if (reference.getExam().getArea() == null || !reference.getExam().getArea().equalsIgnoreCase(area)) {
             throw new BusinessException("A referência selecionada não pertence à área informada.");
         }
-        if (!normalizeRequired(reference.getLevel(), "nível da referência").equalsIgnoreCase(level)) {
-            throw new BusinessException("A referência selecionada não pertence ao nível informado.");
+        if (!normalizeLevel(reference.getLevel()).equalsIgnoreCase(level)) {
+            throw new BusinessException("A referência selecionada não pertence ao padrão operacional vigente.");
         }
         if (!isApplicableOnDate(reference, referenceDate)) {
             throw new BusinessException("A referência selecionada não está vigente para a data informada.");
@@ -253,10 +239,6 @@ public class QcReferenceService {
         return referenceLotNumber != null && referenceLotNumber.equalsIgnoreCase(lotNumber);
     }
 
-    private boolean isLotAgnostic(QcReferenceValue reference) {
-        return normalizeNullable(reference.getLotNumber()) == null;
-    }
-
     private void checkOverlap(UUID examId, String level, LocalDate validFrom,
                                LocalDate validUntil, UUID excludeId) {
         LocalDate effectiveFrom = validFrom != null ? validFrom : LocalDate.MIN;
@@ -275,6 +257,11 @@ public class QcReferenceService {
         if (request.validFrom() != null && request.validUntil() != null && request.validUntil().isBefore(request.validFrom())) {
             throw new BusinessException("A validade final da referência não pode ser anterior à validade inicial.");
         }
+    }
+
+    private String normalizeLevel(String value) {
+        String normalized = normalizeNullable(value);
+        return normalized == null ? DEFAULT_LEVEL : normalized;
     }
 
     private String normalizeRequired(String value, String fieldName) {

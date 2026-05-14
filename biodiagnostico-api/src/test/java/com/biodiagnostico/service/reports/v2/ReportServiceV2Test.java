@@ -35,6 +35,7 @@ import com.biodiagnostico.service.reports.v2.generator.ReportGeneratorRegistry;
 import com.biodiagnostico.service.reports.v2.generator.ReportPreview;
 import com.biodiagnostico.service.reports.v2.storage.ReportStorage;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -117,6 +118,8 @@ class ReportServiceV2Test {
         // Apos expansao Fase 1, ADMIN enxerga 7 tipos
         assertThat(service.listCatalog(authWithRole("ADMIN"))).hasSize(7);
         assertThat(service.listCatalog(authWithRole("VISUALIZADOR"))).isEmpty();
+        assertThat(service.listCatalog(authWithRole("FUNCIONARIO"))).isEmpty();
+        assertThat(service.listCatalog(authFuncionarioDownload())).hasSize(5);
     }
 
     @Test
@@ -141,6 +144,18 @@ class ReportServiceV2Test {
     }
 
     @Test
+    @DisplayName("generate: FUNCIONARIO sem DOWNLOAD dispara AccessDeniedException")
+    void generateFuncionarioSemDownloadAccessDenied() {
+        GenerateReportV2Request req = new GenerateReportV2Request(
+            ReportCode.CQ_OPERATIONAL_V2, ReportFormat.PDF,
+            Map.of("area", "bioquimica", "periodType", "current-month")
+        );
+        assertThatThrownBy(() -> service.generate(req, authWithRole("FUNCIONARIO")))
+            .isInstanceOf(org.springframework.security.access.AccessDeniedException.class)
+            .hasMessageContaining("DOWNLOAD");
+    }
+
+    @Test
     @DisplayName("generate: gera, salva e registra execucao com sucesso")
     void generateHappyPath() throws Exception {
         when(storage.save(any(byte[].class), any(ReportStorage.StorageKeyHint.class)))
@@ -150,7 +165,7 @@ class ReportServiceV2Test {
             ReportCode.CQ_OPERATIONAL_V2, ReportFormat.PDF,
             Map.of("area", "bioquimica", "periodType", "current-month")
         );
-        ReportExecutionResponse res = service.generate(req, authWithRole("FUNCIONARIO"));
+        ReportExecutionResponse res = service.generate(req, authFuncionarioDownload());
 
         assertThat(res).isNotNull();
         assertThat(res.reportCode()).isEqualTo("CQ_OPERATIONAL_V2");
@@ -174,7 +189,7 @@ class ReportServiceV2Test {
             ReportCode.CQ_OPERATIONAL_V2, ReportFormat.PDF,
             Map.of("area", "bioquimica", "periodType", "current-month")
         );
-        ReportExecutionResponse res = service.generate(req, authWithRole("FUNCIONARIO"));
+        ReportExecutionResponse res = service.generate(req, authFuncionarioDownload());
 
         assertThat(res.status()).isEqualTo(ReportRunService.STATUS_WITH_WARNINGS);
         assertThat(res.warnings()).containsExactly("Secao 'KPIs de Manutencao' falhou — conteudo omitido");
@@ -221,7 +236,7 @@ class ReportServiceV2Test {
             ReportCode.CQ_OPERATIONAL_V2,
             Map.of("area", "bioquimica", "periodType", "current-month")
         );
-        PreviewResponse res = service.preview(req, authWithRole("FUNCIONARIO"));
+        PreviewResponse res = service.preview(req, authFuncionarioDownload());
         assertThat(res.html()).contains("preview-stub");
         verify(storage, never()).save(any(), any());
     }
@@ -529,6 +544,50 @@ class ReportServiceV2Test {
             .isInstanceOf(ReportExpiredException.class);
     }
 
+    // ---------- Cancel ----------
+
+    @Test
+    @DisplayName("cancel: marca execucao V2 como CANCELLED")
+    void cancelMarcaStatusCancelled() {
+        UUID id = UUID.randomUUID();
+        ReportRun run = ReportRun.builder()
+            .id(id)
+            .type("V2")
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000001")
+            .sha256("a".repeat(64))
+            .format("PDF")
+            .status(ReportRunService.STATUS_SUCCESS)
+            .build();
+        when(runRepository.findById(id)).thenReturn(Optional.of(run));
+
+        ReportExecutionResponse res = service.cancel(id);
+
+        assertThat(res.status()).isEqualTo(ReportRunService.STATUS_CANCELLED);
+        verify(runRepository).save(run);
+    }
+
+    @Test
+    @DisplayName("cancel: execucao assinada dispara ReportAlreadySignedException")
+    void cancelSignedThrowsConflict() {
+        UUID id = UUID.randomUUID();
+        ReportRun run = ReportRun.builder()
+            .id(id)
+            .type("V2")
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000001")
+            .sha256("a".repeat(64))
+            .format("PDF")
+            .status(ReportRunService.STATUS_SIGNED)
+            .signatureHash("b".repeat(64))
+            .signedAt(Instant.now())
+            .build();
+        when(runRepository.findById(id)).thenReturn(Optional.of(run));
+
+        assertThatThrownBy(() -> service.cancel(id))
+            .isInstanceOf(ReportAlreadySignedException.class);
+    }
+
     // ---------- helpers ----------
 
     private ReportRun buildUnsignedRun() {
@@ -559,8 +618,21 @@ class ReportServiceV2Test {
     }
 
     private Authentication authWithRole(String role) {
+        return authWithRoleAndAuthorities(role);
+    }
+
+    private Authentication authFuncionarioDownload() {
+        return authWithRoleAndAuthorities("FUNCIONARIO", "DOWNLOAD");
+    }
+
+    private Authentication authWithRoleAndAuthorities(String role, String... authorities) {
+        List<SimpleGrantedAuthority> grantedAuthorities = new ArrayList<>();
+        grantedAuthorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+        for (String authority : authorities) {
+            grantedAuthorities.add(new SimpleGrantedAuthority(authority));
+        }
         return new UsernamePasswordAuthenticationToken(
-            "tester", "pw", List.of(new SimpleGrantedAuthority("ROLE_" + role))
+            "tester", "pw", grantedAuthorities
         );
     }
 

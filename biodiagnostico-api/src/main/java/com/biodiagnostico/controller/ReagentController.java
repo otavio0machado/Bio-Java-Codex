@@ -45,14 +45,14 @@ public class ReagentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> createLot(@Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ResponseMapper.toReagentLotResponse(reagentService.createLot(request)));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> updateLot(@PathVariable UUID id, @Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.ok(ResponseMapper.toReagentLotResponse(reagentService.updateLot(id, request)));
     }
@@ -77,7 +77,7 @@ public class ReagentController {
      * {@code { archivedAt, archivedBy }}. Audit {@code REAGENT_LOT_ARCHIVED}.
      */
     @PostMapping("/{id}/archive")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> archiveLot(
         @PathVariable UUID id,
         @Valid @RequestBody ArchiveReagentLotRequest request
@@ -92,7 +92,7 @@ public class ReagentController {
      * Audit {@code REAGENT_LOT_UNARCHIVED}.
      */
     @PostMapping("/{id}/unarchive")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> unarchiveLot(
         @PathVariable UUID id,
         @RequestBody(required = false) UnarchiveReagentLotRequest request
@@ -112,7 +112,7 @@ public class ReagentController {
     }
 
     @PostMapping("/{id}/movements")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<StockMovementResponse> createMovement(
         @PathVariable UUID id,
         @Valid @RequestBody StockMovementRequest request
@@ -122,7 +122,7 @@ public class ReagentController {
     }
 
     @DeleteMapping("/movements/{movId}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<Void> deleteMovement(@PathVariable UUID movId) {
         reagentService.deleteMovement(movId);
         return ResponseEntity.noContent().build();

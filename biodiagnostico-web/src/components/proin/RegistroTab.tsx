@@ -9,6 +9,7 @@ import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } f
 import { PostCalibrationModal } from './PostCalibrationModal'
 import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ExamHistoryModal } from './ExamHistoryModal'
+import { getOperationalReferences } from './qcReferenceResolution'
 
 const LeveyJenningsChart = lazy(() =>
   import('../charts/LeveyJenningsChart').then((module) => ({ default: module.LeveyJenningsChart })),
@@ -117,24 +118,18 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const [historyExam, setHistoryExam] = useState<{ examName: string; level: string | null } | null>(null)
 
   // --- Resolucao de referencia silenciosa ---
+  const referenceCandidates = useMemo(
+    () => getOperationalReferences(references, area, form.examName, form.date),
+    [area, form.date, form.examName, references],
+  )
+
   const resolvedRef = useMemo<QcReferenceValue | null>(() => {
-    if (!form.examName) return null
-    const matching = references.filter((r) =>
-      r.isActive && r.exam?.area === area && r.exam.name === form.examName &&
-      r.level === 'Normal' && isRefValidOnDate(r, form.date),
-    )
-    if (matching.length === 1) return matching[0]
-    if (form.referenceId) return matching.find((r) => r.id === form.referenceId) ?? null
-    return null
-  }, [area, form.examName, form.date, form.referenceId, references])
+    return referenceCandidates.length === 1 ? referenceCandidates[0] : null
+  }, [referenceCandidates])
 
   const ambiguousRefs = useMemo(() => {
-    if (!form.examName || resolvedRef) return []
-    return references.filter((r) =>
-      r.isActive && r.exam?.area === area && r.exam.name === form.examName &&
-      r.level === 'Normal' && isRefValidOnDate(r, form.date),
-    )
-  }, [area, form.examName, form.date, resolvedRef, references])
+    return form.examName && !resolvedRef && referenceCandidates.length > 1 ? referenceCandidates : []
+  }, [form.examName, referenceCandidates, resolvedRef])
 
   const targetValue = resolvedRef ? resolvedRef.targetValue : form.targetValue || 0
   const targetSd = resolvedRef ? resolvedRef.targetSd : form.targetSd || 0
@@ -176,13 +171,13 @@ export function RegistroTab({ area }: RegistroTabProps) {
       return
     }
     if (!resolvedRef && ambiguousRefs.length > 1) {
-      setSubmitError('Selecione a referência correta abaixo.')
+      setSubmitError('Mais de uma referência ativa e vigente foi encontrada para este exame. Revise a aba Referências antes de registrar.')
       return
     }
     const ref = resolvedRef!
     const payload: QcRecordRequest = {
       ...form, area, referenceId: ref.id,
-      lotNumber: form.lotNumber || ref.lotNumber || '',
+      lotNumber: form.lotNumber || '',
       value: Number(form.value), targetValue: targetValue,
       targetSd: targetSd, cvLimit: cvLimit,
     }
@@ -248,6 +243,22 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const handleBatchSubmit = async () => {
     const validRows = batchRows.filter(r => r.examName && r.value)
     if (validRows.length === 0) return
+    const referenceErrors = validRows
+      .map((row, index) => {
+        const candidates = getOperationalReferences(references, area, row.examName, form.date)
+        if (candidates.length === 0) {
+          return `Linha ${index + 1}: cadastre uma referência ativa para ${row.examName} antes de registrar.`
+        }
+        if (candidates.length > 1) {
+          return `Linha ${index + 1}: há mais de uma referência ativa para ${row.examName}; revise a aba Referências.`
+        }
+        return null
+      })
+      .filter((message): message is string => Boolean(message))
+    if (referenceErrors.length > 0) {
+      toast.error(referenceErrors[0])
+      return
+    }
     const requests: QcRecordRequest[] = validRows.map(row => ({
       examName: row.examName,
       area,
@@ -260,6 +271,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
       cvLimit: parseFloat(row.cvLimit) || 10,
       equipment: form.equipment || '',
       analyst: form.analyst || '',
+      referenceId: getOperationalReferences(references, area, row.examName, form.date)[0]?.id,
     }))
     try {
       await qcService.createBatch(requests)
@@ -323,12 +335,9 @@ export function RegistroTab({ area }: RegistroTabProps) {
               <div key={i} className="grid grid-cols-[1fr_100px_100px_100px_100px_40px] gap-2 items-center">
                 <select value={row.examName} onChange={e => {
                   const val = e.target.value
-                  const ref = references.find(r =>
-                    r.exam?.name?.toLowerCase() === val.toLowerCase() &&
-                    r.exam?.area?.toLowerCase() === area.toLowerCase() &&
-                    r.isActive,
-                  )
-                  if (ref) {
+                  const matchingRefs = getOperationalReferences(references, area, val, form.date)
+                  if (matchingRefs.length === 1) {
+                    const ref = matchingRefs[0]
                     setBatchRows(prev => prev.map((r, idx) => idx === i ? {
                       ...r, examName: val,
                       targetValue: String(ref.targetValue ?? ''),
@@ -336,7 +345,13 @@ export function RegistroTab({ area }: RegistroTabProps) {
                       cvLimit: String(ref.cvMaxThreshold ?? '10'),
                     } : r))
                   } else {
-                    setBatchRows(prev => prev.map((r, idx) => idx === i ? { ...r, examName: val } : r))
+                    setBatchRows(prev => prev.map((r, idx) => idx === i ? {
+                      ...r,
+                      examName: val,
+                      targetValue: '',
+                      targetSd: '',
+                      cvLimit: '10',
+                    } : r))
                   }
                 }} className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm">
                   <option value="">Selecione...</option>
@@ -406,14 +421,11 @@ export function RegistroTab({ area }: RegistroTabProps) {
                 <span className="text-sm text-neutral-500">| Alvo: {resolvedRef.targetValue} | DP: {resolvedRef.targetSd}</span>
               </div>
             ) : form.examName && ambiguousRefs.length > 1 ? (
-              <div className="mt-3 space-y-2">
-                <div className="flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Mais de uma referência encontrada. Selecione:
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="font-semibold">Registro bloqueado: referências ambíguas.</div>
+                <div>
+                  Há {ambiguousRefs.length} referências ativas e vigentes para este exame. Revise a aba Referências antes de registrar.
                 </div>
-                <Select value={form.referenceId ?? ''} onChange={(e) => setForm((c) => ({ ...c, referenceId: e.target.value || undefined }))}>
-                  <option value="">Selecione a referência</option>
-                  {ambiguousRefs.map((r) => <option key={r.id} value={r.id}>{r.name} — Alvo: {r.targetValue}, DP: {r.targetSd}</option>)}
-                </Select>
               </div>
             ) : form.examName ? (
               <div className="mt-3 flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -692,13 +704,6 @@ function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps)
       </div>
     </div>
   )
-}
-
-function isRefValidOnDate(ref: QcReferenceValue, date: string) {
-  const d = date || new Date().toISOString().slice(0, 10)
-  const from = ref.validFrom?.slice(0, 10)
-  const until = ref.validUntil?.slice(0, 10)
-  return (!from || from <= d) && (!until || until >= d)
 }
 
 function formatDate(date: string) {

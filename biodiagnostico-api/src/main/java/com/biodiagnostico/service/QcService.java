@@ -37,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class QcService {
 
     private static final double DEFAULT_CV_LIMIT = 10D;
+    private static final String DEFAULT_LEVEL = "Normal";
     private static final int MAX_BATCH_SIZE = 1000;
     private static final int WESTGARD_HISTORY_LIMIT = 10;
     private static final int WESTGARD_HISTORY_FETCH_SIZE = 50;
@@ -235,7 +236,7 @@ public class QcService {
         return qcReferenceService.resolveApplicableReference(
             request.examName(),
             request.area(),
-            request.level(),
+            normalizeLevel(request.level()),
             request.date(),
             request.lotNumber(),
             request.referenceId()
@@ -247,16 +248,13 @@ public class QcService {
         double targetSd = reference != null ? reference.getTargetSd() : NumericUtils.defaultIfNull(request.targetSd());
         double cvLimit = resolveCvLimit(request.cvLimit(), reference);
         String resolvedLotNumber = normalizeNullable(request.lotNumber());
-        if (resolvedLotNumber == null && reference != null) {
-            resolvedLotNumber = normalizeNullable(reference.getLotNumber());
-        }
 
         QcRecord record = existing == null ? new QcRecord() : existing;
         record.setReference(reference);
         record.setExamName(request.examName());
         record.setArea(request.area());
         record.setDate(request.date());
-        record.setLevel(request.level());
+        record.setLevel(normalizeLevel(request.level()));
         record.setLotNumber(resolvedLotNumber);
         record.setValue(request.value());
         record.setTargetValue(targetValue);
@@ -386,5 +384,10 @@ public class QcService {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeLevel(String value) {
+        String normalized = normalizeNullable(value);
+        return normalized == null ? DEFAULT_LEVEL : normalized;
     }
 }

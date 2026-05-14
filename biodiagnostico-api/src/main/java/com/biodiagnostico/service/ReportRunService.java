@@ -41,6 +41,7 @@ public class ReportRunService {
     public static final String STATUS_FAILURE = "FAILURE";
     public static final String STATUS_WITH_WARNINGS = "WITH_WARNINGS";
     public static final String STATUS_SIGNED = "SIGNED";
+    public static final String STATUS_CANCELLED = "CANCELLED";
 
     private final ReportRunRepository repository;
     private final ObjectMapper objectMapper = new ObjectMapper();

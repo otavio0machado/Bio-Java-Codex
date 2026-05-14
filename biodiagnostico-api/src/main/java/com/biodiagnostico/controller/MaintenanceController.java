@@ -40,14 +40,14 @@ public class MaintenanceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('MAINTENANCE_WRITE')")
     public ResponseEntity<MaintenanceResponse> createRecord(@Valid @RequestBody MaintenanceRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ResponseMapper.toMaintenanceResponse(maintenanceService.createRecord(request)));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('MAINTENANCE_WRITE')")
     public ResponseEntity<MaintenanceResponse> updateRecord(
         @PathVariable UUID id,
         @Valid @RequestBody MaintenanceRequest request
@@ -56,7 +56,7 @@ public class MaintenanceController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('MAINTENANCE_WRITE')")
     public ResponseEntity<Void> deleteRecord(@PathVariable UUID id) {
         maintenanceService.deleteRecord(id);
         return ResponseEntity.noContent().build();

@@ -48,6 +48,26 @@ import {
 } from './reagentes/utils'
 import { todayLocal } from '../../utils/date'
 
+const DUPLICATE_REAGENT_LOT_MESSAGE = 'Já existe um lote com este número e fabricante'
+const DUPLICATE_REAGENT_LOT_GUIDANCE =
+  'Este lote já existe para este fabricante. Para acrescentar unidades, localize o lote existente e clique em Adicionar dentro do próprio lote, em vez de cadastrar um novo lote.'
+
+function extractReagentErrorMessage(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'response' in error) {
+    const response = (error as { response?: { data?: { message?: unknown } } }).response
+    if (typeof response?.data?.message === 'string' && response.data.message.trim()) {
+      return response.data.message
+    }
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+  return null
+}
+
 /**
  * Aba de Reagentes pos refator v3.
  *
@@ -323,7 +343,11 @@ export function ReagentesTab() {
       }
       resetLotModal()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro ao salvar lote.'
+      const message = extractReagentErrorMessage(error) ?? 'Erro ao salvar lote.'
+      if (!editingLot && message.includes(DUPLICATE_REAGENT_LOT_MESSAGE)) {
+        toast.warning(DUPLICATE_REAGENT_LOT_GUIDANCE)
+        return
+      }
       toast.error(message)
     }
   }
@@ -514,28 +538,34 @@ export function ReagentesTab() {
         movements={movements}
         lockType={movementLockType}
       />
-      <ArchiveLotModal
-        isOpen={Boolean(archivingLot)}
-        isSaving={archiveLot.isPending}
-        lot={archivingLot}
-        responsibles={responsibles}
-        onClose={() => setArchivingLot(null)}
-        onConfirm={(payload) => void handleArchiveConfirm(payload)}
-      />
-      <DeleteLotModal
-        isOpen={Boolean(deletingLot)}
-        isSaving={deleteLot.isPending}
-        lot={deletingLot}
-        onClose={() => setDeletingLot(null)}
-        onConfirm={(payload) => void handleDeleteConfirm(payload)}
-      />
-      <OpenUnitModal
-        isOpen={Boolean(openingUnitFor)}
-        isSaving={isOpeningUnitSaving}
-        lot={openingUnitFor}
-        onClose={() => setOpeningUnitFor(null)}
-        onConfirm={(eventDate) => void handleConfirmOpenUnit(eventDate)}
-      />
+      {archivingLot ? (
+        <ArchiveLotModal
+          isOpen
+          isSaving={archiveLot.isPending}
+          lot={archivingLot}
+          responsibles={responsibles}
+          onClose={() => setArchivingLot(null)}
+          onConfirm={(payload) => void handleArchiveConfirm(payload)}
+        />
+      ) : null}
+      {deletingLot ? (
+        <DeleteLotModal
+          isOpen
+          isSaving={deleteLot.isPending}
+          lot={deletingLot}
+          onClose={() => setDeletingLot(null)}
+          onConfirm={(payload) => void handleDeleteConfirm(payload)}
+        />
+      ) : null}
+      {openingUnitFor ? (
+        <OpenUnitModal
+          isOpen
+          isSaving={isOpeningUnitSaving}
+          lot={openingUnitFor}
+          onClose={() => setOpeningUnitFor(null)}
+          onConfirm={(eventDate) => void handleConfirmOpenUnit(eventDate)}
+        />
+      ) : null}
     </div>
   )
 }

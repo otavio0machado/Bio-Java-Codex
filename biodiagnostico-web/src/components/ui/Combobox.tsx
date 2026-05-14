@@ -78,6 +78,8 @@ export function Combobox({
   }, [options, query])
 
   const showCreateEntry = allowCustom && query.trim().length > 0 && !hasExact
+  const optionCount = filtered.length + (showCreateEntry ? 1 : 0)
+  const activeHighlightedIndex = optionCount === 0 ? 0 : Math.min(highlightedIndex, optionCount - 1)
 
   useEffect(() => {
     if (!isOpen) return
@@ -89,10 +91,6 @@ export function Combobox({
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [isOpen])
-
-  useEffect(() => {
-    setHighlightedIndex(0)
-  }, [query, isOpen])
 
   const selectedLabel = useMemo(() => {
     const hit = options.find((o) => o.value === value)
@@ -107,23 +105,22 @@ export function Combobox({
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    const total = filtered.length + (showCreateEntry ? 1 : 0)
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       if (!isOpen) setIsOpen(true)
-      setHighlightedIndex((i) => (total === 0 ? 0 : (i + 1) % total))
+      setHighlightedIndex((i) => (optionCount === 0 ? 0 : (i + 1) % optionCount))
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       if (!isOpen) setIsOpen(true)
-      setHighlightedIndex((i) => (total === 0 ? 0 : (i - 1 + total) % total))
+      setHighlightedIndex((i) => (optionCount === 0 ? 0 : (i - 1 + optionCount) % optionCount))
     } else if (event.key === 'Enter') {
       event.preventDefault()
       if (!isOpen) {
         setIsOpen(true)
         return
       }
-      if (highlightedIndex < filtered.length) {
-        handleSelect(filtered[highlightedIndex].value)
+      if (activeHighlightedIndex < filtered.length) {
+        handleSelect(filtered[activeHighlightedIndex].value)
       } else if (showCreateEntry) {
         handleSelect(query.trim())
       }
@@ -160,6 +157,7 @@ export function Combobox({
           onChange={(event) => {
             const raw = event.target.value
             setQuery(raw)
+            setHighlightedIndex(0)
             if (!isOpen) setIsOpen(true)
             if (allowCustom) {
               // QA P0: ao emitir "criar novo", envia o valor trimado para evitar
@@ -167,7 +165,10 @@ export function Combobox({
               onChange(raw.trim())
             }
           }}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            setIsOpen(true)
+            setHighlightedIndex(0)
+          }}
           onKeyDown={handleKeyDown}
           className="w-full border-none bg-transparent text-base outline-none placeholder:text-neutral-400"
           autoComplete="off"
@@ -180,6 +181,7 @@ export function Combobox({
           tabIndex={-1}
           onClick={() => {
             if (disabled) return
+            setHighlightedIndex(0)
             setIsOpen((open) => !open)
             inputRef.current?.focus()
           }}
@@ -200,7 +202,7 @@ export function Combobox({
             ) : null}
             {filtered.map((option, index) => {
               const isSelected = option.value === value
-              const isHighlighted = index === highlightedIndex
+              const isHighlighted = index === activeHighlightedIndex
               return (
                 <li
                   key={option.value}
@@ -229,7 +231,7 @@ export function Combobox({
             {showCreateEntry ? (
               <li
                 role="option"
-                aria-selected={highlightedIndex === filtered.length}
+                aria-selected={activeHighlightedIndex === filtered.length}
                 onMouseDown={(event) => {
                   event.preventDefault()
                   handleSelect(query.trim())
@@ -237,7 +239,7 @@ export function Combobox({
                 onMouseEnter={() => setHighlightedIndex(filtered.length)}
                 className={cn(
                   'flex cursor-pointer items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm font-medium',
-                  highlightedIndex === filtered.length ? 'bg-green-50 text-green-900' : 'text-green-800',
+                  activeHighlightedIndex === filtered.length ? 'bg-green-50 text-green-900' : 'text-green-800',
                 )}
               >
                 <Plus className="h-4 w-4" />

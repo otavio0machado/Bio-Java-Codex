@@ -1,5 +1,5 @@
 import { AlertTriangle, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReagentLot } from '../../../types'
 import { Button, Input, Modal } from '../../ui'
 
@@ -29,10 +29,6 @@ export function DeleteLotModal({
   onConfirm,
 }: DeleteLotModalProps) {
   const [confirmation, setConfirmation] = useState('')
-
-  useEffect(() => {
-    if (isOpen) setConfirmation('')
-  }, [isOpen])
 
   const expected = lot?.lotNumber?.trim() ?? ''
   const isMatch = confirmation.trim() === expected && expected.length > 0

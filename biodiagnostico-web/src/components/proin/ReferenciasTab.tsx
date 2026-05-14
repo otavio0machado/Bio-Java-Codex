@@ -8,6 +8,8 @@ import {
   useQcReferences,
   useUpdateQcReference,
 } from '../../hooks/useQcRecords'
+import { useAuth } from '../../hooks/useAuth'
+import { canWriteQc } from '../../lib/permissions'
 import { qcService } from '../../services/qcService'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
 import { Button, Card, Combobox, EmptyState, Input, Modal, Select, useToast } from '../ui'
@@ -35,6 +37,8 @@ const emptyReferenceForm: QcReferenceRequest = {
 
 export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const { toast } = useToast()
+  const { user } = useAuth()
+  const canManageReferences = canWriteQc(user)
   const { data: exams = [] } = useQcExams(area)
   const { data: references = [] } = useQcReferences(undefined, false)
   const createReference = useCreateQcReference()
@@ -85,12 +89,14 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   }, [area, references, validityFilter])
 
   const openCreate = () => {
+    if (!canManageReferences) return
     setEditing(null)
     setForm({ ...emptyReferenceForm, validFrom: todayStr() })
     setIsModalOpen(true)
   }
 
   const openEdit = (reference: QcReferenceValue) => {
+    if (!canManageReferences) return
     setEditing(reference)
     setForm({
       examId: reference.exam.id,
@@ -109,6 +115,10 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   }
 
   const handleSave = async () => {
+    if (!canManageReferences) {
+      toast.error('Você não tem permissão para alterar referências de CQ.')
+      return
+    }
     if (!form.examId || !form.name) {
       toast.warning('Preencha o nome do registro e selecione o exame.')
       return
@@ -136,6 +146,10 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   }
 
   const handleDelete = async (id: string) => {
+    if (!canManageReferences) {
+      toast.error('Você não tem permissão para excluir referências de CQ.')
+      return
+    }
     try {
       await deleteReference.mutateAsync(id)
       toast.success('Referência excluída.')
@@ -153,7 +167,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           icon={<Plus className="h-8 w-8" />}
           title="Nenhuma referência cadastrada"
           description="Cadastre valores alvo, desvio padrão e validade para automatizar o preenchimento do registro."
-          action={{ label: 'Nova Referência', onClick: openCreate }}
+          action={canManageReferences ? { label: 'Nova Referência', onClick: openCreate } : undefined}
         />
         <ReferenceModal
           area={area}
@@ -166,6 +180,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           onSave={handleSave}
           setForm={setForm}
           isSaving={createReference.isPending || updateReference.isPending}
+          canManageReferences={canManageReferences}
         />
       </>
     )
@@ -195,9 +210,11 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           <button type="button" className={filterButtonClass(validityFilter === 'validas')} onClick={() => setValidityFilter('validas')}>
             Válidas
           </button>
-          <Button onClick={openCreate} icon={<Plus className="h-4 w-4" />}>
-            Nova Referência
-          </Button>
+          {canManageReferences ? (
+            <Button onClick={openCreate} icon={<Plus className="h-4 w-4" />}>
+              Nova Referência
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -216,7 +233,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                 <th className="px-3 py-2.5">Alvo</th>
                 <th className="px-3 py-2.5">DP</th>
                 <th className="px-3 py-2.5">Validade</th>
-                <th className="px-3 py-2.5 text-center">Ações</th>
+                {canManageReferences ? <th className="px-3 py-2.5 text-center">Ações</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -231,26 +248,28 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                     {' → '}
                     {reference.validUntil ? formatDate(reference.validUntil) : 'sem fim'}
                   </td>
-                  <td className="px-3 py-2.5 text-center">
-                    <div className="flex justify-center gap-1">
-                      <button
-                        type="button"
-                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
-                        onClick={() => openEdit(reference)}
-                        title="Editar"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
-                        onClick={() => void handleDelete(reference.id)}
-                        title="Excluir"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
+                  {canManageReferences ? (
+                    <td className="px-3 py-2.5 text-center">
+                      <div className="flex justify-center gap-1">
+                        <button
+                          type="button"
+                          className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                          onClick={() => openEdit(reference)}
+                          title="Editar"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
+                          onClick={() => void handleDelete(reference.id)}
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
@@ -270,6 +289,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
         onSave={handleSave}
         setForm={setForm}
         isSaving={createReference.isPending || updateReference.isPending}
+        canManageReferences={canManageReferences}
       />
     </div>
   )
@@ -294,15 +314,20 @@ interface ReferenceModalProps {
   onSave: () => void
   setForm: Dispatch<SetStateAction<QcReferenceRequest>>
   isSaving: boolean
+  canManageReferences: boolean
 }
 
-function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpen, onClose, onSave, setForm, isSaving }: ReferenceModalProps) {
+function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpen, onClose, onSave, setForm, isSaving, canManageReferences }: ReferenceModalProps) {
   const { toast } = useToast()
   const createExam = useCreateQcExam()
   const [showNewExam, setShowNewExam] = useState(false)
   const [newExamName, setNewExamName] = useState('')
 
   const handleCreateExam = async () => {
+    if (!canManageReferences) {
+      toast.error('Você não tem permissão para criar exames de CQ.')
+      return
+    }
     if (!newExamName.trim()) {
       toast.warning('Informe o nome do exame.')
       return
@@ -328,7 +353,7 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button onClick={onSave} loading={isSaving}>
+          <Button onClick={onSave} loading={isSaving} disabled={!canManageReferences}>
             Salvar
           </Button>
         </div>
@@ -357,7 +382,7 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
               </option>
             ))}
           </Select>
-          {!showNewExam ? (
+          {!showNewExam && canManageReferences ? (
             <button
               type="button"
               onClick={() => setShowNewExam(true)}
@@ -365,7 +390,7 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
             >
               + Adicionar exame
             </button>
-          ) : (
+          ) : showNewExam ? (
             <div className="flex items-end gap-2 rounded-xl bg-neutral-50 p-3">
               <Input
                 label="Nome do exame"
@@ -380,7 +405,7 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
                 Cancelar
               </Button>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Preencher com última referência */}

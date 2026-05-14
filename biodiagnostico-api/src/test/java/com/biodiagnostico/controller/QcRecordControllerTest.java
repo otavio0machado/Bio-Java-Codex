@@ -30,7 +30,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 @WebMvcTest(QcRecordController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, QcRecordControllerTest.NoOpJwtFilterConfig.class})
@@ -66,7 +68,7 @@ class QcRecordControllerTest {
         qcService.createResponse = response();
 
         mockMvc.perform(post("/api/qc/records")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(qcWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(validRequest())))
             .andExpect(status().isCreated())
@@ -74,13 +76,44 @@ class QcRecordControllerTest {
     }
 
     @Test
-    @DisplayName("deve retornar 400 quando request é inválido")
-    void shouldReturn400WhenRequestIsInvalid() throws Exception {
+    @DisplayName("deve retornar 403 ao criar registro sem permissão QC_WRITE")
+    void shouldReturn403WhenCreatingRecordWithoutQcWritePermission() throws Exception {
         mockMvc.perform(post("/api/qc/records")
                 .with(user("ana").roles("FUNCIONARIO"))
                 .contentType("application/json")
+                .content(objectMapper.writeValueAsString(validRequest())))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("deve retornar 400 quando request é inválido")
+    void shouldReturn400WhenRequestIsInvalid() throws Exception {
+        mockMvc.perform(post("/api/qc/records")
+                .with(qcWriter())
+                .contentType("application/json")
                 .content("{}"))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("deve permitir importação batch-v2 com IMPORT")
+    void shouldAllowBatchV2WithImportPermission() throws Exception {
+        mockMvc.perform(post("/api/qc/records/batch-v2")
+                .with(importer())
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(List.of(validRequest()))))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.mode").value("PARTIAL"));
+    }
+
+    @Test
+    @DisplayName("deve bloquear importação batch-v2 sem IMPORT")
+    void shouldRejectBatchV2WithoutImportPermission() throws Exception {
+        mockMvc.perform(post("/api/qc/records/batch-v2")
+                .with(qcWriter())
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(List.of(validRequest()))))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -117,7 +150,7 @@ class QcRecordControllerTest {
             .build();
 
         mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(qcWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
             .andExpect(status().isCreated())
@@ -131,11 +164,25 @@ class QcRecordControllerTest {
         postCalibrationService.createException = new BusinessException("A pós-calibração só pode ser registrada quando existe pendência corretiva ativa no registro de CQ.");
 
         mockMvc.perform(post("/api/qc/records/" + UUID.randomUUID() + "/post-calibration")
-                .with(user("ana").roles("FUNCIONARIO"))
+                .with(qcWriter())
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(new PostCalibrationRequest(LocalDate.now(), 101D, "Ana", "Recalibração ok"))))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value("A pós-calibração só pode ser registrada quando existe pendência corretiva ativa no registro de CQ."));
+    }
+
+    private RequestPostProcessor qcWriter() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("QC_WRITE")
+        );
+    }
+
+    private RequestPostProcessor importer() {
+        return user("ana").authorities(
+            new SimpleGrantedAuthority("ROLE_FUNCIONARIO"),
+            new SimpleGrantedAuthority("IMPORT")
+        );
     }
 
     @TestConfiguration

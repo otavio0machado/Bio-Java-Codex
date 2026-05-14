@@ -23,6 +23,7 @@ import com.biodiagnostico.service.reports.v2.generator.chart.ChartRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.LabHeaderRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.PdfFooterRenderer;
 import com.biodiagnostico.service.reports.v2.generator.pdf.ReportV2PdfTheme;
+import com.biodiagnostico.service.reports.v2.util.WestgardSeverity;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
@@ -185,7 +186,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
             // severidade no stream porque o banco tem tanto "REJEICAO" (legado)
             // quanto "REJECTION" (padrao novo) e nao queremos acoplar isso a query.
             long rejeicoesGraves = violationRepository.findByAreaAndPeriod(null, rf.start, rf.end).stream()
-                .filter(v -> "REJEICAO".equalsIgnoreCase(v.getSeverity()) || "REJECTION".equalsIgnoreCase(v.getSeverity()))
+                .filter(v -> WestgardSeverity.isRejection(v.getSeverity()))
                 .count();
             long reagVencidos = reagCrit;           // reaproveita contagem feita acima
             long manutAtrasadas = manutPend;        // idem

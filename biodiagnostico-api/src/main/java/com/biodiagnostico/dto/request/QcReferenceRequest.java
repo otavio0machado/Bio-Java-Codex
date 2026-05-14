@@ -8,7 +8,7 @@ import java.util.UUID;
 public record QcReferenceRequest(
     @NotNull UUID examId,
     @NotBlank String name,
-    @NotBlank String level,
+    String level,
     String lotNumber,
     String manufacturer,
     @NotNull Double targetValue,
