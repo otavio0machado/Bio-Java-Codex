@@ -20,13 +20,17 @@ public class DatabaseIndexInitializer {
     @PostConstruct
     public void createPartialIndexes() {
         try {
+            jdbcTemplate.execute("DROP INDEX IF EXISTS idx_reagent_lot_manufacturer");
             jdbcTemplate.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_reagent_lot_manufacturer "
-                    + "ON reagent_lots (lot_number, COALESCE(manufacturer, ''))"
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_reagent_lot_natural_key "
+                    + "ON reagent_lots ("
+                    + "LOWER(TRIM(lot_number)), "
+                    + "LOWER(TRIM(COALESCE(manufacturer, ''))), "
+                    + "LOWER(TRIM(name)))"
             );
-            log.info("Partial index idx_reagent_lot_manufacturer verificado/criado com sucesso.");
+            log.info("Indice unico idx_reagent_lot_natural_key verificado/criado com sucesso.");
         } catch (Exception e) {
-            log.warn("Falha ao criar partial index idx_reagent_lot_manufacturer: {}", e.getMessage());
+            log.warn("Falha ao criar indice unico idx_reagent_lot_natural_key: {}", e.getMessage());
         }
     }
 }

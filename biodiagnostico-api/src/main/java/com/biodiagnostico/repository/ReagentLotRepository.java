@@ -39,17 +39,19 @@ public interface ReagentLotRepository extends JpaRepository<ReagentLot, UUID> {
     List<ReagentLot> findByLotNumberIgnoreCase(String lotNumber);
 
     /**
-     * Usado em updateLot para garantir que a mudanca de (lotNumber, manufacturer)
-     * nao colida com outro lote ja existente.
+     * Usado em create/update para garantir que a chave natural operacional
+     * (lotNumber, manufacturer, label) nao colida com outro lote ja existente.
      */
     @Query("""
         SELECT r FROM ReagentLot r
-        WHERE LOWER(r.lotNumber) = LOWER(:lotNumber)
-          AND LOWER(COALESCE(r.manufacturer, '')) = LOWER(COALESCE(:manufacturer, ''))
+        WHERE LOWER(TRIM(r.lotNumber)) = LOWER(TRIM(:lotNumber))
+          AND LOWER(TRIM(COALESCE(r.manufacturer, ''))) = LOWER(TRIM(COALESCE(:manufacturer, '')))
+          AND LOWER(TRIM(r.name)) = LOWER(TRIM(:label))
         """)
-    List<ReagentLot> findByLotNumberAndManufacturer(
+    List<ReagentLot> findByNaturalKey(
         @Param("lotNumber") String lotNumber,
-        @Param("manufacturer") String manufacturer);
+        @Param("manufacturer") String manufacturer,
+        @Param("label") String label);
 
     /**
      * Retorna lotes cuja validade ja passou e cujo status ainda nao foi reclassificado.

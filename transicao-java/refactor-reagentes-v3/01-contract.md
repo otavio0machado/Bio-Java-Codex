@@ -135,7 +135,7 @@ CONSUMO/ENTRADA/FECHAMENTO **nao limpam** a flag (porque nao corrigem a ambiguid
 | Indice | Estado | Notas |
 |---|---|---|
 | `reagent_lots_pkey` (id) | mantem | — |
-| `ux_reagent_lots_lotnumber_manufacturer` em `(LOWER(lot_number), LOWER(manufacturer))` | mantem | Inalterado. |
+| `idx_reagent_lot_natural_key` em `(LOWER(TRIM(lot_number)), LOWER(TRIM(COALESCE(manufacturer,''))), LOWER(TRIM(name)))` | **V16 / hotfix 2026-05-15** | Substitui a unicidade antiga por lote+fabricante. `name` e a etiqueta exposta como `label`; lotes com mesmo numero podem coexistir quando fabricante ou etiqueta diferem. |
 | `idx_reagent_lots_status` em `(status)` | mantem | Continua util com novo dominio. |
 | `idx_reagent_lots_expiry_date` em `(expiry_date)` | mantem | Inalterado. |
 | `idx_reagent_lots_name` em `(name)` | mantem | Inalterado. |
@@ -448,7 +448,7 @@ ReagentLotRequest {
 **Validacoes adicionais cross-field (service):**
 - `category` em `CategoryRegistry.ALL`.
 - `storageTemp` em `StorageTempRegistry.ALL`.
-- `(lotNumber, manufacturer)` unico — 409.
+- `(lotNumber, manufacturer, label)` unico — 400/409 conforme handler; duplicidade so quando numero do lote, fabricante e etiqueta coincidirem.
 - `receivedDate <= openedDate <= expiryDate` quando ambas presentes.
 - `expiryDate < hoje` → service forca `status='vencido'` (preserva semantica v2).
 - **NOVO v3:** `request.status == 'inativo'` → 400 com mensagem `"Status 'inativo' nao pode ser definido em CREATE/UPDATE — use POST /archive."`.

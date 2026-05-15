@@ -6,6 +6,9 @@ Data: 2026-04-26
 
 Status: aceito para a fase atual
 
+Atualizacao: 2026-05-15 — incidente de producao corrigiu a regra de
+unicidade de cadastro de lote.
+
 Fonte de verdade usada:
 
 1. Implementacao ativa em Java/React:
@@ -31,6 +34,7 @@ A aba Reagentes controla lote, validade, estoque, consumo, movimentacao e rastre
 - Rastreabilidade incompleta deve aparecer como fila operacional de saneamento, nao como rejeicao silenciosa.
 - Lote `inativo` nao aceita `ENTRADA`; essa politica deve sair do backend como `canReceiveEntry=false`, `allowedMovementTypes` e `movementWarning`.
 - A regra efetiva segue em `ReagentService`, incluindo bloqueio server-side, auditoria e derivacao de status.
+- A unicidade operacional de cadastro de lote e composta por `lotNumber + manufacturer + label` (`label` = etiqueta; coluna historica `reagent_lots.name`). Mesmo numero de lote pode coexistir quando fabricante ou etiqueta forem diferentes.
 - `DELETE /api/reagents/{id}` nao deve apagar historico operacional: lotes sem movimentacao e sem uso em CQ podem ser removidos fisicamente; lotes com movimentacao ou uso em CQ devem ser preservados como `inativo` quando estoque estiver zerado.
 - Lote com historico operacional e estoque positivo nao pode ser arquivado/removido; o estoque deve ser zerado por movimentacao rastreavel antes.
 
@@ -44,8 +48,10 @@ A aba Reagentes controla lote, validade, estoque, consumo, movimentacao e rastre
 - `SAIDA` acima do estoque deve ser bloqueada.
 - Arquivamento de lote com historico preserva o registro como `inativo`.
 - Arquivamento/remocao com estoque positivo e historico operacional deve ser bloqueado.
+- Duplicidade cadastral so existe quando numero do lote, fabricante e etiqueta forem iguais apos normalizacao defensiva de caixa/espacos.
 
 ### Risco residual
 
 - A obrigatoriedade formal de `location`, `supplier`, `receivedDate` e `openedDate` ainda depende de decisao operacional do laboratorio.
 - A politica de exclusao de movimentacoes individuais permanece a existente: reverte estoque quando possivel e remove a movimentacao.
+- Historico CQ ainda referencia `QcRecord.lotNumber` como texto livre, sem `manufacturer` ou `label`; por isso a flag `usedInQcRecently` continua conservadora em colisoes de numero de lote.

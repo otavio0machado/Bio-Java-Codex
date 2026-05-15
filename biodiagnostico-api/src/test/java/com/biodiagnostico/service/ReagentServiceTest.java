@@ -203,14 +203,49 @@ class ReagentServiceTest {
     }
 
     @Test
-    @DisplayName("createLot com (lotNumber, manufacturer) ja existente deve falhar")
-    void createLot_comDuplicata_deveLancarException() {
+    @DisplayName("createLot com mesmo lotNumber + manufacturer + label ja existente deve falhar")
+    void createLot_comMesmaChaveNatural_deveLancarException() {
+        ReagentLot existing = lot(8, 0);
+        when(reagentLotRepository.findByNaturalKey("L123", "Bio", "ALT"))
+            .thenReturn(List.of(existing));
+
+        assertThatThrownBy(() -> reagentService.createLot(defaultRequest("em_estoque")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining(ReagentService.DUPLICATE_LOT_MESSAGE);
+        verify(reagentLotRepository, never()).save(any(ReagentLot.class));
+    }
+
+    @Test
+    @DisplayName("createLot permite mesmo lotNumber + manufacturer quando label e diferente")
+    void createLot_mesmoLoteFabricanteComEtiquetaDiferente_devePermitir() {
+        when(reagentLotRepository.findByNaturalKey("L123", "Bio", "AST"))
+            .thenReturn(List.of());
+        when(reagentLotRepository.save(any(ReagentLot.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReagentLotRequest req = fullRequest(
+            "AST", "L123", "Bio", "Bioquímica",
+            8, 0, "em_estoque",
+            LocalDate.now().plusDays(60),
+            "Geladeira 2", "2-8°C",
+            null, null, null
+        );
+
+        ReagentLot lot = reagentService.createLot(req);
+
+        assertThat(lot.getName()).isEqualTo("AST");
+        assertThat(lot.getLotNumber()).isEqualTo("L123");
+        assertThat(lot.getManufacturer()).isEqualTo("Bio");
+    }
+
+    @Test
+    @DisplayName("createLot traduz violacao de indice natural para BusinessException")
+    void createLot_indiceNaturalDuplicado_deveLancarBusinessException() {
         when(reagentLotRepository.save(any(ReagentLot.class)))
             .thenThrow(new DataIntegrityViolationException("unique constraint"));
 
         assertThatThrownBy(() -> reagentService.createLot(defaultRequest("em_estoque")))
             .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Já existe um lote com este número e fabricante");
+            .hasMessageContaining(ReagentService.DUPLICATE_LOT_MESSAGE);
     }
 
     // ===== updateLot =====
@@ -236,6 +271,21 @@ class ReagentServiceTest {
         assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), defaultRequest("em_estoque")))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Lote arquivado nao pode ser editado diretamente");
+    }
+
+    @Test
+    @DisplayName("updateLot bloqueia colisao com mesmo lotNumber + manufacturer + label em outro id")
+    void updateLot_comMesmaChaveNaturalEmOutroId_deveLancarException() {
+        ReagentLot lot = lot(5, 0);
+        ReagentLot other = lot(2, 0);
+        when(reagentLotRepository.findById(lot.getId())).thenReturn(Optional.of(lot));
+        when(reagentLotRepository.findByNaturalKey("L123", "Bio", "ALT"))
+            .thenReturn(List.of(other));
+
+        assertThatThrownBy(() -> reagentService.updateLot(lot.getId(), defaultRequest("em_estoque")))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining(ReagentService.DUPLICATE_LOT_MESSAGE);
+        verify(reagentLotRepository, never()).save(any(ReagentLot.class));
     }
 
     @Test

@@ -42,6 +42,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ReagentService {
 
+    static final String DUPLICATE_LOT_MESSAGE =
+        "Já existe um lote com este número, fabricante e etiqueta";
+
     /** Janela para considerar um lote "ativo em CQ" (rastreabilidade Fase 3). */
     private static final int QC_ACTIVE_WINDOW_DAYS = 30;
 
@@ -197,19 +200,21 @@ public class ReagentService {
         validateLotDates(request);
         validateCategoryAndTemp(request);
         validateStatusForCreateOrUpdate(request.status());
+        String label = trimToNull(request.label());
+        String lotNumber = trimToNull(request.lotNumber());
+        String manufacturer = trimToNull(request.manufacturer());
         if (!reagentLotRepository
-                .findByLotNumberAndManufacturer(request.lotNumber(), request.manufacturer())
+                .findByNaturalKey(lotNumber, manufacturer, label)
                 .isEmpty()) {
-            throw new BusinessException("Já existe um lote com este número e fabricante");
+            throw new BusinessException(DUPLICATE_LOT_MESSAGE);
         }
         String status = resolveStatus(request.status(), ReagentStatus.EM_ESTOQUE);
-        String label = request.label() == null ? null : request.label().trim();
         Integer unitsInStock = request.unitsInStock() == null ? 0 : request.unitsInStock();
         Integer unitsInUse = request.unitsInUse() == null ? 0 : request.unitsInUse();
         ReagentLot lot = ReagentLot.builder()
             .name(label)
-            .lotNumber(request.lotNumber())
-            .manufacturer(request.manufacturer())
+            .lotNumber(lotNumber)
+            .manufacturer(manufacturer)
             .category(request.category())
             .expiryDate(request.expiryDate())
             .unitsInStock(unitsInStock)
@@ -234,7 +239,7 @@ public class ReagentService {
         try {
             return reagentLotRepository.save(lot);
         } catch (DataIntegrityViolationException e) {
-            throw new BusinessException("Já existe um lote com este número e fabricante");
+            throw new BusinessException(DUPLICATE_LOT_MESSAGE);
         }
     }
 
@@ -250,18 +255,20 @@ public class ReagentService {
             throw new BusinessException(
                 "Lote arquivado nao pode ser editado diretamente — reative com POST /unarchive");
         }
-        // Reverifica unicidade (lotNumber, manufacturer).
-        List<ReagentLot> conflicts = reagentLotRepository.findByLotNumberAndManufacturer(
-            request.lotNumber(), request.manufacturer());
+        // Reverifica unicidade da chave natural (lotNumber, manufacturer, label).
+        String label = trimToNull(request.label());
+        String lotNumber = trimToNull(request.lotNumber());
+        String manufacturer = trimToNull(request.manufacturer());
+        List<ReagentLot> conflicts = reagentLotRepository.findByNaturalKey(
+            lotNumber, manufacturer, label);
         boolean conflict = conflicts.stream().anyMatch(other -> !other.getId().equals(id));
         if (conflict) {
-            throw new BusinessException("Já existe um lote com este número e fabricante");
+            throw new BusinessException(DUPLICATE_LOT_MESSAGE);
         }
 
-        String label = request.label() == null ? null : request.label().trim();
         lot.setName(label);
-        lot.setLotNumber(request.lotNumber());
-        lot.setManufacturer(request.manufacturer());
+        lot.setLotNumber(lotNumber);
+        lot.setManufacturer(manufacturer);
         lot.setCategory(request.category());
         lot.setExpiryDate(request.expiryDate());
         lot.setUnitsInStock(request.unitsInStock() == null ? 0 : request.unitsInStock());
@@ -287,7 +294,7 @@ public class ReagentService {
         try {
             return reagentLotRepository.save(lot);
         } catch (DataIntegrityViolationException e) {
-            throw new BusinessException("Já existe um lote com este número e fabricante");
+            throw new BusinessException(DUPLICATE_LOT_MESSAGE);
         }
     }
 
@@ -1051,5 +1058,11 @@ public class ReagentService {
                 "Status de lote inválido. Valores aceitos: " + ReagentStatus.humanList());
         }
         return normalized;
+    }
+
+    private String trimToNull(String raw) {
+        if (raw == null) return null;
+        String trimmed = raw.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }
