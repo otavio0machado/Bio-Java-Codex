@@ -48,9 +48,9 @@ import {
 } from './reagentes/utils'
 import { todayLocal } from '../../utils/date'
 
-const DUPLICATE_REAGENT_LOT_MESSAGE = 'Já existe um lote com este número e fabricante'
+const DUPLICATE_REAGENT_LOT_MESSAGE = 'Já existe um lote com este número, fabricante e etiqueta'
 const DUPLICATE_REAGENT_LOT_GUIDANCE =
-  'Este lote já existe para este fabricante. Para acrescentar unidades, localize o lote existente e clique em Adicionar dentro do próprio lote, em vez de cadastrar um novo lote.'
+  'Este lote já existe com a mesma etiqueta e fabricante. Para acrescentar unidades, localize o lote existente e clique em Adicionar dentro do próprio lote, em vez de cadastrar um novo lote.'
 
 function extractReagentErrorMessage(error: unknown) {
   if (typeof error === 'object' && error !== null && 'response' in error) {

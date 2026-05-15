@@ -457,7 +457,7 @@ Cobrir os 24 testes regulatorios da secao 3 (vs 10 do v2). Especialmente:
 
 | Conceito CLAUDE.md | Status apos refator v3 |
 |---|---|
-| Lote (`lot_number` imutavel) | Preservado integralmente. UNIQUE `(lotNumber, manufacturer)` mantido. |
+| Lote (`lot_number` imutavel) | Preservado integralmente. Hotfix 2026-05-15: UNIQUE operacional passa a ser `(lotNumber, manufacturer, label)` para permitir mesmo numero de lote em etiqueta/fabricante diferente. |
 | Status de CQ | Preservado. `usedInQcRecently` via `lot_number` mantido. **Novo bloqueio v3:** DELETE rejeitado se usedInQc=true (forca arquivamento). |
 | Registro de medicao | `qc_records` intocado. Cross-reference por `lot_number` operacional. |
 | Historico (audit_log) | Preservado + 3 novas actions (`REAGENT_LOT_DELETED`, `REAGENT_LOT_UNARCHIVED`, `REAGENT_STATUS_TRANSITION_V3`). **BLOQUEIO:** achado G nao-resolvido sobre `_BACKFILLED` vs `_DERIVED`. |

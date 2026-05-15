@@ -257,12 +257,12 @@ describe('ReagentesTab v3', () => {
     expect(sentRequest.unitsInUse).toBe(1)
   })
 
-  it('orienta usar Adicionar no lote existente quando cadastro novo duplica lote e fabricante', async () => {
+  it('orienta usar Adicionar no lote existente quando cadastro novo duplica lote, fabricante e etiqueta', async () => {
     mockUseReagentLots.mockReturnValue({ data: [] })
     createLotMutation.mutateAsync.mockRejectedValue(
       Object.assign(new Error('Request failed with status code 400'), {
         response: {
-          data: { message: 'Já existe um lote com este número e fabricante' },
+          data: { message: 'Já existe um lote com este número, fabricante e etiqueta' },
         },
       }),
     )
@@ -277,7 +277,7 @@ describe('ReagentesTab v3', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cadastrar' }))
 
     expect(
-      await screen.findByText(/Este lote já existe para este fabricante/i),
+      await screen.findByText(/Este lote já existe com a mesma etiqueta e fabricante/i),
     ).toBeInTheDocument()
     expect(
       screen.getByText(/clique em Adicionar dentro do próprio lote/i),

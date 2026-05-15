@@ -903,7 +903,7 @@ Implementação:
 - Validação de estoque negativo em SAIDA; validação de AJUSTE >= 0
 - Validação de exclusão de movimentação (impede estoque negativo por reversão)
 - Auto-vencimento lazy on-read no service
-- UniqueConstraint composta (lotNumber + manufacturer)
+- UniqueConstraint composta originalmente por (lotNumber + manufacturer); corrigida em 2026-05-15 para (lotNumber + manufacturer + label/etiqueta) por incidente real de produção.
 - Campo `nearExpiry` no ReagentLotResponse
 - Filtragem via JPQL (eliminado filtro em memória)
 - Novo endpoint GET /api/reagents/by-lot-number (lookup informativo)
@@ -1044,7 +1044,7 @@ P2 — curto prazo (RESOLVIDAS):
 - ✅ HematologyBioRecordResponse DTO criado; controller atualizado
 - ✅ Dashboard multi-área: endpoint `/dashboard/kpis` aceita parâmetro `area` opcional
 - ⏳ Levey-Jennings para hematologia e áreas: documentado como feature futura (requer design próprio)
-- ✅ Partial index `idx_reagent_lot_manufacturer` criado via COALESCE no startup
+- ✅ Indice unico `idx_reagent_lot_manufacturer` criado via COALESCE no startup; superseded em 2026-05-15 por `idx_reagent_lot_natural_key` com `(lot_number, manufacturer, name/label)`
 - ✅ ReagentExpiryScheduler: job @Scheduled diário às 1h marca lotes vencidos
 - ⏳ Suíte de testes frontend (vitest): pendente — requer configuração de infraestrutura
 - ⏳ Migrations versionadas (Flyway/Liquibase): pendente — requer decisão de governança de deploy
@@ -1077,7 +1077,7 @@ A migração dos módulos adjacentes e de CQ está completa com:
 - Dashboard multi-área funcional
 - PdfReportService com queries parametrizadas
 - Auto-vencimento de lotes via scheduler + fallback lazy
-- Partial index para unicidade de reagentes
+- Indice unico para unicidade de reagentes pela chave natural `lotNumber + manufacturer + label`
 - Batch import com feedback completo de erros
 - Drag-and-drop, loading states e validações de UX implementados
 
@@ -1373,7 +1373,7 @@ Entregas principais:
 - Combobox reutilizavel + uso em Referencias e Manutencao; hiperlink de historico do exame em Registro (Sprint A/B).
 - Manutencao V2: KPIs, filtros, Combobox equipamento/tecnico, undo delete, historico por equipamento (Sprint B).
 - Reagentes F1 (UX): bloco "Acao hoje", filtros profissionais, ordenacao por urgencia, marcacao visual de rastreabilidade (Sprint C).
-- Reagentes F2 (Contrato): enums canonicos `ReagentStatus`/`MovementType`/`MovementReason`, `manufacturer`+`expiryDate`+`responsible` obrigatorios, `reason` obrigatorio em AJUSTE e SAIDA que zera estoque, `previousStock` gravado em TODOS os movimentos, `updateLot` reverifica unicidade antes de salvar (Sprint C). Migrations V4 + Flyway.
+- Reagentes F2 (Contrato): enums canonicos `ReagentStatus`/`MovementType`/`MovementReason`, `manufacturer`+`expiryDate`+`responsible` obrigatorios, `reason` obrigatorio em AJUSTE e SAIDA que zera estoque, `previousStock` gravado em TODOS os movimentos, `updateLot` reverifica unicidade antes de salvar. Unicidade atual de reagente: `lotNumber + manufacturer + label/etiqueta` (hotfix produção 2026-05-15). Migrations V4 + Flyway.
 - Reagentes F3 (Rastreabilidade forte): `location`, `supplier`, `receivedDate`, `openedDate` + flag derivada `usedInQcRecently` cruzando `qc_records` por janela de 30 dias (Sprint C). Migration V5.
 - Relatorios V2: entity `ReportRun`, endpoint `/api/reports/history`, feedback detalhado de geracao (tamanho/duracao), tabela de historico no frontend (Sprint D). Migration V6.
 - Importar V2: endpoint `/api/qc-records/batch-v2?mode=partial|atomic`, `BatchImportResult` linha-a-linha com `TransactionTemplate REQUIRES_NEW` por linha, entity `ImportRun` com estado `SUCCESS/PARTIAL/FAILURE`, template XLSX canonico no frontend, historico tabular (Sprint D). Migration V6.

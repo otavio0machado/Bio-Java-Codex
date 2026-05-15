@@ -209,7 +209,7 @@ Conflitos abertos sao listados em "Pontos de atrito".
 2. **`inativo` e estado terminal manual** — scheduler NAO toca, ENTRADA bloqueada, AJUSTE permitido com reason. Decisao 1.
 3. **Cadastrar lote ja `inativo` proibido** — `status='inativo'` no CREATE retorna 400. Decisao 2.
 4. **Auditoria de transicao continua imutavel** — qualquer mutacao de status passa por `recordStatusTransition` (`ReagentService.java:721-734`). Detalhes mantem schema `{from, to, trigger, expiryDate, currentStock}` — vai precisar revisitar `currentStock` (passa a ser `unitsInStock`+`unitsInUse`).
-5. **Cardinalidade UNIQUE** `(lotNumber, manufacturer)` preservada — `findByLotNumberAndManufacturer` (`ReagentLotRepository.java:45-52`).
+5. **Cardinalidade UNIQUE** atualizada por hotfix 2026-05-15 para `(lotNumber, manufacturer, label)` — `label` e a etiqueta exposta no contrato HTTP/UI e armazenada como `reagent_lots.name`.
 6. **Backfill de `openedDate`** — quando ABERTURA gera primeira unidade aberta, set `openedDate=today` se null (mantem semantica audit ressalva 1.7).
 7. **`usedInQcRecently`** continua via `lot_number` (`ReagentService.java:160-174`); `qc_records.lot_number` nao muda.
 8. **CONSUMO que zera** — apenas sugere arquivar via toast no client. Backend NAO arquiva sozinho (decisao 6 — terminal e manual).
@@ -411,7 +411,7 @@ Marcadores: (M) modificar, (D) deletar, (N) novo.
 
 3. **`audit_log` historico** — registros com `details->>'to'='fora_de_estoque'` ou literal `'inativo'` (pre-v2) preservados. Auditor externo precisa reconhecer ambos os termos.
 
-4. **Cardinalidade `(lotNumber, manufacturer)` UNIQUE** — preservada. Hard delete + recadastro do mesmo `(lotNumber, manufacturer)` permite reaproveitar par.
+4. **Cardinalidade `(lotNumber, manufacturer, label)` UNIQUE** — hotfix 2026-05-15. Hard delete + recadastro do mesmo trio permite reaproveitar a chave natural; mesmo numero de lote pode coexistir quando fabricante ou etiqueta diferem.
 
 5. **`usedInQcRecently` continua via `lot_number`** — sem mudanca em `qc_records`.
 
