@@ -144,7 +144,7 @@ class ReportControllerTest {
         private byte[] reagentsPdf = new byte[0];
 
         StubPdfReportService() {
-            super(null, null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         @Override

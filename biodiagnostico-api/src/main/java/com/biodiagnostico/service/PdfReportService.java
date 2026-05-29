@@ -4,6 +4,8 @@ import com.biodiagnostico.dto.response.GeneratedReport;
 import com.biodiagnostico.entity.AreaQcMeasurement;
 import com.biodiagnostico.entity.HematologyBioRecord;
 import com.biodiagnostico.entity.HematologyQcMeasurement;
+import com.biodiagnostico.entity.ImmunologyQcRun;
+import com.biodiagnostico.entity.ImmunologyQcRunResult;
 import com.biodiagnostico.entity.LabSettings;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcRecord;
@@ -12,6 +14,7 @@ import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
 import com.biodiagnostico.repository.HematologyBioRecordRepository;
 import com.biodiagnostico.repository.HematologyQcMeasurementRepository;
+import com.biodiagnostico.repository.ImmunologyQcRunRepository;
 import com.biodiagnostico.repository.LabSettingsRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
@@ -70,6 +73,7 @@ public class PdfReportService {
     private final AreaQcMeasurementRepository areaQcMeasurementRepository;
     private final HematologyQcMeasurementRepository hematologyQcMeasurementRepository;
     private final HematologyBioRecordRepository hematologyBioRecordRepository;
+    private final ImmunologyQcRunRepository immunologyQcRunRepository;
     private final LabSettingsRepository labSettingsRepository;
     private final ReportNumberingService reportNumberingService;
 
@@ -80,6 +84,7 @@ public class PdfReportService {
         AreaQcMeasurementRepository areaQcMeasurementRepository,
         HematologyQcMeasurementRepository hematologyQcMeasurementRepository,
         HematologyBioRecordRepository hematologyBioRecordRepository,
+        ImmunologyQcRunRepository immunologyQcRunRepository,
         LabSettingsRepository labSettingsRepository,
         ReportNumberingService reportNumberingService
     ) {
@@ -89,6 +94,7 @@ public class PdfReportService {
         this.areaQcMeasurementRepository = areaQcMeasurementRepository;
         this.hematologyQcMeasurementRepository = hematologyQcMeasurementRepository;
         this.hematologyBioRecordRepository = hematologyBioRecordRepository;
+        this.immunologyQcRunRepository = immunologyQcRunRepository;
         this.labSettingsRepository = labSettingsRepository;
         this.reportNumberingService = reportNumberingService;
     }
@@ -104,7 +110,8 @@ public class PdfReportService {
         PeriodRange range = resolvePeriod(periodType, month, year);
         GeneratedReport report = switch (normalizedArea) {
             case "hematologia" -> buildHematologyReport(range);
-            case "imunologia", "parasitologia", "microbiologia", "uroanalise" -> buildGenericAreaReport(normalizedArea, range);
+            case "imunologia" -> buildImmunologyReport(range);
+            case "parasitologia", "microbiologia", "uroanalise" -> buildGenericAreaReport(normalizedArea, range);
             default -> buildBioquimicaReport(range);
         };
         reportNumberingService.registerGeneration(
@@ -244,6 +251,46 @@ public class PdfReportService {
                 }
                 document.add(table);
                 document.add(new Paragraph("Total de medições: " + measurements.size(), BODY_FONT));
+            }
+        );
+    }
+
+    private GeneratedReport buildImmunologyReport(PeriodRange range) {
+        List<ImmunologyQcRun> runs = immunologyQcRunRepository
+            .findByDataMedicaoBetweenOrderByDataMedicaoDescCreatedAtDesc(range.start(), range.end());
+
+        return buildReport(
+            "Relatório de Imunologia",
+            "CQ qualitativo · Período: " + range.label(),
+            document -> {
+                if (runs.isEmpty()) {
+                    document.add(new Paragraph("Nenhuma análise de imunologia encontrada no período selecionado.", BODY_FONT));
+                    return;
+                }
+
+                PdfPTable table = createTable(new float[] {1.8F, 1.8F, 2.0F, 2.0F, 1.8F, 2.3F, 1.9F, 1.9F, 1.7F});
+                addHeaderRow(table, "Data", "Analito", "Marca", "Lote", "Validade", "Controle", "Esperado", "Observado", "Status");
+                boolean alternate = false;
+                for (ImmunologyQcRun run : runs) {
+                    for (ImmunologyQcRunResult result : run.getResults()) {
+                        addBodyRow(
+                            table,
+                            alternate,
+                            formatDate(run.getDataMedicao()),
+                            safe(run.getAnalitoSnapshot()),
+                            safe(run.getManufacturerSnapshot()),
+                            safe(run.getLotNumberSnapshot()),
+                            formatDate(run.getValidUntilSnapshot()),
+                            safe(result.getControlNameSnapshot()),
+                            qualitativeLabel(result.getExpectedResultSnapshot()),
+                            qualitativeLabel(result.getObservedResult()),
+                            safe(result.getStatus())
+                        );
+                        alternate = !alternate;
+                    }
+                }
+                document.add(table);
+                document.add(new Paragraph("Total de análises: " + runs.size(), BODY_FONT));
             }
         );
     }
@@ -607,6 +654,14 @@ public class PdfReportService {
             return "—";
         }
         return value.trim();
+    }
+
+    private String qualitativeLabel(String value) {
+        return switch (safe(value)) {
+            case "REAGENTE" -> "Reagente";
+            case "NAO_REAGENTE" -> "Não reagente";
+            default -> safe(value);
+        };
     }
 
     private String capitalize(String value) {
