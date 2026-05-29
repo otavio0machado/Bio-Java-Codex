@@ -8,12 +8,17 @@ import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.entity.HematologyBioRecord;
 import com.biodiagnostico.entity.HematologyQcMeasurement;
+import com.biodiagnostico.entity.ImmunologyControlItem;
+import com.biodiagnostico.entity.ImmunologyControlSet;
+import com.biodiagnostico.entity.ImmunologyQcRun;
+import com.biodiagnostico.entity.ImmunologyQcRunResult;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
 import com.biodiagnostico.repository.HematologyBioRecordRepository;
 import com.biodiagnostico.repository.HematologyQcMeasurementRepository;
+import com.biodiagnostico.repository.ImmunologyQcRunRepository;
 import com.biodiagnostico.repository.LabSettingsRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
@@ -24,7 +29,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -50,6 +54,9 @@ class PdfReportServiceTest {
 
     @Mock
     private HematologyBioRecordRepository hematologyBioRecordRepository;
+
+    @Mock
+    private ImmunologyQcRunRepository immunologyQcRunRepository;
 
     @Mock
     private LabSettingsRepository labSettingsRepository;
@@ -78,6 +85,7 @@ class PdfReportServiceTest {
             areaQcMeasurementRepository,
             hematologyQcMeasurementRepository,
             hematologyBioRecordRepository,
+            immunologyQcRunRepository,
             labSettingsRepository,
             reportNumberingService
         );
@@ -153,6 +161,56 @@ class PdfReportServiceTest {
         assertThat(new String(pdf, 0, 5)).isEqualTo("%PDF-");
         verify(hematologyQcMeasurementRepository).findByDataMedicaoBetweenOrderByDataMedicaoDesc(any(LocalDate.class), any(LocalDate.class));
         verify(hematologyBioRecordRepository).findByDataBioBetweenOrderByDataBioDesc(any(LocalDate.class), any(LocalDate.class));
+    }
+
+    @Test
+    @DisplayName("deve gerar PDF de imunologia qualitativa com esperado e observado")
+    void generateQcPdf_imunologia_retornaPdfValido() {
+        ImmunologyControlSet controlSet = ImmunologyControlSet.builder()
+            .id(UUID.randomUUID())
+            .analito("HIV")
+            .manufacturer("Wama")
+            .lotNumber("1022")
+            .validUntil(LocalDate.now().plusMonths(6))
+            .isActive(Boolean.TRUE)
+            .build();
+        ImmunologyControlItem item = ImmunologyControlItem.builder()
+            .id(UUID.randomUUID())
+            .controlSet(controlSet)
+            .name("Controle 1")
+            .expectedResult("REAGENTE")
+            .displayOrder(1)
+            .build();
+        ImmunologyQcRun run = ImmunologyQcRun.builder()
+            .id(UUID.randomUUID())
+            .controlSet(controlSet)
+            .dataMedicao(LocalDate.now())
+            .analitoSnapshot("HIV")
+            .manufacturerSnapshot("Wama")
+            .lotNumberSnapshot("1022")
+            .validUntilSnapshot(LocalDate.now().plusMonths(6))
+            .status("APROVADO")
+            .build();
+        run.getResults().add(ImmunologyQcRunResult.builder()
+            .id(UUID.randomUUID())
+            .run(run)
+            .controlItem(item)
+            .controlNameSnapshot("Controle 1")
+            .expectedResultSnapshot("REAGENTE")
+            .observedResult("REAGENTE")
+            .status("APROVADO")
+            .displayOrder(1)
+            .build());
+
+        when(immunologyQcRunRepository.findByDataMedicaoBetweenOrderByDataMedicaoDescCreatedAtDesc(any(LocalDate.class), any(LocalDate.class)))
+            .thenReturn(List.of(run));
+
+        byte[] pdf = pdfReportService.generateQcPdf("imunologia", "current-month", null, null);
+
+        assertThat(pdf).isNotNull().isNotEmpty();
+        assertThat(new String(pdf, 0, 5)).isEqualTo("%PDF-");
+        verify(immunologyQcRunRepository)
+            .findByDataMedicaoBetweenOrderByDataMedicaoDescCreatedAtDesc(any(LocalDate.class), any(LocalDate.class));
     }
 
     @Test

@@ -610,3 +610,76 @@ export interface AreaQcMeasurementRequest {
   nivelControle?: string
   observacao?: string
 }
+
+export type ImmunologyResult = 'REAGENTE' | 'NAO_REAGENTE'
+
+export interface ImmunologyControlItem {
+  id: string
+  name: string
+  expectedResult: ImmunologyResult | string
+  displayOrder: number
+}
+
+export interface ImmunologyControlSet {
+  id: string
+  analito: string
+  manufacturer: string
+  lotNumber: string
+  validUntil: string
+  isActive: boolean
+  expired: boolean
+  createdAt: string
+  updatedAt: string
+  controls: ImmunologyControlItem[]
+}
+
+export interface ImmunologyControlItemRequest {
+  name: string
+  expectedResult: ImmunologyResult | string
+}
+
+export interface ImmunologyControlSetRequest {
+  analito: string
+  manufacturer: string
+  lotNumber: string
+  validUntil: string
+  controls: ImmunologyControlItemRequest[]
+}
+
+export interface ImmunologyRunResultRequest {
+  controlItemId: string
+  observedResult: ImmunologyResult | string
+}
+
+export interface ImmunologyRunRequest {
+  dataMedicao: string
+  controlSetId: string
+  results: ImmunologyRunResultRequest[]
+  analyst?: string
+  notes?: string
+}
+
+export interface ImmunologyRunResult {
+  id: string
+  controlItemId?: string | null
+  controlName: string
+  expectedResult: ImmunologyResult | string
+  observedResult: ImmunologyResult | string
+  status: 'APROVADO' | 'REPROVADO'
+  displayOrder: number
+}
+
+export interface ImmunologyRun {
+  id: string
+  controlSetId: string
+  dataMedicao: string
+  analito: string
+  manufacturer: string
+  lotNumber: string
+  validUntil: string
+  status: 'APROVADO' | 'REPROVADO'
+  analyst?: string | null
+  notes?: string | null
+  createdAt: string
+  results: ImmunologyRunResult[]
+}
