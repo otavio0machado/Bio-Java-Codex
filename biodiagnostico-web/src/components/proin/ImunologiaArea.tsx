@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { AlertTriangle, CheckCircle2, Download, Edit3, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react'
-import type { Dispatch, SetStateAction } from 'react'
-import { useMemo, useState } from 'react'
+import type { Dispatch, Ref, SetStateAction } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   useCreateImmunologyControlSet,
   useCreateImmunologyRun,
@@ -74,6 +74,7 @@ export function ImunologiaArea() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [deactivationTarget, setDeactivationTarget] = useState<ImmunologyControlSet | null>(null)
   const [lastSavedRun, setLastSavedRun] = useState<ImmunologyRun | null>(null)
+  const firstResultSelectRef = useRef<HTMLSelectElement>(null)
 
   const runFilters = useMemo(
     () => ({
@@ -195,6 +196,7 @@ export function ImunologiaArea() {
       controle2: '',
     })
     setPickerOpen(false)
+    window.setTimeout(() => firstResultSelectRef.current?.focus(), 0)
   }
 
   const editControlSet = (controlSet: ImmunologyControlSet) => {
@@ -292,6 +294,8 @@ export function ImunologiaArea() {
             label="Analito *"
             value={analysisForm.analito}
             onChange={(event) => setAnalysisForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
+            readOnly={Boolean(selectedControlSet)}
+            className={selectedControlSet ? 'text-neutral-500' : undefined}
           />
           <Input
             label="Data *"
@@ -303,20 +307,29 @@ export function ImunologiaArea() {
             label="Marca *"
             value={analysisForm.manufacturer}
             onChange={(event) => setAnalysisForm((current) => ({ ...current, manufacturer: event.target.value }))}
+            readOnly={Boolean(selectedControlSet)}
+            className={selectedControlSet ? 'text-neutral-500' : undefined}
           />
           <Input
             label="Lote *"
             value={analysisForm.lotNumber}
             onChange={(event) => setAnalysisForm((current) => ({ ...current, lotNumber: event.target.value }))}
+            readOnly={Boolean(selectedControlSet)}
+            className={selectedControlSet ? 'text-neutral-500' : undefined}
           />
         </div>
 
-        <div className="relative">
-          <Button className="h-11 rounded-xl px-5 shadow-sm" onClick={() => setPickerOpen((current) => !current)}>
-            Controle +
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Button className="h-11 rounded-xl px-5 shadow-sm" icon={<Plus className="h-4 w-4" />} onClick={() => setPickerOpen((current) => !current)}>
+            Selecionar controle cadastrado
           </Button>
+          {selectedControlSet ? (
+            <div className="text-sm font-medium text-neutral-600">
+              {selectedControlSet.analito} · {selectedControlSet.manufacturer} · lote {selectedControlSet.lotNumber}
+            </div>
+          ) : null}
           {pickerOpen ? (
-            <div className="absolute z-20 mt-3 w-full max-w-xl rounded-2xl border border-neutral-200 bg-white p-2 shadow-[0_22px_50px_rgba(23,23,23,0.14)]">
+            <div className="absolute left-0 top-12 z-20 w-full max-w-xl rounded-2xl border border-neutral-200 bg-white p-2 shadow-[0_22px_50px_rgba(23,23,23,0.14)]">
               {activeControlSets.length ? (
                 <div className="max-h-72 space-y-2 overflow-auto pr-1">
                   {activeControlSets.map((controlSet) => (
@@ -349,6 +362,12 @@ export function ImunologiaArea() {
           ) : null}
         </div>
 
+        {!activeControlSets.length ? (
+          <div className={statusBoxClass('warning')}>
+            Cadastre um controle ativo antes de lançar análise de Imunologia.
+          </div>
+        ) : null}
+
         {selectedControlSet && validityState ? (
           <div className={validityState.className}>
             {validityState.severity === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
@@ -356,12 +375,13 @@ export function ImunologiaArea() {
           </div>
         ) : null}
 
-        <div className={`divide-y divide-neutral-100 rounded-2xl border border-neutral-100 bg-neutral-50/50 px-4 py-1 ${FORM_TONE}`}>
+        <div className={`divide-y divide-neutral-100 border-y border-neutral-100 ${FORM_TONE}`}>
           <AnalysisControlRow
             label="Análise controle 1"
             observedResult={analysisForm.controle1}
             preview={analysisPreview.items[0]}
             onChange={(value) => setAnalysisForm((current) => ({ ...current, controle1: value }))}
+            selectRef={firstResultSelectRef}
           />
           <AnalysisControlRow
             label="Análise controle 2"
@@ -384,7 +404,7 @@ export function ImunologiaArea() {
             icon={<Save className="h-4 w-4" />}
             onClick={() => void saveAnalysis()}
             loading={createRun.isPending}
-            disabled={!canManageQc}
+            disabled={!canManageQc || !selectedControlSet}
           >
             Salvar análise
           </Button>
@@ -438,8 +458,8 @@ export function ImunologiaArea() {
           <div className={statusBoxClass('warning')}>Já existe controle ativo para este analito, marca e lote.</div>
         ) : null}
 
-        <div className={`grid gap-4 md:grid-cols-2 ${FORM_TONE}`}>
-          <div className="grid gap-3 rounded-2xl border border-neutral-100 bg-neutral-50/50 p-4 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
+        <div className={`grid gap-4 border-y border-neutral-100 py-4 md:grid-cols-2 ${FORM_TONE}`}>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
             <div className="text-lg font-semibold text-neutral-950">Controle 1</div>
             <Select
               label="Esperado"
@@ -451,7 +471,7 @@ export function ImunologiaArea() {
               ))}
             </Select>
           </div>
-          <div className="grid gap-3 rounded-2xl border border-neutral-100 bg-neutral-50/50 p-4 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
             <div className="text-lg font-semibold text-neutral-950">Controle 2</div>
             <Select
               label="Esperado"
@@ -633,14 +653,16 @@ function AnalysisControlRow({
   observedResult,
   preview,
   onChange,
+  selectRef,
 }: {
   label: string
   observedResult: string
   preview?: AnalysisPreviewItem
   onChange: (value: string) => void
+  selectRef?: Ref<HTMLSelectElement>
 }) {
   return (
-    <div className="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
+    <div className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
       <div>
         <div className="text-lg font-semibold text-neutral-950">{label}</div>
         {preview?.observedResult ? (
@@ -649,7 +671,7 @@ function AnalysisControlRow({
           </div>
         ) : null}
       </div>
-      <Select label="Resultado" value={observedResult} onChange={(event) => onChange(event.target.value)}>
+      <Select ref={selectRef} label="Resultado" value={observedResult} onChange={(event) => onChange(event.target.value)}>
         <option value="">Selecione</option>
         {RESULT_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>
