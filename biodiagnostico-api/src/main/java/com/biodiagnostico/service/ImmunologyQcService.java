@@ -48,9 +48,18 @@ public class ImmunologyQcService {
 
     @Transactional(readOnly = true)
     public List<ImmunologyControlSetResponse> getControlSets(String analito) {
+        return getControlSets(analito, false);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ImmunologyControlSetResponse> getControlSets(String analito, boolean includeInactive) {
         List<ImmunologyControlSet> controlSets = (analito == null || analito.isBlank())
-            ? controlSetRepository.findByIsActiveTrueOrderByAnalitoAscManufacturerAscLotNumberAsc()
-            : controlSetRepository.findByAnalitoIgnoreCaseAndIsActiveTrueOrderByCreatedAtDesc(analito.trim());
+            ? (includeInactive
+                ? controlSetRepository.findAllByOrderByIsActiveDescAnalitoAscManufacturerAscLotNumberAsc()
+                : controlSetRepository.findByIsActiveTrueOrderByAnalitoAscManufacturerAscLotNumberAsc())
+            : (includeInactive
+                ? controlSetRepository.findByAnalitoIgnoreCaseOrderByIsActiveDescCreatedAtDesc(analito.trim())
+                : controlSetRepository.findByAnalitoIgnoreCaseAndIsActiveTrueOrderByCreatedAtDesc(analito.trim()));
         return controlSets.stream().map(this::toControlSetResponse).toList();
     }
 

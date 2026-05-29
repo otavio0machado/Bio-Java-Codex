@@ -35,9 +35,12 @@ public class ImmunologyController {
 
     @GetMapping("/control-sets")
     public ResponseEntity<List<ImmunologyControlSetResponse>> getControlSets(
-        @RequestParam(required = false) String analito
+        @RequestParam(required = false) String analito,
+        @RequestParam(defaultValue = "false") boolean includeInactive
     ) {
-        return ResponseEntity.ok(immunologyQcService.getControlSets(analito));
+        return ResponseEntity.ok(includeInactive
+            ? immunologyQcService.getControlSets(analito, true)
+            : immunologyQcService.getControlSets(analito));
     }
 
     @PostMapping("/control-sets")

@@ -9,5 +9,9 @@ public interface ImmunologyControlSetRepository extends JpaRepository<Immunology
 
     List<ImmunologyControlSet> findByIsActiveTrueOrderByAnalitoAscManufacturerAscLotNumberAsc();
 
+    List<ImmunologyControlSet> findAllByOrderByIsActiveDescAnalitoAscManufacturerAscLotNumberAsc();
+
     List<ImmunologyControlSet> findByAnalitoIgnoreCaseAndIsActiveTrueOrderByCreatedAtDesc(String analito);
+
+    List<ImmunologyControlSet> findByAnalitoIgnoreCaseOrderByIsActiveDescCreatedAtDesc(String analito);
 }

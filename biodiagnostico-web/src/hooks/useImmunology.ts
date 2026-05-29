@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { immunologyService } from '../services/immunologyService'
 import type { ImmunologyControlSetRequest, ImmunologyRunRequest } from '../types'
 
-export function useImmunologyControlSets(analito?: string) {
+export function useImmunologyControlSets(filters?: { analito?: string; includeInactive?: boolean }) {
   return useQuery({
-    queryKey: ['immunology', 'control-sets', analito],
-    queryFn: () => immunologyService.getControlSets(analito),
+    queryKey: ['immunology', 'control-sets', filters],
+    queryFn: () => immunologyService.getControlSets(filters),
   })
 }
 

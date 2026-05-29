@@ -22,6 +22,19 @@ vi.mock('../../hooks/useImmunology', () => ({
   useDeactivateImmunologyControlSet: () => mockUseDeactivateImmunologyControlSet(),
 }))
 
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: {
+      id: 'user-1',
+      username: 'ana',
+      name: 'Ana',
+      role: 'ADMIN',
+      isActive: true,
+      permissions: [],
+    },
+  }),
+}))
+
 vi.mock('../../services/reportService', () => ({
   reportService: {
     getQcPdf: (...args: unknown[]) => mockGetQcPdf(...args),
@@ -75,18 +88,18 @@ describe('ImunologiaArea', () => {
   it('envia cadastro de controle com os dois resultados esperados padrão', async () => {
     renderArea()
 
-    await userEvent.clear(screen.getAllByLabelText('Analito')[1])
-    await userEvent.type(screen.getAllByLabelText('Analito')[1], 'HIV')
-    await userEvent.type(screen.getAllByLabelText('Marca')[1], 'Wama')
-    await userEvent.type(screen.getAllByLabelText('Lote')[1], '1022')
-    await userEvent.type(screen.getByLabelText('Validade'), '2027-10-01')
+    await userEvent.clear(screen.getAllByLabelText('Analito *')[1])
+    await userEvent.type(screen.getAllByLabelText('Analito *')[1], 'HIV')
+    await userEvent.type(screen.getAllByLabelText('Marca *')[1], 'Wama')
+    await userEvent.type(screen.getAllByLabelText('Lote *')[1], '1023')
+    await userEvent.type(screen.getByLabelText('Validade *'), '2027-10-01')
     await userEvent.click(screen.getByRole('button', { name: /Salvar controle/i }))
 
     await waitFor(() => {
       expect(createControlSetMutation.mutateAsync).toHaveBeenCalledWith({
         analito: 'HIV',
         manufacturer: 'Wama',
-        lotNumber: '1022',
+        lotNumber: '1023',
         validUntil: '2027-10-01',
         controls: [
           { name: 'Controle 1', expectedResult: 'REAGENTE' },

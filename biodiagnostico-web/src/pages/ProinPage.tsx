@@ -136,20 +136,7 @@ export function ProinPage() {
       </header>
 
       {currentArea !== 'bioquimica' ? (
-        <div className="space-y-6">
-          <Card className="bg-gradient-to-r from-white to-green-50">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-xl font-semibold text-neutral-900">
-                Área: {areas.find((item) => item.value === currentArea)?.label}
-              </h2>
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-amber-800">
-                Alpha
-              </span>
-            </div>
-            <p className="mt-2 max-w-3xl text-base text-neutral-600">
-              Módulo em validação alpha. Use para conferência interna; a produção oficial permanece no fluxo de Bioquímica.
-            </p>
-          </Card>
+        <div>
           <Suspense fallback={<ProinContentFallback />}>{renderSpecializedArea()}</Suspense>
         </div>
       ) : null}
