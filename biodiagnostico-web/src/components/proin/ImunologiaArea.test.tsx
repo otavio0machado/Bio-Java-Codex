@@ -79,7 +79,7 @@ describe('ImunologiaArea', () => {
     renderArea()
 
     expect(screen.getByRole('heading', { name: 'Imunologia' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Controle \+/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Selecionar controle cadastrado/i })).toBeInTheDocument()
     expect(screen.getByText('Análise controle 1')).toBeInTheDocument()
     expect(screen.getByText('Análise controle 2')).toBeInTheDocument()
     expect(screen.getByText('Cadastro de controles')).toBeInTheDocument()
@@ -112,7 +112,7 @@ describe('ImunologiaArea', () => {
   it('envia análise com resultado observado por controle', async () => {
     renderArea()
 
-    await userEvent.click(screen.getByRole('button', { name: /Controle \+/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Selecionar controle cadastrado/i }))
     await userEvent.click(screen.getByRole('button', { name: /HIV/i }))
     const resultSelects = screen.getAllByLabelText('Resultado')
     await userEvent.selectOptions(resultSelects[0], 'REAGENTE')
