@@ -62,24 +62,25 @@ beforeEach(() => {
 })
 
 describe('ImunologiaArea', () => {
-  it('renderiza o fluxo qualitativo com controles cadastrados e histórico', () => {
+  it('renderiza a tela no formato do papel', () => {
     renderArea()
 
-    expect(screen.getByText('CQ qualitativo')).toBeInTheDocument()
-    expect(screen.getAllByText(/HIV · Wama · lote 1022/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/Controle 1: Reagente/i)).toBeInTheDocument()
-    expect(screen.getByText(/Observado: Reagente/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Imunologia' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Controle \+/i })).toBeInTheDocument()
+    expect(screen.getByText('Análise controle 1')).toBeInTheDocument()
+    expect(screen.getByText('Análise controle 2')).toBeInTheDocument()
+    expect(screen.getByText('Cadastro de controles')).toBeInTheDocument()
   })
 
   it('envia cadastro de controle com os dois resultados esperados padrão', async () => {
     renderArea()
 
-    await userEvent.clear(screen.getByLabelText('Analito'))
-    await userEvent.type(screen.getByLabelText('Analito'), 'HIV')
-    await userEvent.type(screen.getByLabelText('Marca'), 'Wama')
-    await userEvent.type(screen.getByLabelText('Lote'), '1022')
+    await userEvent.clear(screen.getAllByLabelText('Analito')[1])
+    await userEvent.type(screen.getAllByLabelText('Analito')[1], 'HIV')
+    await userEvent.type(screen.getAllByLabelText('Marca')[1], 'Wama')
+    await userEvent.type(screen.getAllByLabelText('Lote')[1], '1022')
     await userEvent.type(screen.getByLabelText('Validade'), '2027-10-01')
-    await userEvent.click(screen.getByRole('button', { name: /Salvar cadastro/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Salvar controle/i }))
 
     await waitFor(() => {
       expect(createControlSetMutation.mutateAsync).toHaveBeenCalledWith({
@@ -98,11 +99,12 @@ describe('ImunologiaArea', () => {
   it('envia análise com resultado observado por controle', async () => {
     renderArea()
 
-    await userEvent.selectOptions(screen.getByLabelText('Controle cadastrado'), 'set-1')
-    const observedSelects = screen.getAllByLabelText('Observado')
-    await userEvent.selectOptions(observedSelects[0], 'REAGENTE')
-    await userEvent.selectOptions(observedSelects[1], 'NAO_REAGENTE')
-    await userEvent.click(screen.getByRole('button', { name: /Registrar análise/i }))
+    await userEvent.click(screen.getByRole('button', { name: /Controle \+/i }))
+    await userEvent.click(screen.getByRole('button', { name: /HIV/i }))
+    const resultSelects = screen.getAllByLabelText('Resultado')
+    await userEvent.selectOptions(resultSelects[0], 'REAGENTE')
+    await userEvent.selectOptions(resultSelects[1], 'NAO_REAGENTE')
+    await userEvent.click(screen.getByRole('button', { name: /Salvar análise/i }))
 
     await waitFor(() => {
       expect(createRunMutation.mutateAsync).toHaveBeenCalledWith({

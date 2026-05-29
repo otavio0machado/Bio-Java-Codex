@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Download, FlaskConical, Pencil, Plus, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Download, Edit3, Plus, Save, Trash2, X } from 'lucide-react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useMemo, useState } from 'react'
 import {
@@ -11,25 +11,13 @@ import {
   useUpdateImmunologyControlSet,
 } from '../../hooks/useImmunology'
 import { reportService } from '../../services/reportService'
-import type {
-  ImmunologyControlItemRequest,
-  ImmunologyControlSet,
-  ImmunologyControlSetRequest,
-  ImmunologyResult,
-} from '../../types'
-import { diffInDays, formatLongBR, todayLocal } from '../../utils/date'
-import { Button, Card, EmptyState, Input, Select, StatusBadge, TextArea, useToast } from '../ui'
+import type { ImmunologyControlSet, ImmunologyControlSetRequest, ImmunologyResult } from '../../types'
+import { formatLongBR, todayLocal } from '../../utils/date'
+import { Button, Card, EmptyState, Input, Select, StatusBadge, useToast } from '../ui'
 
 const RESULT_OPTIONS: Array<{ value: ImmunologyResult; label: string }> = [
   { value: 'REAGENTE', label: 'Reagente' },
   { value: 'NAO_REAGENTE', label: 'Não reagente' },
-]
-
-const QUICK_ANALYTES = ['HIV', 'HBsAg', 'HCV', 'VDRL', 'DENGUE NS1', 'DENGUE IgG', 'DENGUE IgM']
-
-const defaultControls: ImmunologyControlItemRequest[] = [
-  { name: 'Controle 1', expectedResult: 'REAGENTE' },
-  { name: 'Controle 2', expectedResult: 'NAO_REAGENTE' },
 ]
 
 const emptyControlForm: ImmunologyControlSetRequest = {
@@ -37,51 +25,47 @@ const emptyControlForm: ImmunologyControlSetRequest = {
   manufacturer: '',
   lotNumber: '',
   validUntil: '',
-  controls: defaultControls,
+  controls: [
+    { name: 'Controle 1', expectedResult: 'REAGENTE' },
+    { name: 'Controle 2', expectedResult: 'NAO_REAGENTE' },
+  ],
 }
 
-function createRunForm() {
+function createAnalysisForm() {
   return {
     dataMedicao: todayLocal(),
+    analito: '',
+    manufacturer: '',
+    lotNumber: '',
     controlSetId: '',
-    analyst: '',
-    notes: '',
+    controle1: '',
+    controle2: '',
   }
 }
 
 export function ImunologiaArea() {
   const { toast } = useToast()
+  const [analysisForm, setAnalysisForm] = useState(createAnalysisForm())
   const [controlForm, setControlForm] = useState<ImmunologyControlSetRequest>(emptyControlForm)
-  const [runForm, setRunForm] = useState(createRunForm())
-  const [observedResults, setObservedResults] = useState<Record<string, string>>({})
-  const [analitoFilter, setAnalitoFilter] = useState('')
   const [editingControlSetId, setEditingControlSetId] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  const runFilters = useMemo(() => ({ analito: analitoFilter || undefined }), [analitoFilter])
   const { data: controlSets = [] } = useImmunologyControlSets()
-  const { data: runs = [] } = useImmunologyRuns(runFilters)
+  const { data: runs = [] } = useImmunologyRuns()
   const createControlSet = useCreateImmunologyControlSet()
   const updateControlSet = useUpdateImmunologyControlSet()
   const deactivateControlSet = useDeactivateImmunologyControlSet()
   const createRun = useCreateImmunologyRun()
 
-  const availableAnalitos = useMemo(() => {
-    return Array.from(new Set([...QUICK_ANALYTES, ...controlSets.map((item) => item.analito), ...runs.map((item) => item.analito)]))
-      .sort((left, right) => left.localeCompare(right))
-  }, [controlSets, runs])
-
   const selectedControlSet = useMemo(
-    () => controlSets.find((item) => item.id === runForm.controlSetId) ?? null,
-    [controlSets, runForm.controlSetId],
+    () => controlSets.find((controlSet) => controlSet.id === analysisForm.controlSetId) ?? null,
+    [analysisForm.controlSetId, controlSets],
   )
+  const selectedControls = selectedControlSet ? fixedControls(selectedControlSet) : []
 
   const saveControlSet = async () => {
     if (!controlForm.analito || !controlForm.manufacturer || !controlForm.lotNumber || !controlForm.validUntil) {
       toast.warning('Preencha analito, marca, lote e validade.')
-      return
-    }
-    if (!controlForm.controls.length || controlForm.controls.some((item) => !item.name || !item.expectedResult)) {
-      toast.warning('Cadastre todos os controles esperados.')
       return
     }
 
@@ -89,13 +73,17 @@ export function ImunologiaArea() {
       const request = {
         ...controlForm,
         analito: controlForm.analito.toUpperCase(),
+        controls: [
+          { name: 'Controle 1', expectedResult: controlForm.controls[0].expectedResult },
+          { name: 'Controle 2', expectedResult: controlForm.controls[1].expectedResult },
+        ],
       }
       if (editingControlSetId) {
         await updateControlSet.mutateAsync({ id: editingControlSetId, request })
-        toast.success('Controle de imunologia atualizado.')
+        toast.success('Controle atualizado.')
       } else {
         await createControlSet.mutateAsync(request)
-        toast.success('Controle de imunologia cadastrado.')
+        toast.success('Controle cadastrado.')
       }
       resetControlForm()
     } catch (error) {
@@ -103,66 +91,76 @@ export function ImunologiaArea() {
     }
   }
 
-  const saveRun = async () => {
-    if (!selectedControlSet) {
+  const saveAnalysis = async () => {
+    if (!selectedControlSet || selectedControls.length < 2) {
       toast.warning('Selecione um controle cadastrado.')
       return
     }
-    const missing = selectedControlSet.controls.some((item) => !observedResults[item.id])
-    if (missing) {
-      toast.warning('Informe o resultado observado de todos os controles.')
+    if (!analysisForm.controle1 || !analysisForm.controle2) {
+      toast.warning('Informe controle 1 e controle 2.')
       return
     }
 
     try {
       const response = await createRun.mutateAsync({
-        dataMedicao: runForm.dataMedicao,
+        dataMedicao: analysisForm.dataMedicao,
         controlSetId: selectedControlSet.id,
-        analyst: runForm.analyst || undefined,
-        notes: runForm.notes || undefined,
-        results: selectedControlSet.controls.map((item) => ({
-          controlItemId: item.id,
-          observedResult: observedResults[item.id],
-        })),
+        results: [
+          { controlItemId: selectedControls[0].id, observedResult: analysisForm.controle1 },
+          { controlItemId: selectedControls[1].id, observedResult: analysisForm.controle2 },
+        ],
       })
       toast[response.status === 'APROVADO' ? 'success' : 'warning'](`Análise registrada: ${response.status}.`)
-      setRunForm(createRunForm())
-      setObservedResults({})
+      setAnalysisForm(createAnalysisForm())
     } catch (error) {
       toast.error(getApiErrorMessage(error, 'Não foi possível registrar a análise.'))
     }
   }
 
-  const removeControlSet = async (id: string) => {
-    try {
-      await deactivateControlSet.mutateAsync(id)
-      toast.success('Controle inativado.')
-      if (runForm.controlSetId === id) {
-        setRunForm((current) => ({ ...current, controlSetId: '' }))
-        setObservedResults({})
-      }
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Não foi possível inativar o controle.'))
-    }
+  const selectControlSet = (controlSet: ImmunologyControlSet) => {
+    setAnalysisForm({
+      dataMedicao: analysisForm.dataMedicao,
+      analito: controlSet.analito,
+      manufacturer: controlSet.manufacturer,
+      lotNumber: controlSet.lotNumber,
+      controlSetId: controlSet.id,
+      controle1: '',
+      controle2: '',
+    })
+    setPickerOpen(false)
   }
 
   const editControlSet = (controlSet: ImmunologyControlSet) => {
+    const controls = fixedControls(controlSet)
     setEditingControlSetId(controlSet.id)
     setControlForm({
       analito: controlSet.analito,
       manufacturer: controlSet.manufacturer,
       lotNumber: controlSet.lotNumber,
       validUntil: controlSet.validUntil,
-      controls: controlSet.controls.map((item) => ({
-        name: item.name,
-        expectedResult: item.expectedResult,
-      })),
+      controls: [
+        { name: 'Controle 1', expectedResult: controls[0]?.expectedResult ?? 'REAGENTE' },
+        { name: 'Controle 2', expectedResult: controls[1]?.expectedResult ?? 'NAO_REAGENTE' },
+      ],
     })
+    setPickerOpen(false)
   }
 
   const resetControlForm = () => {
     setEditingControlSetId(null)
     setControlForm(emptyControlForm)
+  }
+
+  const removeControlSet = async (id: string) => {
+    try {
+      await deactivateControlSet.mutateAsync(id)
+      toast.success('Controle inativado.')
+      if (analysisForm.controlSetId === id) {
+        setAnalysisForm(createAnalysisForm())
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Não foi possível inativar o controle.'))
+    }
   }
 
   const downloadPdf = async () => {
@@ -176,392 +174,240 @@ export function ImunologiaArea() {
       })
       downloadBlob(blob, 'imunologia-qc-report.pdf')
     } catch {
-      toast.error('Não foi possível gerar o PDF de imunologia.')
+      toast.error('Não foi possível gerar o PDF.')
     }
   }
 
   return (
-    <div className="space-y-6">
-      <Card className="border border-emerald-100 bg-white">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              CQ qualitativo
-            </div>
-            <h2 className="text-2xl font-semibold text-neutral-900">Imunologia</h2>
-            <p className="max-w-3xl text-sm text-neutral-600">
-              Controle por analito, marca, lote e validade, comparando resultado esperado e observado como reagente ou não reagente.
-            </p>
-          </div>
+    <div className="mx-auto max-w-5xl space-y-6">
+      <Card className="space-y-6 border border-neutral-200 bg-white">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-center text-2xl font-semibold uppercase tracking-wide text-neutral-900 sm:text-left">
+            Imunologia
+          </h2>
           <Button variant="secondary" icon={<Download className="h-4 w-4" />} onClick={() => void downloadPdf()}>
             Gerar PDF
           </Button>
         </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <Input
+            label="Analito"
+            value={analysisForm.analito}
+            onChange={(event) => setAnalysisForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
+          />
+          <Input
+            label="Data"
+            type="date"
+            value={analysisForm.dataMedicao}
+            onChange={(event) => setAnalysisForm((current) => ({ ...current, dataMedicao: event.target.value }))}
+          />
+          <Input
+            label="Marca"
+            value={analysisForm.manufacturer}
+            onChange={(event) => setAnalysisForm((current) => ({ ...current, manufacturer: event.target.value }))}
+          />
+          <Input
+            label="Lote"
+            value={analysisForm.lotNumber}
+            onChange={(event) => setAnalysisForm((current) => ({ ...current, lotNumber: event.target.value }))}
+          />
+        </div>
+
+        <div className="relative">
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setPickerOpen((current) => !current)}>
+            Controle +
+          </Button>
+          {pickerOpen ? (
+            <div className="absolute z-20 mt-2 w-full max-w-xl rounded-xl border border-neutral-200 bg-white p-3 shadow-elevated">
+              {controlSets.length ? (
+                <div className="max-h-72 space-y-2 overflow-auto">
+                  {controlSets.map((controlSet) => (
+                    <div key={controlSet.id} className="flex flex-col gap-2 rounded-lg border border-neutral-100 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => selectControlSet(controlSet)}
+                      >
+                        <div className="font-semibold text-neutral-900">{controlSet.analito}</div>
+                        <div className="text-sm text-neutral-500">
+                          {controlSet.manufacturer} · lote {controlSet.lotNumber} · validade {formatLongBR(controlSet.validUntil)}
+                        </div>
+                      </button>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" icon={<Edit3 className="h-4 w-4" />} onClick={() => editControlSet(controlSet)}>
+                          Editar
+                        </Button>
+                        <Button variant="ghost" size="sm" icon={<Trash2 className="h-4 w-4" />} onClick={() => void removeControlSet(controlSet.id)}>
+                          Inativar
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-3 py-4 text-sm text-neutral-500">Nenhum controle cadastrado.</div>
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
+            <div className="text-lg font-semibold text-neutral-900">Análise controle 1</div>
+            <Select
+              label="Resultado"
+              value={analysisForm.controle1}
+              onChange={(event) => setAnalysisForm((current) => ({ ...current, controle1: event.target.value }))}
+            >
+              <option value="">Selecione</option>
+              {RESULT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
+            <div className="text-lg font-semibold text-neutral-900">Análise controle 2</div>
+            <Select
+              label="Resultado"
+              value={analysisForm.controle2}
+              onChange={(event) => setAnalysisForm((current) => ({ ...current, controle2: event.target.value }))}
+            >
+              <option value="">Selecione</option>
+              {RESULT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        <Button className="w-full" icon={<Save className="h-4 w-4" />} onClick={() => void saveAnalysis()} loading={createRun.isPending}>
+          Salvar análise
+        </Button>
       </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-        <Card className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-neutral-900">Cadastro de controles</h3>
-            <p className="text-sm text-neutral-500">
-              {editingControlSetId ? 'Atualize o controle ativo com cuidado: análises já registradas mantêm snapshot histórico.' : 'Configure o resultado esperado antes de usar o lote na rotina.'}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {availableAnalitos.slice(0, 8).map((analito) => (
-              <button
-                key={analito}
-                type="button"
-                className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-medium text-emerald-800 transition hover:bg-emerald-50"
-                onClick={() => setControlForm((current) => ({ ...current, analito }))}
-              >
-                {analito}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              label="Analito"
-              value={controlForm.analito}
-              onChange={(event) => setControlForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
-            />
-            <Input
-              label="Marca"
-              value={controlForm.manufacturer}
-              onChange={(event) => setControlForm((current) => ({ ...current, manufacturer: event.target.value }))}
-            />
-            <Input
-              label="Lote"
-              value={controlForm.lotNumber}
-              onChange={(event) => setControlForm((current) => ({ ...current, lotNumber: event.target.value }))}
-            />
-            <Input
-              label="Validade"
-              type="date"
-              value={controlForm.validUntil}
-              onChange={(event) => setControlForm((current) => ({ ...current, validUntil: event.target.value }))}
-            />
-          </div>
-
-          <div className="space-y-3">
-            {controlForm.controls.map((control, index) => (
-              <div key={index} className="grid gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 md:grid-cols-[1fr_13rem_auto]">
-                <Input
-                  label={`Controle ${index + 1}`}
-                  value={control.name}
-                  onChange={(event) => updateControlItem(index, { name: event.target.value }, setControlForm)}
-                />
-                <Select
-                  label="Esperado"
-                  value={control.expectedResult}
-                  onChange={(event) => updateControlItem(index, { expectedResult: event.target.value }, setControlForm)}
-                >
-                  {RESULT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-                <Button
-                  className="self-end"
-                  variant="ghost"
-                  icon={<Trash2 className="h-4 w-4" />}
-                  onClick={() => removeControlItem(index, setControlForm)}
-                  disabled={controlForm.controls.length <= 1}
-                >
-                  Remover
-                </Button>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button
-              className="flex-1"
-              variant="secondary"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => addControlItem(setControlForm)}
-            >
-              Adicionar controle
-            </Button>
-            <Button
-              className="flex-1"
-              icon={<Save className="h-4 w-4" />}
-              onClick={() => void saveControlSet()}
-              loading={createControlSet.isPending || updateControlSet.isPending}
-            >
-              {editingControlSetId ? 'Atualizar cadastro' : 'Salvar cadastro'}
-            </Button>
-          </div>
-
+      <Card className="space-y-5 border border-neutral-200 bg-white">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-xl font-semibold text-neutral-900">Cadastro de controles</h3>
           {editingControlSetId ? (
             <Button variant="ghost" icon={<X className="h-4 w-4" />} onClick={resetControlForm}>
               Cancelar edição
             </Button>
           ) : null}
-        </Card>
+        </div>
 
-        <Card className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-neutral-900">Análise de controle</h3>
-            <p className="text-sm text-neutral-500">O backend calcula a decisão comparando observado contra esperado.</p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              label="Data"
-              type="date"
-              value={runForm.dataMedicao}
-              onChange={(event) => setRunForm((current) => ({ ...current, dataMedicao: event.target.value }))}
-            />
-            <Select
-              label="Controle cadastrado"
-              value={runForm.controlSetId}
-              onChange={(event) => {
-                setRunForm((current) => ({ ...current, controlSetId: event.target.value }))
-                setObservedResults({})
-              }}
-            >
-              <option value="">Selecione</option>
-              {controlSets.map((controlSet) => (
-                <option key={controlSet.id} value={controlSet.id}>
-                  {formatControlSetLabel(controlSet)}
-                </option>
-              ))}
-            </Select>
-            <Input
-              label="Responsável"
-              value={runForm.analyst}
-              onChange={(event) => setRunForm((current) => ({ ...current, analyst: event.target.value }))}
-            />
-          </div>
-
-          {selectedControlSet ? (
-            <div className={selectedControlSet.expired ? 'rounded-xl border border-red-200 bg-red-50 p-4' : 'rounded-xl border border-emerald-200 bg-emerald-50 p-4'}>
-              <div className="text-sm font-semibold text-neutral-900">
-                {selectedControlSet.analito} · {selectedControlSet.manufacturer} · lote {selectedControlSet.lotNumber}
-              </div>
-              <div className="mt-1 text-sm text-neutral-600">
-                Validade {formatLongBR(selectedControlSet.validUntil)} · {formatExpiryState(selectedControlSet)}
-              </div>
-            </div>
-          ) : null}
-
-          {selectedControlSet ? (
-            <div className="space-y-3">
-              {selectedControlSet.controls.map((control) => (
-                <div key={control.id} className="grid gap-3 rounded-xl border border-neutral-200 bg-white p-3 md:grid-cols-[1fr_12rem_13rem]">
-                  <div>
-                    <div className="font-semibold text-neutral-900">{control.name}</div>
-                    <div className="mt-1 text-sm text-neutral-500">Esperado: {resultLabel(control.expectedResult)}</div>
-                  </div>
-                  <Select
-                    label="Observado"
-                    value={observedResults[control.id] ?? ''}
-                    onChange={(event) => setObservedResults((current) => ({ ...current, [control.id]: event.target.value }))}
-                  >
-                    <option value="">Selecione</option>
-                    {RESULT_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                  <div className="self-end">
-                    {observedResults[control.id] ? (
-                      <StatusBadge status={observedResults[control.id] === control.expectedResult ? 'APROVADO' : 'REPROVADO'} />
-                    ) : (
-                      <span className="inline-flex rounded-full bg-neutral-100 px-3 py-1.5 text-sm font-semibold text-neutral-600">
-                        Pendente
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<FlaskConical className="h-8 w-8" />}
-              title="Selecione um controle"
-              description="Os controles cadastrados aparecerão aqui para lançar a análise qualitativa da rotina."
-            />
-          )}
-
-          <TextArea
-            label="Observação"
-            value={runForm.notes}
-            onChange={(event) => setRunForm((current) => ({ ...current, notes: event.target.value }))}
-            placeholder="Registre repetição, troca de lote, não conformidade ou contexto operacional relevante."
+        <div className="grid gap-4 md:grid-cols-4">
+          <Input
+            label="Analito"
+            value={controlForm.analito}
+            onChange={(event) => setControlForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
           />
+          <Input
+            label="Marca"
+            value={controlForm.manufacturer}
+            onChange={(event) => setControlForm((current) => ({ ...current, manufacturer: event.target.value }))}
+          />
+          <Input
+            label="Lote"
+            value={controlForm.lotNumber}
+            onChange={(event) => setControlForm((current) => ({ ...current, lotNumber: event.target.value }))}
+          />
+          <Input
+            label="Validade"
+            type="date"
+            value={controlForm.validUntil}
+            onChange={(event) => setControlForm((current) => ({ ...current, validUntil: event.target.value }))}
+          />
+        </div>
 
-          <Button className="w-full" onClick={() => void saveRun()} loading={createRun.isPending}>
-            Registrar análise
-          </Button>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-        <Card className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-neutral-900">Controles cadastrados</h3>
-              <p className="text-sm text-neutral-500">Somente controles ativos ficam disponíveis para análise.</p>
-            </div>
-            <Select label="Filtro analito" value={analitoFilter} onChange={(event) => setAnalitoFilter(event.target.value)}>
-              <option value="">Todos</option>
-              {availableAnalitos.map((analito) => (
-                <option key={analito} value={analito}>
-                  {analito}
-                </option>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
+            <div className="text-lg font-semibold text-neutral-900">Controle 1</div>
+            <Select
+              label="Esperado"
+              value={controlForm.controls[0].expectedResult}
+              onChange={(event) => updateExpectedControl(0, event.target.value, setControlForm)}
+            >
+              {RESULT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </Select>
           </div>
-
-          {controlSets.length ? (
-            <div className="space-y-3">
-              {controlSets
-                .filter((controlSet) => !analitoFilter || controlSet.analito === analitoFilter)
-                .map((controlSet) => (
-                  <div key={controlSet.id} className="rounded-xl border border-neutral-200 bg-white p-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="font-semibold text-neutral-900">{formatControlSetLabel(controlSet)}</div>
-                        <div className="mt-1 text-sm text-neutral-500">
-                          Validade {formatLongBR(controlSet.validUntil)} · {formatExpiryState(controlSet)}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Pencil className="h-4 w-4" />}
-                          onClick={() => editControlSet(controlSet)}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon={<Trash2 className="h-4 w-4" />}
-                          onClick={() => void removeControlSet(controlSet.id)}
-                          loading={deactivateControlSet.isPending}
-                        >
-                          Inativar
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {controlSet.controls.map((control) => (
-                        <span key={control.id} className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700">
-                          {control.name}: {resultLabel(control.expectedResult)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<FlaskConical className="h-8 w-8" />}
-              title="Nenhum controle cadastrado"
-              description="Cadastre o primeiro lote para liberar a análise qualitativa da Imunologia."
-            />
-          )}
-        </Card>
-
-        <Card className="space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-neutral-900">Histórico de análises</h3>
-            <p className="text-sm text-neutral-500">Cada linha mantém snapshot do lote e do resultado esperado.</p>
-          </div>
-
-          {runs.length ? (
-            <div className="space-y-3">
-              {runs.map((run) => (
-                <div key={run.id} className="rounded-xl border border-neutral-200 bg-white p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="font-semibold text-neutral-900">
-                        {run.analito} · {run.manufacturer} · lote {run.lotNumber}
-                      </div>
-                      <div className="text-sm text-neutral-500">{formatLongBR(run.dataMedicao)}</div>
-                    </div>
-                    <StatusBadge status={run.status} />
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {run.results.map((result) => (
-                      <div key={result.id} className="grid gap-2 text-sm text-neutral-600 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                        <div>{result.controlName}</div>
-                        <div>Esperado: {resultLabel(result.expectedResult)}</div>
-                        <div>Observado: {resultLabel(result.observedResult)}</div>
-                        <StatusBadge status={result.status} />
-                      </div>
-                    ))}
-                  </div>
-                  {run.notes ? <div className="mt-3 text-sm text-neutral-500">{run.notes}</div> : null}
-                </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
+            <div className="text-lg font-semibold text-neutral-900">Controle 2</div>
+            <Select
+              label="Esperado"
+              value={controlForm.controls[1].expectedResult}
+              onChange={(event) => updateExpectedControl(1, event.target.value, setControlForm)}
+            >
+              {RESULT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={<ShieldCheck className="h-8 w-8" />}
-              title="Nenhuma análise registrada"
-              description="Depois do primeiro lançamento, o histórico qualitativo da Imunologia aparece aqui."
-            />
-          )}
-        </Card>
-      </div>
+            </Select>
+          </div>
+        </div>
+
+        <Button className="w-full" icon={<Save className="h-4 w-4" />} onClick={() => void saveControlSet()} loading={createControlSet.isPending || updateControlSet.isPending}>
+          {editingControlSetId ? 'Atualizar controle' : 'Salvar controle'}
+        </Button>
+      </Card>
+
+      <Card className="space-y-4 border border-neutral-200 bg-white">
+        <h3 className="text-xl font-semibold text-neutral-900">Histórico</h3>
+        {runs.length ? (
+          <div className="space-y-3">
+            {runs.map((run) => (
+              <div key={run.id} className="rounded-xl border border-neutral-200 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="font-semibold text-neutral-900">
+                      {run.analito} · {formatLongBR(run.dataMedicao)}
+                    </div>
+                    <div className="text-sm text-neutral-500">
+                      {run.manufacturer} · lote {run.lotNumber}
+                    </div>
+                  </div>
+                  <StatusBadge status={run.status} />
+                </div>
+                <div className="mt-3 grid gap-2 text-sm text-neutral-600 md:grid-cols-2">
+                  {run.results.map((result) => (
+                    <div key={result.id}>
+                      {result.controlName}: {resultLabel(result.observedResult)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={<Plus className="h-8 w-8" />} title="Sem análises" description="Nenhuma análise registrada." />
+        )}
+      </Card>
     </div>
   )
 }
 
-function updateControlItem(
-  index: number,
-  patch: Partial<ImmunologyControlItemRequest>,
+function updateExpectedControl(
+  index: 0 | 1,
+  expectedResult: string,
   setControlForm: Dispatch<SetStateAction<ImmunologyControlSetRequest>>,
 ) {
   setControlForm((current) => ({
     ...current,
-    controls: current.controls.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+    controls: current.controls.map((control, controlIndex) => (
+      controlIndex === index ? { ...control, expectedResult } : control
+    )),
   }))
 }
 
-function addControlItem(setControlForm: Dispatch<SetStateAction<ImmunologyControlSetRequest>>) {
-  setControlForm((current) => ({
-    ...current,
-    controls: [
-      ...current.controls,
-      { name: `Controle ${current.controls.length + 1}`, expectedResult: 'REAGENTE' },
-    ],
-  }))
-}
-
-function removeControlItem(index: number, setControlForm: Dispatch<SetStateAction<ImmunologyControlSetRequest>>) {
-  setControlForm((current) => ({
-    ...current,
-    controls: current.controls.filter((_, itemIndex) => itemIndex !== index),
-  }))
+function fixedControls(controlSet: ImmunologyControlSet) {
+  return [...controlSet.controls].sort((left, right) => left.displayOrder - right.displayOrder).slice(0, 2)
 }
 
 function resultLabel(value: string) {
   if (value === 'REAGENTE') return 'Reagente'
   if (value === 'NAO_REAGENTE') return 'Não reagente'
-  return value.replace(/_/g, ' ')
-}
-
-function formatControlSetLabel(controlSet: ImmunologyControlSet) {
-  return `${controlSet.analito} · ${controlSet.manufacturer} · lote ${controlSet.lotNumber}`
-}
-
-function formatExpiryState(controlSet: ImmunologyControlSet) {
-  const days = diffInDays(todayLocal(), controlSet.validUntil)
-  if (days === null) return 'validade sem cálculo'
-  if (days < 0) return 'vencido'
-  if (days === 0) return 'vence hoje'
-  return `${days} dia${days === 1 ? '' : 's'} restantes`
+  return value
 }
 
 function getApiErrorMessage(error: unknown, fallbackMessage: string) {
