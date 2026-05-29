@@ -272,7 +272,7 @@ export function ImunologiaArea() {
         <div className="flex flex-col gap-3 border-b border-neutral-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-center text-2xl font-bold uppercase tracking-[0.08em] text-neutral-950 sm:text-left">
-              Imunologia
+              Controle de Qualidade
             </h2>
             {!canManageQc ? (
               <p className="mt-2 text-sm font-medium text-amber-700">Modo leitura: sem permissão para lançar ou alterar CQ.</p>

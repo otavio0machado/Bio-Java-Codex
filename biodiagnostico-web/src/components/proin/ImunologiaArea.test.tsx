@@ -78,7 +78,7 @@ describe('ImunologiaArea', () => {
   it('renderiza a tela no formato do papel', () => {
     renderArea()
 
-    expect(screen.getByRole('heading', { name: 'Imunologia' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Controle de Qualidade' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Selecionar controle cadastrado/i })).toBeInTheDocument()
     expect(screen.getByText('Análise controle 1')).toBeInTheDocument()
     expect(screen.getByText('Análise controle 2')).toBeInTheDocument()
