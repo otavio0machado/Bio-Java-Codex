@@ -7,8 +7,8 @@ import type {
 } from '../types'
 
 export const immunologyService = {
-  async getControlSets(analito?: string) {
-    const response = await api.get<ImmunologyControlSet[]>('/qc/imunologia/control-sets', { params: { analito } })
+  async getControlSets(filters?: { analito?: string; includeInactive?: boolean }) {
+    const response = await api.get<ImmunologyControlSet[]>('/qc/imunologia/control-sets', { params: filters })
     return response.data
   },
   async createControlSet(request: ImmunologyControlSetRequest) {
