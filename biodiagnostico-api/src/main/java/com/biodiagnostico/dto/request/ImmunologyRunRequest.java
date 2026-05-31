@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public record ImmunologyRunRequest(
     @NotNull LocalDate dataMedicao,
+    @NotNull UUID reagentLotId,
     @NotNull UUID controlSetId,
     @Valid @NotEmpty List<ImmunologyRunResultRequest> results,
     String analyst,

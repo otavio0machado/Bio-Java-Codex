@@ -6,14 +6,16 @@ import {
   useCreateImmunologyControlSet,
   useCreateImmunologyRun,
   useDeactivateImmunologyControlSet,
+  useDeleteImmunologyRun,
   useImmunologyControlSets,
   useImmunologyRuns,
   useUpdateImmunologyControlSet,
 } from '../../hooks/useImmunology'
+import { useReagentLots } from '../../hooks/useReagents'
 import { useAuth } from '../../hooks/useAuth'
 import { canDownload, canWriteQc } from '../../lib/permissions'
 import { reportService } from '../../services/reportService'
-import type { ImmunologyControlSet, ImmunologyControlSetRequest, ImmunologyResult, ImmunologyRun } from '../../types'
+import type { ImmunologyControlSet, ImmunologyControlSetRequest, ImmunologyResult, ImmunologyRun, ReagentLot } from '../../types'
 import { diffInDays, formatLongBR, todayLocal } from '../../utils/date'
 import { Button, Card, EmptyState, Input, Modal, Select, StatusBadge, useToast } from '../ui'
 
@@ -31,15 +33,14 @@ const FORM_TONE =
 const PRIMARY_ACTION_CLASS =
   'h-11 rounded-xl bg-green-800 text-base shadow-[0_10px_24px_rgba(22,101,52,0.18)] hover:bg-green-900'
 
-const emptyControlForm: ImmunologyControlSetRequest = {
-  analito: '',
-  manufacturer: '',
-  lotNumber: '',
-  validUntil: '',
-  controls: [
-    { name: 'Controle 1', expectedResult: 'REAGENTE' },
-    { name: 'Controle 2', expectedResult: 'NAO_REAGENTE' },
-  ],
+function createControlForm(): ImmunologyControlSetRequest {
+  return {
+    analito: '',
+    manufacturer: '',
+    lotNumber: '',
+    validUntil: '',
+    controls: [{ name: 'Controle 1', expectedResult: 'REAGENTE' }],
+  }
 }
 
 const emptyHistoryFilters = {
@@ -53,12 +54,7 @@ const emptyHistoryFilters = {
 function createAnalysisForm() {
   return {
     dataMedicao: todayLocal(),
-    analito: '',
-    manufacturer: '',
-    lotNumber: '',
     controlSetId: '',
-    controle1: '',
-    controle2: '',
   }
 }
 
@@ -68,11 +64,13 @@ export function ImunologiaArea() {
   const canManageQc = canWriteQc(user)
   const canExportPdf = canDownload(user)
   const [analysisForm, setAnalysisForm] = useState(createAnalysisForm())
-  const [controlForm, setControlForm] = useState<ImmunologyControlSetRequest>(emptyControlForm)
+  const [analysisResults, setAnalysisResults] = useState<Record<string, string>>({})
+  const [controlForm, setControlForm] = useState<ImmunologyControlSetRequest>(createControlForm)
+  const [selectedReagentLotId, setSelectedReagentLotId] = useState('')
   const [historyFilters, setHistoryFilters] = useState(emptyHistoryFilters)
   const [editingControlSetId, setEditingControlSetId] = useState<string | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [deactivationTarget, setDeactivationTarget] = useState<ImmunologyControlSet | null>(null)
+  const [deletingRun, setDeletingRun] = useState<ImmunologyRun | null>(null)
   const [lastSavedRun, setLastSavedRun] = useState<ImmunologyRun | null>(null)
   const firstResultSelectRef = useRef<HTMLSelectElement>(null)
 
@@ -87,12 +85,23 @@ export function ImunologiaArea() {
 
   const { data: controlSets = [] } = useImmunologyControlSets({ includeInactive: true })
   const { data: runs = [] } = useImmunologyRuns(runFilters)
+  const { data: reagentLots = [] } = useReagentLots('Imunologia')
   const createControlSet = useCreateImmunologyControlSet()
   const updateControlSet = useUpdateImmunologyControlSet()
   const deactivateControlSet = useDeactivateImmunologyControlSet()
   const createRun = useCreateImmunologyRun()
+  const deleteRun = useDeleteImmunologyRun()
 
+  const immunologyReagentLots = useMemo(() => reagentLots, [reagentLots])
   const activeControlSets = useMemo(() => controlSets.filter((controlSet) => controlSet.isActive), [controlSets])
+  const selectedReagentLot = useMemo(
+    () => immunologyReagentLots.find((lot) => lot.id === selectedReagentLotId) ?? null,
+    [immunologyReagentLots, selectedReagentLotId],
+  )
+  const compatibleControlSets = useMemo(() => {
+    if (!selectedReagentLot) return []
+    return activeControlSets.filter((controlSet) => normalizeKey(controlSet.analito) === normalizeKey(selectedReagentLot.label))
+  }, [activeControlSets, selectedReagentLot])
   const controlStats = useMemo(() => buildControlStats(controlSets), [controlSets])
   const filteredRuns = useMemo(() => filterRuns(runs, historyFilters), [historyFilters, runs])
   const selectedControlSet = useMemo(
@@ -100,10 +109,9 @@ export function ImunologiaArea() {
     [analysisForm.controlSetId, controlSets],
   )
   const selectedControls = selectedControlSet ? fixedControls(selectedControlSet) : []
-  const validityState = selectedControlSet ? getControlValidityState(selectedControlSet, analysisForm.dataMedicao) : null
   const analysisPreview = useMemo(
-    () => buildAnalysisPreview(selectedControls, [analysisForm.controle1, analysisForm.controle2]),
-    [analysisForm.controle1, analysisForm.controle2, selectedControls],
+    () => buildAnalysisPreview(selectedControls, analysisResults),
+    [analysisResults, selectedControls],
   )
 
   const saveControlSet = async () => {
@@ -113,6 +121,10 @@ export function ImunologiaArea() {
     }
     if (!controlForm.analito || !controlForm.manufacturer || !controlForm.lotNumber || !controlForm.validUntil) {
       toast.warning('Preencha analito, marca, lote e validade.')
+      return
+    }
+    if (!controlForm.controls.length || controlForm.controls.some((control) => !control.name.trim())) {
+      toast.warning('Cadastre ao menos um controle com nome.')
       return
     }
     if (findDuplicateControlSet(controlSets, controlForm, editingControlSetId)) {
@@ -126,10 +138,10 @@ export function ImunologiaArea() {
         analito: controlForm.analito.trim().toUpperCase(),
         manufacturer: controlForm.manufacturer.trim(),
         lotNumber: controlForm.lotNumber.trim(),
-        controls: [
-          { name: 'Controle 1', expectedResult: controlForm.controls[0].expectedResult },
-          { name: 'Controle 2', expectedResult: controlForm.controls[1].expectedResult },
-        ],
+        controls: controlForm.controls.map((control, index) => ({
+          name: control.name.trim() || `Controle ${index + 1}`,
+          expectedResult: control.expectedResult,
+        })),
       }
       if (editingControlSetId) {
         await updateControlSet.mutateAsync({ id: editingControlSetId, request })
@@ -149,53 +161,85 @@ export function ImunologiaArea() {
       toast.warning('Seu perfil não pode lançar análise de CQ.')
       return
     }
-    if (!selectedControlSet || selectedControls.length < 2) {
-      toast.warning('Selecione um controle cadastrado.')
+    if (!selectedReagentLot) {
+      toast.warning('Selecione um reagente de Imunologia antes de lançar a análise.')
+      return
+    }
+    const reagentValidity = getReagentValidityState(selectedReagentLot, analysisForm.dataMedicao)
+    if (reagentValidity?.severity === 'danger') {
+      toast.warning(reagentValidity.message)
+      return
+    }
+    if (!selectedControlSet || !selectedControls.length) {
+      toast.warning('Selecione um soro-controle compatível com o reagente.')
+      return
+    }
+    if (normalizeKey(selectedControlSet.analito) !== normalizeKey(selectedReagentLot.label)) {
+      toast.warning('O soro-controle selecionado não pertence ao analito do reagente.')
       return
     }
     if (isControlExpiredForDate(selectedControlSet, analysisForm.dataMedicao)) {
       toast.warning('Controle vencido na data da análise. Use outro lote de controle.')
       return
     }
-    if (!analysisForm.controle1 || !analysisForm.controle2) {
-      toast.warning('Informe controle 1 e controle 2.')
+    if (selectedControls.some((control) => !analysisResults[control.id])) {
+      toast.warning('Informe o resultado de todos os controles cadastrados.')
       return
     }
 
     try {
       const response = await createRun.mutateAsync({
         dataMedicao: analysisForm.dataMedicao,
+        reagentLotId: selectedReagentLot.id,
         controlSetId: selectedControlSet.id,
         analyst: undefined,
         notes: undefined,
-        results: [
-          { controlItemId: selectedControls[0].id, observedResult: analysisForm.controle1 },
-          { controlItemId: selectedControls[1].id, observedResult: analysisForm.controle2 },
-        ],
+        results: selectedControls.map((control) => ({
+          controlItemId: control.id,
+          observedResult: analysisResults[control.id],
+        })),
       })
       toast[response.status === 'APROVADO' ? 'success' : 'warning'](`Análise registrada: ${response.status}.`)
       setLastSavedRun(response)
       setAnalysisForm(createAnalysisForm())
+      setSelectedReagentLotId('')
+      setAnalysisResults({})
     } catch (error) {
       toast.error(getApiErrorMessage(error, 'Não foi possível registrar a análise.'))
     }
   }
 
-  const selectControlSet = (controlSet: ImmunologyControlSet) => {
+  const selectReagentLotForAnalysis = (lotId: string) => {
+    setSelectedReagentLotId(lotId)
+    setAnalysisForm((current) => ({ ...current, controlSetId: '' }))
+    setAnalysisResults({})
+    setLastSavedRun(null)
+  }
+
+  const selectControlSet = (controlSetId: string) => {
+    if (!controlSetId) {
+      setAnalysisForm((current) => ({ ...current, controlSetId: '' }))
+      setAnalysisResults({})
+      return
+    }
+    if (!selectedReagentLot) {
+      toast.warning('Selecione um reagente antes do soro-controle.')
+      return
+    }
+    const controlSet = compatibleControlSets.find((item) => item.id === controlSetId)
+    if (!controlSet) {
+      toast.warning('Selecione um soro-controle compatível com o analito do reagente.')
+      return
+    }
     if (!controlSet.isActive) {
       toast.warning('Controle inativo não pode ser usado em nova análise.')
       return
     }
     setAnalysisForm({
       dataMedicao: analysisForm.dataMedicao,
-      analito: controlSet.analito,
-      manufacturer: controlSet.manufacturer,
-      lotNumber: controlSet.lotNumber,
       controlSetId: controlSet.id,
-      controle1: '',
-      controle2: '',
     })
-    setPickerOpen(false)
+    setAnalysisResults({})
     window.setTimeout(() => firstResultSelectRef.current?.focus(), 0)
   }
 
@@ -215,22 +259,51 @@ export function ImunologiaArea() {
       manufacturer: controlSet.manufacturer,
       lotNumber: controlSet.lotNumber,
       validUntil: controlSet.validUntil,
-      controls: [
-        { name: 'Controle 1', expectedResult: controls[0]?.expectedResult ?? 'REAGENTE' },
-        { name: 'Controle 2', expectedResult: controls[1]?.expectedResult ?? 'NAO_REAGENTE' },
-      ],
+      controls: controls.map((control) => ({
+        name: control.name,
+        expectedResult: control.expectedResult,
+      })),
     })
-    setPickerOpen(false)
   }
 
   const resetAnalysisForm = () => {
     setAnalysisForm(createAnalysisForm())
+    setSelectedReagentLotId('')
+    setAnalysisResults({})
     setLastSavedRun(null)
   }
 
   const resetControlForm = () => {
     setEditingControlSetId(null)
-    setControlForm(emptyControlForm)
+    setControlForm(createControlForm())
+  }
+
+  const addExpectedControl = () => {
+    setControlForm((current) => ({
+      ...current,
+      controls: [
+        ...current.controls,
+        {
+          name: `Controle ${current.controls.length + 1}`,
+          expectedResult: current.controls.length === 1 ? 'NAO_REAGENTE' : 'REAGENTE',
+        },
+      ],
+    }))
+  }
+
+  const removeExpectedControl = (index: number) => {
+    setControlForm((current) => {
+      if (current.controls.length === 1) return current
+      return {
+        ...current,
+        controls: current.controls
+          .filter((_, controlIndex) => controlIndex !== index)
+          .map((control, controlIndex) => ({
+            ...control,
+            name: control.name.trim() ? control.name : `Controle ${controlIndex + 1}`,
+          })),
+      }
+    })
   }
 
   const confirmDeactivateControlSet = async () => {
@@ -240,10 +313,25 @@ export function ImunologiaArea() {
       toast.success('Controle inativado.')
       if (analysisForm.controlSetId === deactivationTarget.id) {
         setAnalysisForm(createAnalysisForm())
+        setAnalysisResults({})
       }
       setDeactivationTarget(null)
     } catch (error) {
       toast.error(getApiErrorMessage(error, 'Não foi possível inativar o controle.'))
+    }
+  }
+
+  const confirmDeleteRun = async () => {
+    if (!deletingRun) return
+    try {
+      await deleteRun.mutateAsync(deletingRun.id)
+      toast.success('Análise removida do histórico.')
+      if (lastSavedRun?.id === deletingRun.id) {
+        setLastSavedRun(null)
+      }
+      setDeletingRun(null)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Não foi possível remover a análise.'))
     }
   }
 
@@ -289,140 +377,134 @@ export function ImunologiaArea() {
           </Button>
         </div>
 
-        <div className={`grid gap-4 md:grid-cols-4 ${FORM_TONE}`}>
-          <Input
-            label="Analito *"
-            value={analysisForm.analito}
-            onChange={(event) => setAnalysisForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
-            readOnly={Boolean(selectedControlSet)}
-            className={selectedControlSet ? 'text-neutral-500' : undefined}
-          />
-          <Input
-            label="Data *"
-            type="date"
-            value={analysisForm.dataMedicao}
-            onChange={(event) => setAnalysisForm((current) => ({ ...current, dataMedicao: event.target.value }))}
-          />
-          <Input
-            label="Marca *"
-            value={analysisForm.manufacturer}
-            onChange={(event) => setAnalysisForm((current) => ({ ...current, manufacturer: event.target.value }))}
-            readOnly={Boolean(selectedControlSet)}
-            className={selectedControlSet ? 'text-neutral-500' : undefined}
-          />
-          <Input
-            label="Lote *"
-            value={analysisForm.lotNumber}
-            onChange={(event) => setAnalysisForm((current) => ({ ...current, lotNumber: event.target.value }))}
-            readOnly={Boolean(selectedControlSet)}
-            className={selectedControlSet ? 'text-neutral-500' : undefined}
-          />
-        </div>
-
-        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Button className="h-11 rounded-xl px-5 shadow-sm" icon={<Plus className="h-4 w-4" />} onClick={() => setPickerOpen((current) => !current)}>
-            Selecionar controle cadastrado
-          </Button>
-          {selectedControlSet ? (
-            <div className="text-sm font-medium text-neutral-600">
-              {selectedControlSet.analito} · {selectedControlSet.manufacturer} · lote {selectedControlSet.lotNumber}
+        <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+          <section className={`space-y-4 ${FORM_TONE}`}>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.14em] text-green-800">1. Selecionar reagente</div>
+              <div className="mt-1 text-sm font-medium text-neutral-500">Escolha o reagente de Imunologia usado na análise.</div>
             </div>
-          ) : null}
-          {pickerOpen ? (
-            <div className="absolute left-0 top-12 z-20 w-full max-w-xl rounded-2xl border border-neutral-200 bg-white p-2 shadow-[0_22px_50px_rgba(23,23,23,0.14)]">
-              {activeControlSets.length ? (
-                <div className="max-h-72 space-y-2 overflow-auto pr-1">
-                  {activeControlSets.map((controlSet) => (
-                    <div key={controlSet.id} className="flex flex-col gap-3 rounded-xl border border-neutral-100 bg-neutral-50/70 p-3 transition hover:border-green-200 hover:bg-green-50/40 sm:flex-row sm:items-center sm:justify-between">
-                      <button
-                        type="button"
-                        className="min-w-0 text-left"
-                        onClick={() => selectControlSet(controlSet)}
-                      >
-                        <div className="truncate font-semibold text-neutral-950">{controlSet.analito}</div>
-                        <div className="mt-1 text-sm text-neutral-500">
-                          {controlSet.manufacturer} · lote {controlSet.lotNumber} · validade {formatLongBR(controlSet.validUntil)}
-                        </div>
-                      </button>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="sm" icon={<Edit3 className="h-4 w-4" />} onClick={() => editControlSet(controlSet)} disabled={!canManageQc}>
-                          Editar
-                        </Button>
-                        <Button variant="ghost" size="sm" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeactivationTarget(controlSet)} disabled={!canManageQc}>
-                          Inativar
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl bg-neutral-50 px-3 py-4 text-sm font-medium text-neutral-500">Nenhum controle ativo cadastrado.</div>
-              )}
+
+            <Select
+              label="Reagente de Imunologia *"
+              value={selectedReagentLotId}
+              onChange={(event) => selectReagentLotForAnalysis(event.target.value)}
+            >
+              <option value="">Selecione um reagente cadastrado</option>
+              {immunologyReagentLots.map((lot) => (
+                <option key={lot.id} value={lot.id}>
+                  {lot.label} · {lot.manufacturer} · lote {lot.lotNumber} · validade {formatLongBR(lot.expiryDate)} · {reagentStatusLabel(lot.status)}
+                </option>
+              ))}
+            </Select>
+
+            {selectedReagentLot ? (
+              <ReagentLotSummary lot={selectedReagentLot} dataMedicao={analysisForm.dataMedicao} />
+            ) : (
+              <div className="rounded-2xl border border-neutral-100 bg-neutral-50 px-4 py-5 text-sm font-medium text-neutral-500">
+                Selecione um reagente para carregar os dados do lote e liberar soro-controles compatíveis.
+              </div>
+            )}
+
+            {!immunologyReagentLots.length ? (
+              <div className={statusBoxClass('warning')}>
+                Cadastre um reagente de Imunologia na aba Reagentes antes de lançar análise.
+              </div>
+            ) : null}
+          </section>
+
+          <section className={`space-y-4 border-t border-neutral-100 pt-5 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0 ${FORM_TONE}`}>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.14em] text-green-800">2. Dados/Resultados</div>
+              <div className="mt-1 text-sm font-medium text-neutral-500">Selecione o soro-controle e informe o observado.</div>
             </div>
-          ) : null}
-        </div>
 
-        {!activeControlSets.length ? (
-          <div className={statusBoxClass('warning')}>
-            Cadastre um controle ativo antes de lançar análise de Imunologia.
-          </div>
-        ) : null}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Input
+                label="Data *"
+                type="date"
+                value={analysisForm.dataMedicao}
+                onChange={(event) => setAnalysisForm((current) => ({ ...current, dataMedicao: event.target.value }))}
+              />
+              <Select
+                label="Soro-controle *"
+                value={analysisForm.controlSetId}
+                onChange={(event) => selectControlSet(event.target.value)}
+                disabled={!selectedReagentLot}
+              >
+                <option value="">
+                  {selectedReagentLot ? 'Selecione o soro-controle' : 'Selecione o reagente primeiro'}
+                </option>
+                {compatibleControlSets.map((controlSet) => (
+                  <option key={controlSet.id} value={controlSet.id}>
+                    {controlSet.analito} · {controlSet.manufacturer} · lote {controlSet.lotNumber}
+                  </option>
+                ))}
+              </Select>
+            </div>
 
-        {selectedControlSet && validityState ? (
-          <div className={validityState.className}>
-            {validityState.severity === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
-            <span>{validityState.message}</span>
-          </div>
-        ) : null}
+            {selectedReagentLot && !compatibleControlSets.length ? (
+              <div className={statusBoxClass('warning')}>
+                Não há soro-controle ativo para o analito {selectedReagentLot.label}.
+              </div>
+            ) : null}
 
-        <div className={`divide-y divide-neutral-100 border-y border-neutral-100 ${FORM_TONE}`}>
-          <AnalysisControlRow
-            label="Análise controle 1"
-            observedResult={analysisForm.controle1}
-            preview={analysisPreview.items[0]}
-            onChange={(value) => setAnalysisForm((current) => ({ ...current, controle1: value }))}
-            selectRef={firstResultSelectRef}
-          />
-          <AnalysisControlRow
-            label="Análise controle 2"
-            observedResult={analysisForm.controle2}
-            preview={analysisPreview.items[1]}
-            onChange={(value) => setAnalysisForm((current) => ({ ...current, controle2: value }))}
-          />
-        </div>
+            {selectedControlSet ? (
+              <ControlSetSummary controlSet={selectedControlSet} dataMedicao={analysisForm.dataMedicao} />
+            ) : (
+              <div className="rounded-2xl border border-neutral-100 bg-neutral-50 px-4 py-5 text-sm font-medium text-neutral-500">
+                Selecione um soro-controle compatível para visualizar os resultados esperados.
+              </div>
+            )}
 
-        {analysisPreview.status !== 'PENDENTE' ? (
-          <div className={analysisPreview.status === 'APROVADO' ? statusBoxClass('success') : statusBoxClass('danger')}>
-            Prévia da análise: <strong>{analysisPreview.status}</strong>
-            {analysisPreview.failedControls.length ? ` · Divergente: ${analysisPreview.failedControls.join(', ')}` : ''}
-          </div>
-        ) : null}
+            {selectedControls.length ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {selectedControls.map((control, index) => (
+                  <AnalysisControlRow
+                    key={control.id}
+                    label={control.name}
+                    observedResult={analysisResults[control.id] ?? ''}
+                    preview={analysisPreview.items[index]}
+                    onChange={(value) => setAnalysisResults((current) => ({ ...current, [control.id]: value }))}
+                    selectRef={index === 0 ? firstResultSelectRef : undefined}
+                  />
+                ))}
+              </div>
+            ) : null}
 
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <Button
-            className={`flex-1 ${PRIMARY_ACTION_CLASS}`}
-            icon={<Save className="h-4 w-4" />}
-            onClick={() => void saveAnalysis()}
-            loading={createRun.isPending}
-            disabled={!canManageQc || !selectedControlSet}
-          >
-            Salvar análise
-          </Button>
-          <Button className="sm:w-44" variant="secondary" icon={<RotateCcw className="h-4 w-4" />} onClick={resetAnalysisForm}>
-            Limpar
-          </Button>
+            {analysisPreview.status !== 'PENDENTE' ? (
+              <div className={analysisPreview.status === 'APROVADO' ? statusBoxClass('success') : statusBoxClass('danger')}>
+                Prévia: <strong>{analysisPreview.status}</strong>
+                {analysisPreview.failedControls.length ? ` · Divergente: ${analysisPreview.failedControls.join(', ')}` : ''}
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                className={`flex-1 ${PRIMARY_ACTION_CLASS}`}
+                icon={<Save className="h-4 w-4" />}
+                onClick={() => void saveAnalysis()}
+                loading={createRun.isPending}
+                disabled={!canManageQc || !selectedReagentLot || !selectedControlSet}
+              >
+                Salvar análise
+              </Button>
+              <Button className="sm:w-44" variant="secondary" icon={<RotateCcw className="h-4 w-4" />} onClick={resetAnalysisForm}>
+                Limpar
+              </Button>
+            </div>
+          </section>
         </div>
 
         {lastSavedRun ? (
           <div className={lastSavedRun.status === 'APROVADO' ? statusBoxClass('success') : statusBoxClass('danger')}>
-            Última análise: {lastSavedRun.analito} · lote {lastSavedRun.lotNumber} · {formatLongBR(lastSavedRun.dataMedicao)} · <strong>{lastSavedRun.status}</strong>
+            Última análise: reagente {lastSavedRun.reagentLabel || 'não vinculado'} · soro {lastSavedRun.analito} lote {lastSavedRun.lotNumber} · {formatLongBR(lastSavedRun.dataMedicao)} · <strong>{lastSavedRun.status}</strong>
           </div>
         ) : null}
       </Card>
 
       <Card className={`space-y-5 ${PANEL_CLASS}`}>
         <div className="flex flex-col gap-3 border-b border-neutral-100 pb-5 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-xl font-bold text-neutral-950">Cadastro de controles</h3>
+          <h3 className="text-xl font-bold text-neutral-950">Cadastro de soro-controles</h3>
           {editingControlSetId ? (
             <Button variant="ghost" icon={<X className="h-4 w-4" />} onClick={resetControlForm}>
               Cancelar edição
@@ -458,30 +540,44 @@ export function ImunologiaArea() {
           <div className={statusBoxClass('warning')}>Já existe controle ativo para este analito, marca e lote.</div>
         ) : null}
 
-        <div className={`grid gap-4 border-y border-neutral-100 py-4 md:grid-cols-2 ${FORM_TONE}`}>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
-            <div className="text-lg font-semibold text-neutral-950">Controle 1</div>
-            <Select
-              label="Esperado"
-              value={controlForm.controls[0].expectedResult}
-              onChange={(event) => updateExpectedControl(0, event.target.value, setControlForm)}
-            >
-              {RESULT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </Select>
+        <div className={`space-y-4 border-y border-neutral-100 py-4 ${FORM_TONE}`}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h4 className="text-lg font-semibold text-neutral-950">Controles esperados</h4>
+              <p className="text-sm font-medium text-neutral-500">Adicione exatamente os controles esperados do soro-controle.</p>
+            </div>
+            <Button variant="secondary" icon={<Plus className="h-4 w-4" />} onClick={addExpectedControl}>
+              Adicionar controle
+            </Button>
           </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_14rem] md:items-end">
-            <div className="text-lg font-semibold text-neutral-950">Controle 2</div>
-            <Select
-              label="Esperado"
-              value={controlForm.controls[1].expectedResult}
-              onChange={(event) => updateExpectedControl(1, event.target.value, setControlForm)}
-            >
-              {RESULT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </Select>
+          <div className="grid gap-4 md:grid-cols-2">
+            {controlForm.controls.map((control, index) => (
+              <div key={`${control.name}-${index}`} className="grid gap-3 border-b border-neutral-100 pb-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end md:border-b-0 md:pb-0">
+                <Input
+                  label={`Controle ${index + 1}`}
+                  value={control.name}
+                  onChange={(event) => updateExpectedControl(index, { name: event.target.value }, setControlForm)}
+                />
+                <Select
+                  label="Esperado"
+                  value={control.expectedResult}
+                  onChange={(event) => updateExpectedControl(index, { expectedResult: event.target.value }, setControlForm)}
+                >
+                  {RESULT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+                <Button
+                  variant="ghost"
+                  icon={<Trash2 className="h-4 w-4" />}
+                  onClick={() => removeExpectedControl(index)}
+                  disabled={controlForm.controls.length === 1}
+                  aria-label={`Remover controle ${index + 1}`}
+                >
+                  Remover
+                </Button>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -597,10 +693,26 @@ export function ImunologiaArea() {
                       {run.analito} · {formatLongBR(run.dataMedicao)}
                     </div>
                     <div className="mt-1 text-sm text-neutral-500">
-                      {run.manufacturer} · lote {run.lotNumber} · validade {formatLongBR(run.validUntil)}
+                      Soro-controle: {run.manufacturer} · lote {run.lotNumber} · validade {formatLongBR(run.validUntil)}
+                    </div>
+                    <div className="mt-1 text-sm text-neutral-500">
+                      {run.reagentLabel
+                        ? `Reagente: ${run.reagentLabel} · ${run.reagentManufacturer || 'marca não informada'} · lote ${run.reagentLotNumber || '-'} · validade ${formatOptionalDate(run.reagentValidUntil)} · ${reagentStatusLabel(run.reagentStatus)}`
+                        : 'Reagente: não vinculado neste registro antigo'}
                     </div>
                   </div>
-                  <StatusBadge status={run.status} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={run.status} />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon={<Trash2 className="h-4 w-4" />}
+                      onClick={() => setDeletingRun(run)}
+                      disabled={!canManageQc}
+                    >
+                      Excluir
+                    </Button>
+                  </div>
                 </div>
                 <div className="mt-4 grid gap-2 border-t border-neutral-100 pt-3 text-sm font-medium text-neutral-600 md:grid-cols-2">
                   {run.results.map((result) => (
@@ -644,6 +756,32 @@ export function ImunologiaArea() {
           ) : null}
         </div>
       </Modal>
+
+      <Modal
+        isOpen={Boolean(deletingRun)}
+        onClose={() => setDeletingRun(null)}
+        title="Excluir análise do histórico"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setDeletingRun(null)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={() => void confirmDeleteRun()} loading={deleteRun.isPending}>
+              Excluir
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm text-neutral-600">
+          <p>Esta ação remove a análise e seus resultados observados do histórico de Imunologia.</p>
+          {deletingRun ? (
+            <div className="rounded-xl bg-neutral-50 p-3 font-medium text-neutral-800">
+              {deletingRun.analito} · {formatLongBR(deletingRun.dataMedicao)} · lote {deletingRun.lotNumber}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -662,12 +800,13 @@ function AnalysisControlRow({
   selectRef?: Ref<HTMLSelectElement>
 }) {
   return (
-    <div className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_16rem] md:items-end">
+    <div className="space-y-3 rounded-2xl border border-neutral-100 bg-white px-4 py-4 shadow-sm">
       <div>
-        <div className="text-lg font-semibold text-neutral-950">{label}</div>
-        {preview?.observedResult ? (
-          <div className={preview.status === 'APROVADO' ? 'mt-2 text-sm font-medium text-green-700' : 'mt-2 text-sm font-medium text-red-700'}>
-            Esperado: {resultLabel(preview.expectedResult)} · {preview.status}
+        <div className="text-base font-semibold text-neutral-950">{label}</div>
+        {preview ? (
+          <div className={preview.observedResult && preview.status === 'REPROVADO' ? 'mt-2 text-sm font-medium text-red-700' : 'mt-2 text-sm font-medium text-green-700'}>
+            Esperado: {resultLabel(preview.expectedResult)}
+            {preview.observedResult ? ` · ${preview.status}` : ''}
           </div>
         ) : null}
       </div>
@@ -681,21 +820,94 @@ function AnalysisControlRow({
   )
 }
 
+function ReagentLotSummary({ lot, dataMedicao }: { lot: ReagentLot; dataMedicao: string }) {
+  const validityState = getReagentValidityState(lot, dataMedicao)
+  return (
+    <div className="space-y-4 rounded-2xl border border-green-100 bg-green-50/40 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-base font-semibold text-neutral-950">{lot.label}</div>
+          <div className="mt-1 text-sm font-medium text-neutral-500">{lot.manufacturer} · lote {lot.lotNumber}</div>
+        </div>
+        <span className={reagentStatusPillClass(lot.status)}>{reagentStatusLabel(lot.status)}</span>
+      </div>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        <DetailItem label="Validade" value={formatOptionalDate(lot.expiryDate)} />
+        <DetailItem label="Estoque" value={formatStock(lot)} />
+        <DetailItem label="Temperatura" value={lot.storageTemp || 'Não informada'} />
+        <DetailItem label="Local" value={lot.location || 'Não informado'} />
+      </div>
+      {validityState ? (
+        <div className={validityState.className}>
+          {validityState.severity === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+          <span>{validityState.message}</span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ControlSetSummary({ controlSet, dataMedicao }: { controlSet: ImmunologyControlSet; dataMedicao: string }) {
+  const controls = fixedControls(controlSet)
+  const validityState = getControlValidityState(controlSet, dataMedicao)
+  return (
+    <div className="space-y-4 rounded-2xl border border-neutral-200/80 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-base font-semibold text-neutral-950">{controlSet.analito}</div>
+          <div className="mt-1 text-sm font-medium text-neutral-500">
+            {controlSet.manufacturer} · lote {controlSet.lotNumber}
+          </div>
+        </div>
+        <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-700">
+          {controlStatusLabel(controlSet)}
+        </span>
+      </div>
+      <div className="grid gap-3 text-sm sm:grid-cols-2">
+        <DetailItem label="Validade" value={formatOptionalDate(controlSet.validUntil)} />
+        <DetailItem label="Controles" value={`${controls.length} esperado(s)`} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {controls.map((control) => (
+          <span key={control.id} className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-700">
+            {control.name}: {resultLabel(control.expectedResult)}
+          </span>
+        ))}
+      </div>
+      {validityState ? (
+        <div className={validityState.className}>
+          {validityState.severity === 'ok' ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+          <span>{validityState.message}</span>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/70 bg-white/75 px-3 py-2">
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{label}</div>
+      <div className="mt-1 font-semibold text-neutral-800">{value}</div>
+    </div>
+  )
+}
+
 function updateExpectedControl(
-  index: 0 | 1,
-  expectedResult: string,
+  index: number,
+  patch: Partial<ImmunologyControlSetRequest['controls'][number]>,
   setControlForm: Dispatch<SetStateAction<ImmunologyControlSetRequest>>,
 ) {
   setControlForm((current) => ({
     ...current,
     controls: current.controls.map((control, controlIndex) => (
-      controlIndex === index ? { ...control, expectedResult } : control
+      controlIndex === index ? { ...control, ...patch } : control
     )),
   }))
 }
 
 function fixedControls(controlSet: ImmunologyControlSet) {
-  return [...controlSet.controls].sort((left, right) => left.displayOrder - right.displayOrder).slice(0, 2)
+  return [...controlSet.controls].sort((left, right) => left.displayOrder - right.displayOrder)
 }
 
 type AnalysisPreviewItem = {
@@ -705,9 +917,9 @@ type AnalysisPreviewItem = {
   status: 'APROVADO' | 'REPROVADO' | 'PENDENTE'
 }
 
-function buildAnalysisPreview(controls: ImmunologyControlSet['controls'], observedResults: string[]) {
-  const items = controls.map((control, index) => {
-    const observedResult = observedResults[index] ?? ''
+function buildAnalysisPreview(controls: ImmunologyControlSet['controls'], observedResults: Record<string, string>) {
+  const items = controls.map((control) => {
+    const observedResult = observedResults[control.id] ?? ''
     return {
       controlName: control.name,
       expectedResult: control.expectedResult,
@@ -715,7 +927,7 @@ function buildAnalysisPreview(controls: ImmunologyControlSet['controls'], observ
       status: observedResult ? (observedResult === control.expectedResult ? 'APROVADO' : 'REPROVADO') : 'PENDENTE',
     } satisfies AnalysisPreviewItem
   })
-  const complete = items.length >= 2 && items.every((item) => item.status !== 'PENDENTE')
+  const complete = items.length > 0 && items.every((item) => item.status !== 'PENDENTE')
   const failedControls = items.filter((item) => item.status === 'REPROVADO').map((item) => item.controlName)
   return {
     items,
@@ -788,6 +1000,40 @@ function getControlValidityState(controlSet: ImmunologyControlSet, dataMedicao: 
   }
 }
 
+function getReagentValidityState(lot: ReagentLot, dataMedicao: string) {
+  if (isTerminalReagentStatus(lot.status)) {
+    return {
+      severity: 'danger',
+      message: `Reagente ${reagentStatusLabel(lot.status).toLowerCase()} não pode ser usado em análise de Imunologia.`,
+      className: statusBoxClass('danger'),
+    }
+  }
+  const days = diffInDays(dataMedicao, lot.expiryDate)
+  if (days !== null && days < 0) {
+    return {
+      severity: 'danger',
+      message: `Reagente vencido em ${formatLongBR(lot.expiryDate)} para a data da análise.`,
+      className: statusBoxClass('danger'),
+    }
+  }
+  if (days !== null && days <= 30) {
+    return {
+      severity: 'warning',
+      message: `Reagente vence em ${days} dia${days === 1 ? '' : 's'} (${formatLongBR(lot.expiryDate)}).`,
+      className: statusBoxClass('warning'),
+    }
+  }
+  return {
+    severity: 'ok',
+    message: `Reagente válido até ${formatLongBR(lot.expiryDate)}.`,
+    className: statusBoxClass('success'),
+  }
+}
+
+function isTerminalReagentStatus(status?: string | null) {
+  return status === 'inativo' || status === 'vencido'
+}
+
 function statusBoxClass(tone: 'success' | 'warning' | 'danger') {
   const tones = {
     success: 'border-green-200 bg-green-50 text-green-800',
@@ -795,6 +1041,35 @@ function statusBoxClass(tone: 'success' | 'warning' | 'danger') {
     danger: 'border-red-200 bg-red-50 text-red-800',
   }
   return `flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium ${tones[tone]}`
+}
+
+function reagentStatusLabel(value?: string | null) {
+  if (value === 'em_estoque') return 'Em estoque'
+  if (value === 'em_uso') return 'Em uso'
+  if (value === 'vencido') return 'Vencido'
+  if (value === 'inativo') return 'Inativo'
+  return value || 'Não informado'
+}
+
+function reagentStatusPillClass(value?: string | null) {
+  if (value === 'vencido' || value === 'inativo') {
+    return 'rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800'
+  }
+  if (value === 'em_uso') {
+    return 'rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800'
+  }
+  return 'rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-800'
+}
+
+function formatOptionalDate(value?: string | null) {
+  return value ? formatLongBR(value) : 'Não informada'
+}
+
+function formatStock(lot: ReagentLot) {
+  const inStock = lot.unitsInStock ?? 0
+  const inUse = lot.unitsInUse ?? 0
+  const total = lot.totalUnits ?? inStock + inUse
+  return `${inStock} fechado(s) · ${inUse} em uso · total ${total}`
 }
 
 function controlStatusLabel(controlSet: ImmunologyControlSet) {

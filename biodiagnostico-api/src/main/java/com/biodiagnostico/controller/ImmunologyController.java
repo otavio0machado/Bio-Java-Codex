@@ -82,4 +82,11 @@ public class ImmunologyController {
     public ResponseEntity<ImmunologyRunResponse> createRun(@Valid @RequestBody ImmunologyRunRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(immunologyQcService.createRun(request));
     }
+
+    @DeleteMapping("/runs/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    public ResponseEntity<Void> deleteRun(@PathVariable UUID id) {
+        immunologyQcService.deleteRun(id);
+        return ResponseEntity.noContent().build();
+    }
 }

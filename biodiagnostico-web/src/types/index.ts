@@ -653,6 +653,7 @@ export interface ImmunologyRunResultRequest {
 
 export interface ImmunologyRunRequest {
   dataMedicao: string
+  reagentLotId: string
   controlSetId: string
   results: ImmunologyRunResultRequest[]
   analyst?: string
@@ -672,6 +673,16 @@ export interface ImmunologyRunResult {
 export interface ImmunologyRun {
   id: string
   controlSetId: string
+  reagentLotId?: string | null
+  reagentLabel?: string | null
+  reagentManufacturer?: string | null
+  reagentLotNumber?: string | null
+  reagentValidUntil?: string | null
+  reagentStatus?: string | null
+  reagentUnitsInStock?: number | null
+  reagentUnitsInUse?: number | null
+  reagentStorageTemp?: string | null
+  reagentLocation?: string | null
   dataMedicao: string
   analito: string
   manufacturer: string

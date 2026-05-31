@@ -12,10 +12,12 @@ import com.biodiagnostico.entity.ImmunologyControlItem;
 import com.biodiagnostico.entity.ImmunologyControlSet;
 import com.biodiagnostico.entity.ImmunologyQcRun;
 import com.biodiagnostico.entity.ImmunologyQcRunResult;
+import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.ImmunologyControlSetRepository;
 import com.biodiagnostico.repository.ImmunologyQcRunRepository;
+import com.biodiagnostico.repository.ReagentLotRepository;
 import java.text.Normalizer;
 import java.time.LocalDate;
 import java.util.HashMap;
@@ -37,13 +39,16 @@ public class ImmunologyQcService {
 
     private final ImmunologyControlSetRepository controlSetRepository;
     private final ImmunologyQcRunRepository runRepository;
+    private final ReagentLotRepository reagentLotRepository;
 
     public ImmunologyQcService(
         ImmunologyControlSetRepository controlSetRepository,
-        ImmunologyQcRunRepository runRepository
+        ImmunologyQcRunRepository runRepository,
+        ReagentLotRepository reagentLotRepository
     ) {
         this.controlSetRepository = controlSetRepository;
         this.runRepository = runRepository;
+        this.reagentLotRepository = reagentLotRepository;
     }
 
     @Transactional(readOnly = true)
@@ -126,8 +131,11 @@ public class ImmunologyQcService {
 
     @Transactional
     public ImmunologyRunResponse createRun(ImmunologyRunRequest request) {
+        ReagentLot reagentLot = reagentLotRepository.findById(request.reagentLotId())
+            .orElseThrow(() -> new ResourceNotFoundException("Reagente de imunologia não encontrado"));
         ImmunologyControlSet controlSet = controlSetRepository.findById(request.controlSetId())
             .orElseThrow(() -> new ResourceNotFoundException("Controle de imunologia não encontrado"));
+        validateReagentForRun(reagentLot, controlSet, request.dataMedicao());
         if (!Boolean.TRUE.equals(controlSet.getIsActive())) {
             throw new BusinessException("Controle de imunologia inativo não pode receber nova análise.");
         }
@@ -142,11 +150,21 @@ public class ImmunologyQcService {
 
         ImmunologyQcRun run = ImmunologyQcRun.builder()
             .controlSet(controlSet)
+            .reagentLot(reagentLot)
             .dataMedicao(request.dataMedicao())
             .analitoSnapshot(controlSet.getAnalito())
             .manufacturerSnapshot(controlSet.getManufacturer())
             .lotNumberSnapshot(controlSet.getLotNumber())
             .validUntilSnapshot(controlSet.getValidUntil())
+            .reagentLabelSnapshot(reagentLot.getName())
+            .reagentManufacturerSnapshot(reagentLot.getManufacturer())
+            .reagentLotNumberSnapshot(reagentLot.getLotNumber())
+            .reagentValidUntilSnapshot(reagentLot.getExpiryDate())
+            .reagentStatusSnapshot(reagentLot.getStatus())
+            .reagentUnitsInStockSnapshot(reagentLot.getUnitsInStock())
+            .reagentUnitsInUseSnapshot(reagentLot.getUnitsInUse())
+            .reagentStorageTempSnapshot(reagentLot.getStorageTemp())
+            .reagentLocationSnapshot(reagentLot.getLocation())
             .analyst(normalizeNullable(request.analyst()))
             .notes(normalizeNullable(request.notes()))
             .status("APROVADO")
@@ -175,6 +193,28 @@ public class ImmunologyQcService {
         }
         run.setStatus(approved ? "APROVADO" : "REPROVADO");
         return toRunResponse(runRepository.save(run));
+    }
+
+    @Transactional
+    public void deleteRun(UUID id) {
+        ImmunologyQcRun run = runRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Análise de imunologia não encontrada"));
+        runRepository.delete(run);
+    }
+
+    private void validateReagentForRun(ReagentLot reagentLot, ImmunologyControlSet controlSet, LocalDate dataMedicao) {
+        if (!"Imunologia".equalsIgnoreCase(normalizeRequired(reagentLot.getCategory(), "Categoria do reagente é obrigatória."))) {
+            throw new BusinessException("Selecione um reagente da categoria Imunologia.");
+        }
+        if ("inativo".equalsIgnoreCase(reagentLot.getStatus()) || "vencido".equalsIgnoreCase(reagentLot.getStatus())) {
+            throw new BusinessException("Reagente inativo ou vencido não pode ser usado em análise de imunologia.");
+        }
+        if (reagentLot.getExpiryDate() != null && reagentLot.getExpiryDate().isBefore(dataMedicao)) {
+            throw new BusinessException("Reagente vencido na data da análise.");
+        }
+        if (!normalizeComparable(reagentLot.getName()).equals(normalizeComparable(controlSet.getAnalito()))) {
+            throw new BusinessException("O soro-controle selecionado não pertence ao analito do reagente.");
+        }
     }
 
     private void validateNaturalKey(UUID currentId, ImmunologyControlSetRequest request) {
@@ -246,6 +286,11 @@ public class ImmunologyQcService {
         return normalizeRequired(value, "Analito é obrigatório.").toUpperCase(Locale.ROOT);
     }
 
+    private String normalizeComparable(String value) {
+        return stripAccents(normalizeRequired(value, "Valor obrigatório."))
+            .toUpperCase(Locale.ROOT);
+    }
+
     private String normalizeRequired(String value, String message) {
         if (value == null || value.isBlank()) {
             throw new BusinessException(message);
@@ -293,9 +338,20 @@ public class ImmunologyQcService {
     }
 
     private ImmunologyRunResponse toRunResponse(ImmunologyQcRun run) {
+        ReagentLot reagentLot = run.getReagentLot();
         return new ImmunologyRunResponse(
             run.getId(),
             run.getControlSet() != null ? run.getControlSet().getId() : null,
+            reagentLot != null ? reagentLot.getId() : null,
+            coalesce(run.getReagentLabelSnapshot(), reagentLot != null ? reagentLot.getName() : null),
+            coalesce(run.getReagentManufacturerSnapshot(), reagentLot != null ? reagentLot.getManufacturer() : null),
+            coalesce(run.getReagentLotNumberSnapshot(), reagentLot != null ? reagentLot.getLotNumber() : null),
+            run.getReagentValidUntilSnapshot() != null ? run.getReagentValidUntilSnapshot() : (reagentLot != null ? reagentLot.getExpiryDate() : null),
+            coalesce(run.getReagentStatusSnapshot(), reagentLot != null ? reagentLot.getStatus() : null),
+            run.getReagentUnitsInStockSnapshot() != null ? run.getReagentUnitsInStockSnapshot() : (reagentLot != null ? reagentLot.getUnitsInStock() : null),
+            run.getReagentUnitsInUseSnapshot() != null ? run.getReagentUnitsInUseSnapshot() : (reagentLot != null ? reagentLot.getUnitsInUse() : null),
+            coalesce(run.getReagentStorageTempSnapshot(), reagentLot != null ? reagentLot.getStorageTemp() : null),
+            coalesce(run.getReagentLocationSnapshot(), reagentLot != null ? reagentLot.getLocation() : null),
             run.getDataMedicao(),
             run.getAnalitoSnapshot(),
             run.getManufacturerSnapshot(),
@@ -307,6 +363,10 @@ public class ImmunologyQcService {
             run.getCreatedAt(),
             run.getResults().stream().map(this::toRunResultResponse).toList()
         );
+    }
+
+    private String coalesce(String preferred, String fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
     private ImmunologyRunResultResponse toRunResultResponse(ImmunologyQcRunResult result) {
