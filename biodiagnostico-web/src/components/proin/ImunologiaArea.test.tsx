@@ -62,6 +62,22 @@ function renderArea() {
   )
 }
 
+function getSoroControleCadastroInput() {
+  const field = screen.getAllByLabelText('Soro-controle *').find((element) => element.tagName === 'INPUT')
+  if (!field) {
+    throw new Error('Campo de cadastro de soro-controle não encontrado')
+  }
+  return field as HTMLInputElement
+}
+
+function getSoroControleAnalysisSelect() {
+  const field = screen.getAllByLabelText('Soro-controle *').find((element) => element.tagName === 'SELECT')
+  if (!field) {
+    throw new Error('Select de soro-controle da análise não encontrado')
+  }
+  return field as HTMLSelectElement
+}
+
 beforeEach(() => {
   createControlSetMutation.mutateAsync.mockReset()
   updateControlSetMutation.mutateAsync.mockReset()
@@ -94,7 +110,8 @@ describe('ImunologiaArea', () => {
     expect(screen.getByText('1. Selecionar reagente')).toBeInTheDocument()
     expect(screen.getByText('2. Dados/Resultados')).toBeInTheDocument()
     expect(screen.getByLabelText('Reagente de Imunologia *')).toBeInTheDocument()
-    expect(screen.getByLabelText('Soro-controle *')).toBeInTheDocument()
+    expect(getSoroControleAnalysisSelect()).toBeInTheDocument()
+    expect(getSoroControleCadastroInput()).toBeInTheDocument()
     expect(screen.queryByText('3. Resultados')).not.toBeInTheDocument()
     expect(screen.getByText('Cadastro de soro-controles')).toBeInTheDocument()
   })
@@ -103,14 +120,15 @@ describe('ImunologiaArea', () => {
     renderArea()
 
     expect(screen.getByLabelText('Reagente de Imunologia *')).toBeInTheDocument()
-    expect(screen.queryByText(/Selecione para preencher analito/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Selecione para preencher soro-controle/i)).not.toBeInTheDocument()
   })
 
   it('envia cadastro de controle com a quantidade configurada pelo usuário', async () => {
     renderArea()
 
-    await userEvent.clear(screen.getByLabelText('Analito *'))
-    await userEvent.type(screen.getByLabelText('Analito *'), 'HIV')
+    const soroControleInput = getSoroControleCadastroInput()
+    await userEvent.clear(soroControleInput)
+    await userEvent.type(soroControleInput, 'HIV')
     await userEvent.type(screen.getByLabelText('Marca *'), 'Wama')
     await userEvent.type(screen.getByLabelText('Lote *'), '1023')
     await userEvent.type(screen.getByLabelText('Validade *'), '2027-10-01')
@@ -133,8 +151,9 @@ describe('ImunologiaArea', () => {
     renderArea()
 
     await userEvent.click(screen.getByRole('button', { name: /Adicionar controle/i }))
-    await userEvent.clear(screen.getByLabelText('Analito *'))
-    await userEvent.type(screen.getByLabelText('Analito *'), 'HIV')
+    const soroControleInput = getSoroControleCadastroInput()
+    await userEvent.clear(soroControleInput)
+    await userEvent.type(soroControleInput, 'HIV')
     await userEvent.type(screen.getByLabelText('Marca *'), 'Wama')
     await userEvent.type(screen.getByLabelText('Lote *'), '1024')
     await userEvent.type(screen.getByLabelText('Validade *'), '2027-10-01')
@@ -158,7 +177,7 @@ describe('ImunologiaArea', () => {
     renderArea()
 
     await userEvent.selectOptions(screen.getByLabelText('Reagente de Imunologia *'), 'lot-1')
-    await userEvent.selectOptions(screen.getByLabelText('Soro-controle *'), 'set-1')
+    await userEvent.selectOptions(getSoroControleAnalysisSelect(), 'set-1')
     const resultSelects = screen.getAllByLabelText('Resultado')
     expect(screen.getAllByText('Controle 1: Reagente').length).toBeGreaterThan(0)
     await userEvent.selectOptions(resultSelects[0], 'REAGENTE')
@@ -180,13 +199,13 @@ describe('ImunologiaArea', () => {
     })
   })
 
-  it('filtra soro-controles pelo analito do reagente selecionado', async () => {
+  it('filtra soro-controles pelo reagente selecionado', async () => {
     mockUseImmunologyControlSets.mockReturnValue({ data: [controlSet(), controlSet({ id: 'set-2', analito: 'HBsAg', lotNumber: 'HB-01' })] })
     renderArea()
 
     await userEvent.selectOptions(screen.getByLabelText('Reagente de Imunologia *'), 'lot-1')
 
-    const select = screen.getByLabelText('Soro-controle *')
+    const select = getSoroControleAnalysisSelect()
     expect(within(select).getByRole('option', { name: /HIV/i })).toBeInTheDocument()
     expect(within(select).queryByRole('option', { name: /HBsAg/i })).not.toBeInTheDocument()
   })

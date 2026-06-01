@@ -120,7 +120,7 @@ export function ImunologiaArea() {
       return
     }
     if (!controlForm.analito || !controlForm.manufacturer || !controlForm.lotNumber || !controlForm.validUntil) {
-      toast.warning('Preencha analito, marca, lote e validade.')
+      toast.warning('Preencha soro-controle, marca, lote e validade.')
       return
     }
     if (!controlForm.controls.length || controlForm.controls.some((control) => !control.name.trim())) {
@@ -128,7 +128,7 @@ export function ImunologiaArea() {
       return
     }
     if (findDuplicateControlSet(controlSets, controlForm, editingControlSetId)) {
-      toast.warning('Já existe controle ativo para este analito, marca e lote.')
+      toast.warning('Já existe controle ativo para este soro-controle, marca e lote.')
       return
     }
 
@@ -175,7 +175,7 @@ export function ImunologiaArea() {
       return
     }
     if (normalizeKey(selectedControlSet.analito) !== normalizeKey(selectedReagentLot.label)) {
-      toast.warning('O soro-controle selecionado não pertence ao analito do reagente.')
+      toast.warning('O soro-controle selecionado não corresponde ao reagente.')
       return
     }
     if (isControlExpiredForDate(selectedControlSet, analysisForm.dataMedicao)) {
@@ -228,7 +228,7 @@ export function ImunologiaArea() {
     }
     const controlSet = compatibleControlSets.find((item) => item.id === controlSetId)
     if (!controlSet) {
-      toast.warning('Selecione um soro-controle compatível com o analito do reagente.')
+      toast.warning('Selecione um soro-controle compatível com o reagente.')
       return
     }
     if (!controlSet.isActive) {
@@ -444,7 +444,7 @@ export function ImunologiaArea() {
 
             {selectedReagentLot && !compatibleControlSets.length ? (
               <div className={statusBoxClass('warning')}>
-                Não há soro-controle ativo para o analito {selectedReagentLot.label}.
+                Não há soro-controle ativo para o reagente {selectedReagentLot.label}.
               </div>
             ) : null}
 
@@ -497,7 +497,7 @@ export function ImunologiaArea() {
 
         {lastSavedRun ? (
           <div className={lastSavedRun.status === 'APROVADO' ? statusBoxClass('success') : statusBoxClass('danger')}>
-            Última análise: reagente {lastSavedRun.reagentLabel || 'não vinculado'} · soro {lastSavedRun.analito} lote {lastSavedRun.lotNumber} · {formatLongBR(lastSavedRun.dataMedicao)} · <strong>{lastSavedRun.status}</strong>
+            Última análise: reagente {lastSavedRun.reagentLabel || 'não vinculado'} · soro-controle {lastSavedRun.analito} lote {lastSavedRun.lotNumber} · {formatLongBR(lastSavedRun.dataMedicao)} · <strong>{lastSavedRun.status}</strong>
           </div>
         ) : null}
       </Card>
@@ -514,7 +514,7 @@ export function ImunologiaArea() {
 
         <div className={`grid gap-4 md:grid-cols-4 ${FORM_TONE}`}>
           <Input
-            label="Analito *"
+            label="Soro-controle *"
             value={controlForm.analito}
             onChange={(event) => setControlForm((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
           />
@@ -537,7 +537,7 @@ export function ImunologiaArea() {
         </div>
 
         {findDuplicateControlSet(controlSets, controlForm, editingControlSetId) ? (
-          <div className={statusBoxClass('warning')}>Já existe controle ativo para este analito, marca e lote.</div>
+          <div className={statusBoxClass('warning')}>Já existe controle ativo para este soro-controle, marca e lote.</div>
         ) : null}
 
         <div className={`space-y-4 border-y border-neutral-100 py-4 ${FORM_TONE}`}>
@@ -647,7 +647,7 @@ export function ImunologiaArea() {
         <h3 className="border-b border-neutral-100 pb-5 text-xl font-bold text-neutral-950">Histórico</h3>
         <div className={`grid gap-3 md:grid-cols-5 ${FORM_TONE}`}>
           <Input
-            label="Analito"
+            label="Soro-controle"
             value={historyFilters.analito}
             onChange={(event) => setHistoryFilters((current) => ({ ...current, analito: event.target.value.toUpperCase() }))}
           />
