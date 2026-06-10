@@ -43,6 +43,11 @@ public class ImmunologyQcRun {
     @JsonIgnore
     private ImmunologyControlSet controlSet;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reagent_lot_id")
+    @JsonIgnore
+    private ReagentLot reagentLot;
+
     @Column(name = "data_medicao", nullable = false)
     private LocalDate dataMedicao;
 
@@ -57,6 +62,33 @@ public class ImmunologyQcRun {
 
     @Column(name = "valid_until_snapshot", nullable = false)
     private LocalDate validUntilSnapshot;
+
+    @Column(name = "reagent_label_snapshot")
+    private String reagentLabelSnapshot;
+
+    @Column(name = "reagent_manufacturer_snapshot")
+    private String reagentManufacturerSnapshot;
+
+    @Column(name = "reagent_lot_number_snapshot")
+    private String reagentLotNumberSnapshot;
+
+    @Column(name = "reagent_valid_until_snapshot")
+    private LocalDate reagentValidUntilSnapshot;
+
+    @Column(name = "reagent_status_snapshot")
+    private String reagentStatusSnapshot;
+
+    @Column(name = "reagent_units_in_stock_snapshot")
+    private Integer reagentUnitsInStockSnapshot;
+
+    @Column(name = "reagent_units_in_use_snapshot")
+    private Integer reagentUnitsInUseSnapshot;
+
+    @Column(name = "reagent_storage_temp_snapshot")
+    private String reagentStorageTempSnapshot;
+
+    @Column(name = "reagent_location_snapshot")
+    private String reagentLocationSnapshot;
 
     @Column(nullable = false)
     private String status;

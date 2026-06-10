@@ -268,8 +268,8 @@ public class PdfReportService {
                     return;
                 }
 
-                PdfPTable table = createTable(new float[] {1.8F, 1.8F, 2.0F, 2.0F, 1.8F, 2.3F, 1.9F, 1.9F, 1.7F});
-                addHeaderRow(table, "Data", "Analito", "Marca", "Lote", "Validade", "Controle", "Esperado", "Observado", "Status");
+                PdfPTable table = createTable(new float[] {1.5F, 1.8F, 1.8F, 1.4F, 1.8F, 1.8F, 2.0F, 1.7F, 1.7F, 1.5F});
+                addHeaderRow(table, "Data", "Reagente", "Lote reag.", "Status reag.", "Soro", "Lote soro", "Controle", "Esperado", "Observado", "Status");
                 boolean alternate = false;
                 for (ImmunologyQcRun run : runs) {
                     for (ImmunologyQcRunResult result : run.getResults()) {
@@ -277,10 +277,11 @@ public class PdfReportService {
                             table,
                             alternate,
                             formatDate(run.getDataMedicao()),
+                            safe(run.getReagentLabelSnapshot()),
+                            safe(run.getReagentLotNumberSnapshot()),
+                            safe(run.getReagentStatusSnapshot()),
                             safe(run.getAnalitoSnapshot()),
-                            safe(run.getManufacturerSnapshot()),
                             safe(run.getLotNumberSnapshot()),
-                            formatDate(run.getValidUntilSnapshot()),
                             safe(result.getControlNameSnapshot()),
                             qualitativeLabel(result.getExpectedResultSnapshot()),
                             qualitativeLabel(result.getObservedResult()),

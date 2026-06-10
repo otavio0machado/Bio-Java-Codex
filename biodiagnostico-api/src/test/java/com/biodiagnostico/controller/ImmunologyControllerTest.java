@@ -1,6 +1,8 @@
 package com.biodiagnostico.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -88,6 +90,7 @@ class ImmunologyControllerTest {
                 .content(objectMapper.writeValueAsString(runRequest())))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.status").value("APROVADO"))
+            .andExpect(jsonPath("$.reagentLabel").value("HIV"))
             .andExpect(jsonPath("$.results[0].observedResult").value("REAGENTE"));
     }
 
@@ -121,6 +124,17 @@ class ImmunologyControllerTest {
                 .contentType("application/json")
                 .content(objectMapper.writeValueAsString(runRequest())))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("deve retornar 204 ao excluir análise qualitativa")
+    void shouldReturn204WhenDeletingRun() throws Exception {
+        UUID id = UUID.randomUUID();
+
+        mockMvc.perform(delete("/api/qc/imunologia/runs/{id}", id).with(qcWriter()))
+            .andExpect(status().isNoContent());
+
+        assertThat(service.deletedRunId).isEqualTo(id);
     }
 
     private RequestPostProcessor qcWriter() {
@@ -165,10 +179,11 @@ class ImmunologyControllerTest {
         private List<ImmunologyControlSetResponse> controlSets = List.of();
         private ImmunologyControlSetResponse createControlSetResponse;
         private ImmunologyRunResponse createRunResponse;
+        private UUID deletedRunId;
         private RuntimeException createRunException;
 
         StubImmunologyQcService() {
-            super(null, null);
+            super(null, null, null);
         }
 
         @Override
@@ -188,6 +203,11 @@ class ImmunologyControllerTest {
             }
             return createRunResponse;
         }
+
+        @Override
+        public void deleteRun(UUID id) {
+            deletedRunId = id;
+        }
     }
 
     private ImmunologyControlSetRequest controlSetRequest() {
@@ -206,6 +226,7 @@ class ImmunologyControllerTest {
     private ImmunologyRunRequest runRequest() {
         return new ImmunologyRunRequest(
             LocalDate.of(2026, 5, 29),
+            UUID.randomUUID(),
             UUID.randomUUID(),
             List.of(new ImmunologyRunResultRequest(UUID.randomUUID(), "REAGENTE")),
             "Ana",
@@ -235,6 +256,16 @@ class ImmunologyControllerTest {
         return new ImmunologyRunResponse(
             UUID.randomUUID(),
             UUID.randomUUID(),
+            UUID.randomUUID(),
+            "HIV",
+            "Wama",
+            "R-1022",
+            LocalDate.of(2027, 10, 1),
+            "em_estoque",
+            1,
+            0,
+            "2-8°C",
+            "Geladeira CQ",
             LocalDate.of(2026, 5, 29),
             "HIV",
             "Wama",

@@ -30,4 +30,7 @@ export const immunologyService = {
     const response = await api.post<ImmunologyRun>('/qc/imunologia/runs', request)
     return response.data
   },
+  async deleteRun(id: string) {
+    await api.delete(`/qc/imunologia/runs/${id}`)
+  },
 }

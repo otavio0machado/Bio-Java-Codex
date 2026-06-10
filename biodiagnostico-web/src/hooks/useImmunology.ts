@@ -56,3 +56,13 @@ export function useCreateImmunologyRun() {
     },
   })
 }
+
+export function useDeleteImmunologyRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => immunologyService.deleteRun(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['immunology', 'runs'] })
+    },
+  })
+}
