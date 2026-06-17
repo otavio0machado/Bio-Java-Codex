@@ -2,7 +2,12 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
-    open-in-view: false
+    # Mantido habilitado: os recursos de IA montam o contexto de CQ percorrendo a
+    # colecao LAZY QcRecord.violations (AiService.buildQcContext) fora da transacao
+    # de leitura. Com open-in-view=false isso lanca LazyInitializationException e
+    # derruba todas as funcoes de IA. A conexao nao fica presa durante a chamada
+    # da OpenAI (o Hibernate libera apos cada lazy-load) e as respostas sao DTOs.
+    open-in-view: ${JPA_OPEN_IN_VIEW:true}
     show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
