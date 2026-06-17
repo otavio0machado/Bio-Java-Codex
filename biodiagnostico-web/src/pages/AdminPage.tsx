@@ -272,6 +272,8 @@ function CreateUserModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
   const [showPw, setShowPw] = useState(false)
 
   const handleSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (createUser.isPending) return
     if (!username.trim() || !name.trim() || !password) {
       toast.warning('Preencha o nome de usuário, nome completo e senha.')
       return
@@ -455,6 +457,8 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? [])
 
   const handleSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (updateUser.isPending) return
     try {
       await updateUser.mutateAsync({
         id: user.id,
@@ -604,6 +608,8 @@ function ResetPasswordModal({ user, onClose }: { user: User; onClose: () => void
   const [showPw, setShowPw] = useState(false)
 
   const handleSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (resetPassword.isPending) return
     if (newPassword.length < 4) {
       toast.warning('A senha deve ter pelo menos 4 caracteres.')
       return

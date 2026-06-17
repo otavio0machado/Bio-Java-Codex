@@ -87,6 +87,45 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
         return "SEM EFEITO";
     }
 
+    /**
+     * Quatro baldes mutuamente exclusivos para o efeito de calibracao.
+     * <p>INVARIANTE: {@code eficazes + semEfeito + pioraram + semMedicao == total}.
+     * Registros sem CV original ou sem CV pos-calibracao NAO sao decisao clinica
+     * (nao houve medicao) e nao podem cair em "Sem efeito" nem "Pioraram".
+     */
+    record CalibrationBuckets(long eficazes, long semEfeito, long pioraram, long semMedicao) {
+        int total() {
+            return (int) (eficazes + semEfeito + pioraram + semMedicao);
+        }
+    }
+
+    /**
+     * Classifica uma lista de calibracoes nos 4 baldes deterministicos.
+     * Metodo puro (package-private) — unica fonte de verdade usada tanto no
+     * resumo de topo quanto no detalhamento por exame, eliminando divergencia.
+     */
+    CalibrationBuckets classifyCalibrations(List<PostCalibrationRecord> records) {
+        long eficazes = 0;
+        long semEfeito = 0;
+        long pioraram = 0;
+        long semMedicao = 0;
+        if (records != null) {
+            for (PostCalibrationRecord r : records) {
+                if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) {
+                    semMedicao++;
+                    continue;
+                }
+                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                switch (classifyCalibrationDelta(delta)) {
+                    case "EFICAZ" -> eficazes++;
+                    case "PIOROU" -> pioraram++;
+                    default -> semEfeito++;
+                }
+            }
+        }
+        return new CalibrationBuckets(eficazes, semEfeito, pioraram, semMedicao);
+    }
+
     @Override
     public ReportDefinition definition() {
         return ReportDefinitionRegistry.CALIBRACAO_PREPOST_DEFINITION;
@@ -135,19 +174,22 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
             List<PostCalibrationRecord> records = repository.findByQcRecordAreaAndDateRange(
                 rf.area == null ? "bioquimica" : rf.area, rf.start, rf.end);
             // Tolerancia configuravel (default 0.5pp) para classificar efeito.
-            long eficazes = records.stream().filter(r -> {
-                if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
-                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
-                return "EFICAZ".equals(classifyCalibrationDelta(delta));
-            }).count();
-            long semEfeito = records.size() - eficazes;
+            // 4 baldes mutuamente exclusivos — fonte unica compartilhada com o
+            // detalhamento por exame (sem divergencia resumo vs. soma do detalhe).
+            CalibrationBuckets buckets = classifyCalibrations(records);
 
             doc.add(ReportV2PdfTheme.section("Resumo"));
-            PdfPTable cards = new PdfPTable(new float[] {1, 1, 1});
+            boolean showSemMedicao = buckets.semMedicao() > 0;
+            float[] cardWidths = showSemMedicao ? new float[] {1, 1, 1, 1, 1} : new float[] {1, 1, 1, 1};
+            PdfPTable cards = new PdfPTable(cardWidths);
             cards.setWidthPercentage(100F); cards.setSpacingAfter(6F);
             cards.addCell(card("Total", String.valueOf(records.size()), ReportV2PdfTheme.BRAND_PRIMARY));
-            cards.addCell(card("Eficazes", String.valueOf(eficazes), ReportV2PdfTheme.STATUS_APROVADO));
-            cards.addCell(card("Sem efeito/pioraram", String.valueOf(semEfeito), ReportV2PdfTheme.STATUS_ALERTA));
+            cards.addCell(card("Eficazes", String.valueOf(buckets.eficazes()), ReportV2PdfTheme.STATUS_APROVADO));
+            cards.addCell(card("Sem efeito", String.valueOf(buckets.semEfeito()), ReportV2PdfTheme.MUTED));
+            cards.addCell(card("Pioraram", String.valueOf(buckets.pioraram()), ReportV2PdfTheme.STATUS_REPROVADO));
+            if (showSemMedicao) {
+                cards.addCell(card("Sem medicao", String.valueOf(buckets.semMedicao()), ReportV2PdfTheme.BORDER));
+            }
             doc.add(cards);
 
             if (!records.isEmpty()) {
@@ -157,19 +199,26 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                 boolean alt = false;
                 Map<String, Number> deltaChart = new LinkedHashMap<>();
                 for (PostCalibrationRecord r : records) {
-                    double oCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
-                    double pCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
-                    double delta = pCv - oCv;
-                    String st = classifyCalibrationDelta(delta);
+                    boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+                    String deltaTxt;
+                    String st;
+                    if (medido) {
+                        double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                        deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                        st = classifyCalibrationDelta(delta);
+                        deltaChart.put(ReportV2PdfTheme.safe(r.getExamName()), delta);
+                    } else {
+                        deltaTxt = "N/D";
+                        st = "SEM MEDICAO";
+                    }
                     ReportV2PdfTheme.bodyRow(t, alt,
                         ReportV2PdfTheme.safe(r.getExamName()),
-                        ReportV2PdfTheme.formatDecimal(oCv),
-                        ReportV2PdfTheme.formatDecimal(pCv),
-                        String.format(PT_BR, "%+.2f", delta),
+                        ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                        ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
+                        deltaTxt,
                         st,
                         ReportV2PdfTheme.formatDate(r.getDate()));
                     alt = !alt;
-                    deltaChart.put(ReportV2PdfTheme.safe(r.getExamName()), delta);
                 }
                 doc.add(t);
                 if (!deltaChart.isEmpty()) {
@@ -220,7 +269,10 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
             if (rf.includeAiCommentary) {
                 doc.add(ReportV2PdfTheme.section("Analise executiva"));
                 String structured = "Periodo: " + rf.periodLabel + "\nTotal calibracoes: " + records.size()
-                    + "\nEficazes: " + eficazes + "\nSem efeito ou pioraram: " + semEfeito;
+                    + "\nEficazes: " + buckets.eficazes()
+                    + "\nSem efeito: " + buckets.semEfeito()
+                    + "\nPioraram: " + buckets.pioraram()
+                    + "\nSem medicao: " + buckets.semMedicao();
                 String commentary = aiCommentator.commentary(ReportCode.CALIBRACAO_PREPOST, structured, ctx);
                 PdfPTable wrap = new PdfPTable(1);
                 wrap.setWidthPercentage(100F);
@@ -323,24 +375,21 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
         h.setSpacingBefore(4F); h.setSpacingAfter(6F);
         doc.add(h);
 
-        // Stats deste exame
-        long eficazes = events.stream().filter(r -> {
-            if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
-            return "EFICAZ".equals(classifyCalibrationDelta(r.getPostCalibrationCv() - r.getOriginalCv()));
-        }).count();
-        long pioraram = events.stream().filter(r -> {
-            if (r.getOriginalCv() == null || r.getPostCalibrationCv() == null) return false;
-            return "PIOROU".equals(classifyCalibrationDelta(r.getPostCalibrationCv() - r.getOriginalCv()));
-        }).count();
-        long semEf = events.size() - eficazes - pioraram;
+        // Stats deste exame — mesma fonte unica do resumo de topo (4 baldes).
+        CalibrationBuckets buckets = classifyCalibrations(events);
+        boolean showSemMedicao = buckets.semMedicao() > 0;
 
-        PdfPTable cards = new PdfPTable(new float[] {1, 1, 1, 1});
+        float[] cardWidths = showSemMedicao ? new float[] {1, 1, 1, 1, 1} : new float[] {1, 1, 1, 1};
+        PdfPTable cards = new PdfPTable(cardWidths);
         cards.setWidthPercentage(100F);
         cards.setSpacingAfter(8F);
         cards.addCell(card("Total no periodo", String.valueOf(events.size()), ReportV2PdfTheme.BRAND_PRIMARY));
-        cards.addCell(card("Eficazes", String.valueOf(eficazes), ReportV2PdfTheme.STATUS_APROVADO));
-        cards.addCell(card("Sem efeito", String.valueOf(semEf), ReportV2PdfTheme.MUTED));
-        cards.addCell(card("Pioraram", String.valueOf(pioraram), ReportV2PdfTheme.STATUS_REPROVADO));
+        cards.addCell(card("Eficazes", String.valueOf(buckets.eficazes()), ReportV2PdfTheme.STATUS_APROVADO));
+        cards.addCell(card("Sem efeito", String.valueOf(buckets.semEfeito()), ReportV2PdfTheme.MUTED));
+        cards.addCell(card("Pioraram", String.valueOf(buckets.pioraram()), ReportV2PdfTheme.STATUS_REPROVADO));
+        if (showSemMedicao) {
+            cards.addCell(card("Sem medicao", String.valueOf(buckets.semMedicao()), ReportV2PdfTheme.BORDER));
+        }
         doc.add(cards);
 
         // Tabela cronologica
@@ -355,18 +404,24 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
             .collect(java.util.stream.Collectors.toList());
         for (com.biodiagnostico.entity.PostCalibrationRecord r : sorted) {
-            double oCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
-            double pCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
-            double delta = pCv - oCv;
-            String st = r.getOriginalCv() == null || r.getPostCalibrationCv() == null
-                ? "—" : classifyCalibrationDelta(delta);
+            boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+            String deltaTxt;
+            String st;
+            if (medido) {
+                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                st = classifyCalibrationDelta(delta);
+            } else {
+                deltaTxt = "N/D";
+                st = "SEM MEDICAO";
+            }
             ReportV2PdfTheme.bodyRow(t, alt,
                 ReportV2PdfTheme.formatDate(r.getDate()),
-                ReportV2PdfTheme.formatDecimal(oCv),
-                ReportV2PdfTheme.formatDecimal(pCv),
+                ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
                 ReportV2PdfTheme.formatDecimal(r.getOriginalValue()),
                 ReportV2PdfTheme.formatDecimal(r.getPostCalibrationValue()),
-                String.format(PT_BR, "%+.2f", delta),
+                deltaTxt,
                 st,
                 ReportV2PdfTheme.safe(r.getAnalyst()),
                 truncate(ReportV2PdfTheme.safe(r.getNotes()), 60));

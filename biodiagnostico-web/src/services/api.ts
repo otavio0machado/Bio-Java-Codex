@@ -171,7 +171,19 @@ api.interceptors.response.use(
     const isNetworkError = !axiosError.response
     const retryCount = originalRequest._retryCount ?? 0
 
-    if ((isNetworkError || (status !== undefined && status >= 500)) && retryCount < 3 && !isAuthRoute(originalRequest.url)) {
+    // Re-tentativa automatica so e segura para metodos idempotentes. Metodos
+    // mutantes (post/put/patch/delete) NAO podem ser reenviados aqui, pois um
+    // 5xx/erro de rede pode ter ocorrido APOS a gravacao no servidor — reenviar
+    // duplicaria medicoes, lotes e assinaturas.
+    const method = (originalRequest.method ?? 'get').toLowerCase()
+    const isIdempotent = ['get', 'head', 'options'].includes(method)
+
+    if (
+      isIdempotent &&
+      (isNetworkError || (status !== undefined && status >= 500)) &&
+      retryCount < 3 &&
+      !isAuthRoute(originalRequest.url)
+    ) {
       originalRequest._retryCount = retryCount + 1
       await wait(250 * 2 ** retryCount)
       return api(originalRequest)

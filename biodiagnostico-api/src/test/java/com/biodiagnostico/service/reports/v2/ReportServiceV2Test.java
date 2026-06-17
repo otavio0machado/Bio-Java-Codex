@@ -179,6 +179,27 @@ class ReportServiceV2Test {
     }
 
     @Test
+    @DisplayName("generate: popula shareToken (opaco, sem hifens, <= 64) no run V2 persistido")
+    void generatePopulatesShareToken() throws Exception {
+        when(storage.save(any(byte[].class), any(ReportStorage.StorageKeyHint.class)))
+            .thenReturn("reports/v2/202604/CQ_OPERATIONAL_V2/BIO-202604-000001.pdf");
+
+        GenerateReportV2Request req = new GenerateReportV2Request(
+            ReportCode.CQ_OPERATIONAL_V2, ReportFormat.PDF,
+            Map.of("area", "bioquimica", "periodType", "current-month")
+        );
+        service.generate(req, authFuncionarioDownload());
+
+        ArgumentCaptor<ReportRun> captor = ArgumentCaptor.forClass(ReportRun.class);
+        verify(runRepository).save(captor.capture());
+        String token = captor.getValue().getShareToken();
+        assertThat(token).isNotNull();
+        assertThat(token).doesNotContain("-");
+        assertThat(token.length()).isLessThanOrEqualTo(64);
+        assertThat(token).hasSize(32); // UUID v4 sem hifens
+    }
+
+    @Test
     @DisplayName("generate: warnings ficam persistidos e status vira WITH_WARNINGS")
     void generateWithWarningsPersistsWarnings() throws Exception {
         stubGenerator.warnings = List.of("Secao 'KPIs de Manutencao' falhou — conteudo omitido");
@@ -244,15 +265,134 @@ class ReportServiceV2Test {
     // ---------- Verify (Ressalva 5) ----------
 
     @Test
-    @DisplayName("verify: hash desconhecido retorna 200 com valid=false (Ressalva 5)")
+    @DisplayName("verify: param desconhecido (token) retorna 200 com status NOT_FOUND, valid=false (Ressalva 5)")
     void verifyHashDesconhecidoRetornaValidFalse() {
-        when(runRepository.findBySha256OrSignatureHash(eq("zzz"))).thenReturn(List.of());
+        // "zzz" nao casa [0-9a-fA-F]{64} -> tratado como TOKEN
+        when(runRepository.findByShareToken(eq("zzz"))).thenReturn(Optional.empty());
         VerifyReportResponse res = service.verify("zzz");
+        assertThat(res.status()).isEqualTo("NOT_FOUND");
         assertThat(res.valid()).isFalse();
         assertThat(res.signed()).isFalse();
         assertThat(res.reportNumber()).isNull();
         assertThat(res.sha256()).isNull();
         assertThat(res.signatureHash()).isNull();
+    }
+
+    @Test
+    @DisplayName("verify: token de run assinado -> VALID_SIGNED, valid=true")
+    void verifyTokenRunAssinadoValidSigned() {
+        String token = "abcdef0123456789abcdef0123456789";
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000010")
+            .sha256("a".repeat(64))
+            .signatureHash("b".repeat(64))
+            .signedAt(Instant.now())
+            .shareToken(token)
+            .status("SIGNED")
+            .createdAt(Instant.now())
+            .build();
+        when(runRepository.findByShareToken(eq(token))).thenReturn(Optional.of(run));
+        VerifyReportResponse res = service.verify(token);
+        assertThat(res.status()).isEqualTo("VALID_SIGNED");
+        assertThat(res.valid()).isTrue();
+        assertThat(res.signed()).isTrue();
+        assertThat(res.signatureHash()).isEqualTo("b".repeat(64));
+        assertThat(res.reportNumber()).isEqualTo("BIO-202604-000010");
+    }
+
+    @Test
+    @DisplayName("verify: token de run NAO assinado -> VALID_UNSIGNED, valid=true, signed=false")
+    void verifyTokenRunNaoAssinadoValidUnsigned() {
+        String token = "0123456789abcdef0123456789abcdef";
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000011")
+            .sha256("a".repeat(64))
+            .shareToken(token)
+            .status("SUCCESS")
+            .createdAt(Instant.now())
+            .build();
+        when(runRepository.findByShareToken(eq(token))).thenReturn(Optional.of(run));
+        VerifyReportResponse res = service.verify(token);
+        assertThat(res.status()).isEqualTo("VALID_UNSIGNED");
+        assertThat(res.valid()).isTrue();
+        assertThat(res.signed()).isFalse();
+        assertThat(res.signatureHash()).isNull();
+    }
+
+    @Test
+    @DisplayName("verify: hash == signatureHash -> VALID_SIGNED")
+    void verifyHashSignatureHashValidSigned() {
+        String sigHash = "b".repeat(64);
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000012")
+            .sha256("a".repeat(64))
+            .signatureHash(sigHash)
+            .signedAt(Instant.now())
+            .status("SIGNED")
+            .createdAt(Instant.now())
+            .build();
+        when(runRepository.findBySha256OrSignatureHash(eq(sigHash))).thenReturn(List.of(run));
+        VerifyReportResponse res = service.verify(sigHash);
+        assertThat(res.status()).isEqualTo("VALID_SIGNED");
+        assertThat(res.valid()).isTrue();
+        assertThat(res.signed()).isTrue();
+        assertThat(res.signatureHash()).isEqualTo(sigHash);
+    }
+
+    @Test
+    @DisplayName("verify: hash == sha256 original de run JA assinado -> SUPERSEDED, valid=false")
+    void verifyHashOriginalRunAssinadoSuperseded() {
+        String origHash = "a".repeat(64);
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000013")
+            .sha256(origHash)
+            .signatureHash("b".repeat(64))
+            .signedAt(Instant.now())
+            .status("SIGNED")
+            .createdAt(Instant.now())
+            .build();
+        when(runRepository.findBySha256OrSignatureHash(eq(origHash))).thenReturn(List.of(run));
+        VerifyReportResponse res = service.verify(origHash);
+        assertThat(res.status()).isEqualTo("SUPERSEDED");
+        assertThat(res.valid()).isFalse();
+        assertThat(res.sha256()).isEqualTo(origHash);
+    }
+
+    @Test
+    @DisplayName("verify: hash == sha256 original de run NAO assinado -> VALID_UNSIGNED")
+    void verifyHashOriginalRunNaoAssinadoValidUnsigned() {
+        String origHash = "a".repeat(64);
+        ReportRun run = ReportRun.builder()
+            .id(UUID.randomUUID())
+            .reportCode("CQ_OPERATIONAL_V2")
+            .reportNumber("BIO-202604-000014")
+            .sha256(origHash)
+            .status("SUCCESS")
+            .createdAt(Instant.now())
+            .build();
+        when(runRepository.findBySha256OrSignatureHash(eq(origHash))).thenReturn(List.of(run));
+        VerifyReportResponse res = service.verify(origHash);
+        assertThat(res.status()).isEqualTo("VALID_UNSIGNED");
+        assertThat(res.valid()).isTrue();
+        assertThat(res.signed()).isFalse();
+    }
+
+    @Test
+    @DisplayName("verify: hash hex desconhecido -> NOT_FOUND, valid=false")
+    void verifyHashHexDesconhecidoNotFound() {
+        String hash = "e".repeat(64);
+        when(runRepository.findBySha256OrSignatureHash(eq(hash))).thenReturn(List.of());
+        VerifyReportResponse res = service.verify(hash);
+        assertThat(res.status()).isEqualTo("NOT_FOUND");
+        assertThat(res.valid()).isFalse();
     }
 
     @Test
@@ -279,6 +419,7 @@ class ReportServiceV2Test {
             .build();
         when(runRepository.findBySha256OrSignatureHash(eq(hash))).thenReturn(List.of(run));
         VerifyReportResponse res = service.verify(hash);
+        assertThat(res.status()).isEqualTo("VALID_UNSIGNED");
         assertThat(res.valid()).isTrue();
         assertThat(res.reportNumber()).isEqualTo("BIO-202604-000001");
         assertThat(res.sha256()).isEqualTo(hash);
@@ -303,6 +444,7 @@ class ReportServiceV2Test {
             .build();
         when(runRepository.findBySha256OrSignatureHash(eq(sigHash))).thenReturn(List.of(run));
         VerifyReportResponse res = service.verify(sigHash);
+        assertThat(res.status()).isEqualTo("VALID_SIGNED");
         assertThat(res.valid()).isTrue();
         assertThat(res.signed()).isTrue();
         assertThat(res.signatureHash()).isEqualTo(sigHash);
@@ -331,6 +473,7 @@ class ReportServiceV2Test {
         when(signatureLogRepository.findBySignatureHash(eq(sigHash))).thenReturn(Optional.of(log));
 
         VerifyReportResponse res = service.verify(sigHash);
+        assertThat(res.status()).isEqualTo("VALID_SIGNED");
         assertThat(res.valid()).isTrue();
         assertThat(res.signed()).isTrue();
         assertThat(res.reportNumber()).isEqualTo("BIO-202604-000002");
@@ -447,6 +590,39 @@ class ReportServiceV2Test {
         assertThat(saved.getSignatureHash()).isNotNull().hasSize(64);
         assertThat(saved.getSignerRegistration()).isEqualTo("CRF-1");
         assertThat(saved.getSignedStorageKey()).isEqualTo("signedKey");
+    }
+
+    @Test
+    @DisplayName("sign: run legado sem shareToken recebe token gerado+persistido antes de assinar")
+    void signLegacyRunGeneratesShareToken() throws Exception {
+        ReportRun run = buildUnsignedRun(); // shareToken == null
+        assertThat(run.getShareToken()).isNull();
+        when(runRepository.findById(run.getId())).thenReturn(Optional.of(run));
+        when(storage.load(any())).thenReturn(buildMinimalPdf());
+        when(storage.save(any(byte[].class), any(ReportStorage.StorageKeyHint.class)))
+            .thenReturn("signedKey");
+
+        service.sign(run.getId(), new SignReportV2Request(null, null), authWithRole("ADMIN"));
+
+        // token gerado e fixado no run (usado no QR e persistido)
+        assertThat(run.getShareToken()).isNotNull();
+        assertThat(run.getShareToken()).doesNotContain("-");
+        assertThat(run.getShareToken().length()).isLessThanOrEqualTo(64);
+    }
+
+    @Test
+    @DisplayName("sign: run com shareToken pre-existente preserva o token (idempotente)")
+    void signKeepsExistingShareToken() throws Exception {
+        ReportRun run = buildUnsignedRun();
+        run.setShareToken("preexisting0token0value0000000000");
+        when(runRepository.findById(run.getId())).thenReturn(Optional.of(run));
+        when(storage.load(any())).thenReturn(buildMinimalPdf());
+        when(storage.save(any(byte[].class), any(ReportStorage.StorageKeyHint.class)))
+            .thenReturn("signedKey");
+
+        service.sign(run.getId(), new SignReportV2Request(null, null), authWithRole("ADMIN"));
+
+        assertThat(run.getShareToken()).isEqualTo("preexisting0token0value0000000000");
     }
 
     // ---------- Download (Ressalva 1) ----------

@@ -55,6 +55,8 @@ export function ConfiguracaoPage() {
   const [newEmailName, setNewEmailName] = useState('')
 
   const handleSave = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (updateSettings.isPending) return
     // Validação cliente-side para campos institucionais opcionais
     if (form.cnpj && form.cnpj.trim() && !CNPJ_REGEX.test(form.cnpj.trim())) {
       toast.warning('CNPJ deve seguir o formato XX.XXX.XXX/XXXX-XX.')
@@ -73,6 +75,8 @@ export function ConfiguracaoPage() {
   }
 
   const handleAddEmail = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (addEmail.isPending) return
     if (!newEmail.trim()) {
       toast.warning('Informe o e-mail.')
       return

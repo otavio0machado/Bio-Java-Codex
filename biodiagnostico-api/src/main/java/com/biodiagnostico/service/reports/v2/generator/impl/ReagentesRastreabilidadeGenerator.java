@@ -474,11 +474,12 @@ public class ReagentesRastreabilidadeGenerator implements ReportGenerator {
         doc.add(ReportV2PdfTheme.subsection("Uso em CQ"));
         try {
             String lotKey = lot.getLotNumber() == null ? null : lot.getLotNumber().trim().toLowerCase(Locale.ROOT);
+            // Query direcionada por lote (case-insensitive, trim) no lugar de
+            // findAll() em loop por etiqueta — evita full table scan. O match e
+            // o mesmo do filtro anterior; ordenacao/limit preservados.
             java.util.List<QcRecord> qcUses = lotKey == null || lotKey.isEmpty()
                 ? java.util.List.of()
-                : qcRecordRepository.findAll().stream()
-                    .filter(qc -> qc.getLotNumber() != null
-                        && qc.getLotNumber().trim().toLowerCase(Locale.ROOT).equals(lotKey))
+                : qcRecordRepository.findByLotNumberOperational(lot.getLotNumber()).stream()
                     .sorted(Comparator.comparing(QcRecord::getDate, Comparator.nullsLast(Comparator.reverseOrder())))
                     .limit(50)
                     .collect(Collectors.toList());

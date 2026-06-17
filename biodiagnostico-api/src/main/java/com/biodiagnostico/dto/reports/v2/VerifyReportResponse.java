@@ -20,7 +20,14 @@ import java.time.Instant;
  * @param signedAt       timestamp da assinatura; null se nao assinado
  * @param signedByName   responsavel tecnico que assinou (vem do signature log)
  * @param signed         atalho: true se existe signature_hash + signed_at
- * @param valid          true quando exatamente um registro coerente foi encontrado
+ * @param status         estado enumerado da verificacao:
+ *                       {@code VALID_SIGNED} | {@code VALID_UNSIGNED} |
+ *                       {@code SUPERSEDED} | {@code NOT_FOUND}. SUPERSEDED indica
+ *                       que o hash informado e o sha256 original de um run que ja
+ *                       foi assinado (logo o PDF em maos e a versao pre-assinatura,
+ *                       superada pela versao assinada)
+ * @param valid          derivado: {@code true} apenas quando status e
+ *                       VALID_SIGNED ou VALID_UNSIGNED
  */
 public record VerifyReportResponse(
     String reportNumber,
@@ -33,5 +40,6 @@ public record VerifyReportResponse(
     Instant signedAt,
     String signedByName,
     boolean signed,
+    String status,
     boolean valid
 ) {}

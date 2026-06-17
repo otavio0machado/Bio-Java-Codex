@@ -135,7 +135,22 @@ export interface PreviewResponse {
   periodLabel: string
 }
 
+/**
+ * Estado enumerado da verificacao publica, autoritativo (vem do backend).
+ *
+ * <ul>
+ *   <li>{@code VALID_SIGNED}: hash casa com a versao assinada (oficial entregue).</li>
+ *   <li>{@code VALID_UNSIGNED}: hash casa com laudo valido ainda sem assinatura.</li>
+ *   <li>{@code SUPERSEDED}: hash corresponde a uma versao preliminar (nao assinada)
+ *       de um laudo que ja foi assinado depois. A versao oficial e a assinada.</li>
+ *   <li>{@code NOT_FOUND}: hash desconhecido / nao emitido pelo laboratorio.</li>
+ * </ul>
+ */
+export type VerifyReportStatus = 'VALID_SIGNED' | 'VALID_UNSIGNED' | 'SUPERSEDED' | 'NOT_FOUND'
+
 export interface VerifyReportResponse {
+  /** Estado autoritativo da verificacao. Fonte unica para decisao de UI. */
+  status: VerifyReportStatus
   reportNumber: string | null
   reportCode: ReportCode | null
   periodLabel: string | null
@@ -146,6 +161,7 @@ export interface VerifyReportResponse {
   signedAt: string | null
   signedByName: string | null
   signed: boolean
+  /** Derivado de {@code status} no backend. Mantido por retrocompat. */
   valid: boolean
 }
 

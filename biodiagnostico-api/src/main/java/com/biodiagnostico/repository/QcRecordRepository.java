@@ -142,4 +142,20 @@ public interface QcRecordRepository extends JpaRepository<QcRecord, UUID> {
           AND LOWER(TRIM(q.lotNumber)) = LOWER(TRIM(:lotNumber))
         """)
     boolean existsByLotNumberOperational(@Param("lotNumber") String lotNumber);
+
+    /**
+     * Retorna os registros de CQ que usaram um lote especifico, com match
+     * case-insensitive e tolerante a espacos nas pontas (mesma semantica do
+     * filtro operacional). Substitui o uso de {@code findAll()} em loop por
+     * etiqueta na rastreabilidade de reagentes, evitando full table scan.
+     * Ordenado por data desc (nulls por ultimo) para que o consumidor possa
+     * truncar pelos mais recentes.
+     */
+    @Query("""
+        SELECT q FROM QcRecord q
+        WHERE q.lotNumber IS NOT NULL
+          AND LOWER(TRIM(q.lotNumber)) = LOWER(TRIM(:lotNumber))
+        ORDER BY q.date DESC NULLS LAST
+        """)
+    List<QcRecord> findByLotNumberOperational(@Param("lotNumber") String lotNumber);
 }

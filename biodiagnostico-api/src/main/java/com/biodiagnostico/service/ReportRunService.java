@@ -137,6 +137,10 @@ public class ReportRunService {
             .format(format.name())
             .filters(filtersJson)
             .storageKey(storageKey)
+            // shareToken: token estavel/opaco gerado na criacao do run V2. Precisa
+            // existir ANTES de assinar — o QR da pagina de assinatura aponta para
+            // {publicBaseUrl}/r/verify/{shareToken}, nunca para o sha256.
+            .shareToken(newShareToken())
             .reportNumber(artifact.reportNumber())
             .sha256(artifact.sha256())
             .sizeBytes(artifact.sizeBytes())
@@ -213,6 +217,36 @@ public class ReportRunService {
         run.setSignedStorageKey(signedStorageKey);
         run.setStatus(STATUS_SIGNED);
         return repository.save(run);
+    }
+
+    /**
+     * Garante que o run tenha um {@code shareToken} antes da assinatura. Runs
+     * legados (gerados antes de o token ser populado na criacao) tem token nulo;
+     * neste fluxo de sign geramos e persistimos um token ANTES de chamar o
+     * {@link ReportSigner}. Idempotente: se ja houver token, devolve o existente.
+     *
+     * @return o token garantido (existente ou recem-gerado)
+     */
+    @Transactional
+    public String ensureShareToken(UUID runId) {
+        ReportRun run = repository.findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("ReportRun nao encontrado: " + runId));
+        if (run.getShareToken() != null && !run.getShareToken().isBlank()) {
+            return run.getShareToken();
+        }
+        String token = newShareToken();
+        run.setShareToken(token);
+        repository.save(run);
+        return token;
+    }
+
+    /**
+     * Gera um token opaco, nao sequencial e nao adivinhavel para o run V2.
+     * UUID v4 sem hifens (32 chars hex, <= 64) garante unicidade pratica via
+     * {@link UUID#randomUUID()} (apoiado em {@code SecureRandom}).
+     */
+    private String newShareToken() {
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     private String serializeFilters(Map<String, Object> filters) {

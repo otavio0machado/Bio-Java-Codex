@@ -118,11 +118,15 @@ export const reportsV2Service = {
     return normalizeExecution(data)
   },
 
-  async verify(hash: string): Promise<VerifyReportResponse> {
-    // /verify e publico - nao depende do token. Usamos a mesma instancia
-    // para aproveitar baseURL/retry, mas o endpoint ignora Authorization.
+  /**
+   * Verificacao publica de laudo. O {@code param} pode ser um TOKEN estavel
+   * (embutido no QR Code) OU um SHA-256 de 64 hex (retrocompat). O backend
+   * resolve ambos e devolve {@link VerifyReportResponse} com {@code status}
+   * enumerado. Endpoint publico (permitAll); ignora Authorization.
+   */
+  async verify(param: string): Promise<VerifyReportResponse> {
     const { data } = await api.get<VerifyReportResponse>(
-      `/reports/v2/verify/${encodeURIComponent(hash)}`,
+      `/reports/v2/verify/${encodeURIComponent(param)}`,
     )
     return data
   },

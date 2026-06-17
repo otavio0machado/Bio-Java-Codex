@@ -59,10 +59,20 @@ public final class ReportV2Mapper {
      */
     public static ReportExecutionResponse toResponse(ReportRun run, String publicBaseUrl, List<String> warnings) {
         String downloadUrl = "/api/reports/v2/executions/" + run.getId() + "/download";
+        // Link autoritativo/estavel de verificacao e por TOKEN (mesmo valor
+        // estampado no QR). Runs legados sem token caem no sha256 original
+        // (que o endpoint /verify ainda resolve) para nao quebrar.
         String verifyUrl = null;
-        if (run.getSha256() != null && publicBaseUrl != null && !publicBaseUrl.isBlank()) {
-            String base = publicBaseUrl.endsWith("/") ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1) : publicBaseUrl;
-            verifyUrl = base + "/r/verify/" + run.getSha256();
+        if (publicBaseUrl != null && !publicBaseUrl.isBlank()) {
+            String base = publicBaseUrl.endsWith("/")
+                ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1)
+                : publicBaseUrl;
+            String token = run.getShareToken();
+            if (token != null && !token.isBlank()) {
+                verifyUrl = base + "/r/verify/" + token;
+            } else if (run.getSha256() != null) {
+                verifyUrl = base + "/r/verify/" + run.getSha256();
+            }
         }
         // periodLabel nao esta serializado em ReportRun diretamente — derivado de filters/period; omitido por ora
         String periodLabel = derivePeriodLabel(run);
