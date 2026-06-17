@@ -50,6 +50,10 @@ ai:
     batch-validation: medium
     chat: medium
     voice-form: audio
+    executive-summary: medium
+    audit-summary: medium
+    root-cause: advanced
+    priorities: medium
   voice:
     max-audio-bytes: ${VOICE_MAX_AUDIO_BYTES:2097152}
 

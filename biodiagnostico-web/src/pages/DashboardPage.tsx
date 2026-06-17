@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useDashboardAlerts, useDashboardKpis, useRecentRecords } from '../hooks/useDashboard'
+import { AiDashboardSection } from '../components/proin/AiDashboardSection'
 import { Card, EmptyState, Skeleton, StatCard, StatusBadge } from '../components/ui'
 import { formatLongBR } from '../utils/date'
 
@@ -155,6 +156,9 @@ export function DashboardPage() {
           )}
         </Card>
       </section>
+
+      {/* === IA assistiva (Onda 3): C9 resumo executivo + D12 prioridades === */}
+      <AiDashboardSection />
 
       {/* === ACOES RAPIDAS — cards grandes e claros === */}
       <section className="grid gap-4 md:grid-cols-3">

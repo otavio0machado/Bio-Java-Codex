@@ -1,9 +1,9 @@
 import axios from 'axios'
-import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Layers, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Layers, Microscope, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
-import { useExplainQc, useValidateBatch } from '../../hooks/useAiAssist'
+import { useExplainQc, useRootCause, useValidateBatch } from '../../hooks/useAiAssist'
 import { qcService } from '../../services/qcService'
 import type { QcRecord, QcRecordRequest, QcReferenceValue, ValidateBatchRow } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
@@ -829,12 +829,22 @@ interface FeedbackPanelProps {
 
 function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps) {
   const explainQc = useExplainQc()
+  const rootCause = useRootCause()
   const [explanationOpen, setExplanationOpen] = useState(false)
+  const [rootCauseOpen, setRootCauseOpen] = useState(false)
 
   const handleExplain = () => {
     if (explainQc.isPending) return
     setExplanationOpen(true)
     explainQc.mutate(record.id)
+  }
+
+  // A3 — hipotese assistiva de causa-raiz (read-only). Disponivel sempre, mas
+  // faz mais sentido para registros com violacao (ALERTA/REPROVADO).
+  const handleRootCause = () => {
+    if (rootCause.isPending) return
+    setRootCauseOpen(true)
+    rootCause.mutate(record.id)
   }
 
   const status = record.status
@@ -911,6 +921,16 @@ function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps)
               <Sparkles className="h-4 w-4" />
               Entender este resultado
             </button>
+            <button
+              type="button"
+              onClick={handleRootCause}
+              disabled={rootCause.isPending}
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Hipótese de causa-raiz gerada por IA (apoio à decisão, não decisão)"
+            >
+              <Microscope className="h-4 w-4" />
+              Análise de causa-raiz
+            </button>
           </div>
 
           {explanationOpen ? (
@@ -923,8 +943,54 @@ function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps)
               />
             </div>
           ) : null}
+
+          {rootCauseOpen ? (
+            <div className="mt-3">
+              <RootCauseResult
+                isPending={rootCause.isPending}
+                isError={rootCause.isError}
+                text={rootCause.data ?? null}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
+    </div>
+  )
+}
+
+interface RootCauseResultProps {
+  isPending: boolean
+  isError: boolean
+  text: string | null
+}
+
+/**
+ * A3 — Exibe a hipotese de causa-raiz gerada por IA. Reusa o bloco padrao de
+ * resultado (estados de loading/erro) mas com cabecalho e disclaimer proprios
+ * que deixam explicito que e HIPOTESE assistiva, nao decisao tecnica. Read-only.
+ */
+function RootCauseResult({ isPending, isError, text }: RootCauseResultProps) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-sm font-semibold text-violet-700">
+        <Microscope className="h-4 w-4" />
+        <span>Hipótese de causa-raiz (IA)</span>
+      </div>
+      <AiAssistResult
+        isPending={isPending}
+        isError={isError}
+        text={text}
+        loadingLabel="Analisando possíveis causas com IA..."
+        errorLabel="Não foi possível gerar a análise de causa-raiz agora. Tente novamente."
+        withDisclaimer={false}
+      />
+      {!isPending && !isError && text ? (
+        <p className="text-xs text-neutral-500">
+          Hipótese assistiva gerada por IA — apoio à investigação, não decisão. Confirme com a
+          avaliação técnica antes de agir.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -941,17 +1007,32 @@ interface ExplainRecordModalProps {
  */
 function ExplainRecordModal({ record, onClose }: ExplainRecordModalProps) {
   const explainQc = useExplainQc()
+  const rootCause = useRootCause()
   const reset = explainQc.reset
+  const resetRootCause = rootCause.reset
+  const [rootCauseOpen, setRootCauseOpen] = useState(false)
 
   useEffect(() => {
     if (!record) {
       reset()
+      resetRootCause()
+      setRootCauseOpen(false)
       return
     }
     explainQc.mutate(record.id)
+    // A3 e sob demanda (botao); aqui apenas limpamos o estado anterior ao trocar
+    // de registro para nao exibir analise de outro exame.
+    resetRootCause()
+    setRootCauseOpen(false)
     // Dispara apenas quando o id do registro muda.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id])
+
+  const handleRootCause = () => {
+    if (!record || rootCause.isPending) return
+    setRootCauseOpen(true)
+    rootCause.mutate(record.id)
+  }
 
   return (
     <Modal
@@ -971,6 +1052,28 @@ function ExplainRecordModal({ record, onClose }: ExplainRecordModalProps) {
             text={explainQc.data ?? null}
             loadingLabel="Gerando explicação com IA..."
           />
+
+          {/* A3 — análise de causa-raiz ao lado da explicação (A1), sob demanda. */}
+          <div>
+            <button
+              type="button"
+              onClick={handleRootCause}
+              disabled={rootCause.isPending}
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Hipótese de causa-raiz gerada por IA (apoio à decisão, não decisão)"
+            >
+              <Microscope className="h-4 w-4" />
+              Análise de causa-raiz
+            </button>
+          </div>
+
+          {rootCauseOpen ? (
+            <RootCauseResult
+              isPending={rootCause.isPending}
+              isError={rootCause.isError}
+              text={rootCause.data ?? null}
+            />
+          ) : null}
         </div>
       ) : null}
     </Modal>

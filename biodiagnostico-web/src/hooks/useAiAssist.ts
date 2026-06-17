@@ -1,6 +1,12 @@
 import { useMutation } from '@tanstack/react-query'
 import { aiService } from '../services/aiService'
-import type { InterpretTrendRequest, SuggestObservationRequest, ValidateBatchRequest } from '../types'
+import type {
+  AuditSummaryRequest,
+  DashboardSummaryRequest,
+  InterpretTrendRequest,
+  SuggestObservationRequest,
+  ValidateBatchRequest,
+} from '../types'
 
 /**
  * Hooks de IA assistiva (Onda 1). Todos sao {@code useMutation} — disparam sob
@@ -37,5 +43,39 @@ export function useSuggestObservation() {
 export function useValidateBatch() {
   return useMutation({
     mutationFn: (request: ValidateBatchRequest) => aiService.validateBatch(request),
+  })
+}
+
+/**
+ * Hooks de IA assistiva (Onda 3). Tambem {@code useMutation} — inclusive os que
+ * batem em endpoints GET — para que a geracao (e o custo de IA) ocorra apenas
+ * sob clique do operador, nunca no load da pagina. Read-only e apoio a decisao.
+ */
+
+/** C9 — resumo executivo do dashboard (geracao sob demanda). */
+export function useDashboardSummary() {
+  return useMutation({
+    mutationFn: (request: DashboardSummaryRequest = {}) => aiService.dashboardSummary(request),
+  })
+}
+
+/** C10 — sumarizacao de audit logs (ADMIN; geracao sob demanda). */
+export function useAuditSummary() {
+  return useMutation({
+    mutationFn: (request: AuditSummaryRequest = {}) => aiService.auditSummary(request),
+  })
+}
+
+/** A3 — analise de causa-raiz de um registro de CQ (por UUID; sob demanda). */
+export function useRootCause() {
+  return useMutation({
+    mutationFn: (recordId: string) => aiService.rootCause(recordId),
+  })
+}
+
+/** D12 — priorizacao inteligente (geracao sob demanda); {@code area} opcional. */
+export function usePriorities() {
+  return useMutation({
+    mutationFn: (area?: string) => aiService.priorities(area),
   })
 }

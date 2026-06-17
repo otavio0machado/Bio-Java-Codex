@@ -28,13 +28,17 @@ public class AiModelRouter {
     private static final String TIER_AUDIO = "audio";
 
     /** Tiers default por tarefa, usados quando {@code ai.routing} nao define. */
-    private static final Map<AiTask, String> DEFAULT_TIERS = Map.of(
-        AiTask.EXPLAIN_VIOLATION, TIER_MEDIUM,
-        AiTask.INTERPRET_TREND, TIER_MEDIUM,
-        AiTask.SUGGEST_OBSERVATION, TIER_BASIC,
-        AiTask.BATCH_VALIDATION, TIER_MEDIUM,
-        AiTask.CHAT, TIER_MEDIUM,
-        AiTask.VOICE_FORM, TIER_AUDIO
+    private static final Map<AiTask, String> DEFAULT_TIERS = Map.ofEntries(
+        Map.entry(AiTask.EXPLAIN_VIOLATION, TIER_MEDIUM),
+        Map.entry(AiTask.INTERPRET_TREND, TIER_MEDIUM),
+        Map.entry(AiTask.SUGGEST_OBSERVATION, TIER_BASIC),
+        Map.entry(AiTask.BATCH_VALIDATION, TIER_MEDIUM),
+        Map.entry(AiTask.CHAT, TIER_MEDIUM),
+        Map.entry(AiTask.VOICE_FORM, TIER_AUDIO),
+        Map.entry(AiTask.EXECUTIVE_SUMMARY, TIER_MEDIUM),
+        Map.entry(AiTask.AUDIT_SUMMARY, TIER_MEDIUM),
+        Map.entry(AiTask.ROOT_CAUSE, TIER_ADVANCED),
+        Map.entry(AiTask.PRIORITIES, TIER_MEDIUM)
     );
 
     private final AiProperties properties;

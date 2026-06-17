@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -13,6 +14,7 @@ import com.biodiagnostico.dto.request.BatchValidationRequest;
 import com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto;
 import com.biodiagnostico.dto.request.ExplainQcRequest;
 import com.biodiagnostico.dto.request.InterpretTrendRequest;
+import com.biodiagnostico.dto.request.RootCauseRequest;
 import com.biodiagnostico.dto.request.SuggestObservationRequest;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.exception.GlobalExceptionHandler;
@@ -57,6 +59,15 @@ class AiControllerTest {
 
     @Autowired
     private QcRecordRepository qcRecordRepository;
+
+    @Autowired
+    private com.biodiagnostico.repository.ReagentLotRepository reagentLotRepository;
+
+    @Autowired
+    private com.biodiagnostico.repository.MaintenanceRecordRepository maintenanceRecordRepository;
+
+    @Autowired
+    private com.biodiagnostico.repository.WestgardViolationRepository westgardViolationRepository;
 
     private QcRecord record() {
         return QcRecord.builder()
@@ -243,12 +254,170 @@ class AiControllerTest {
             .andExpect(status().isBadRequest());
     }
 
+    // ---------- C9 /api/ai/dashboard/summary ----------
+
+    @Test
+    @DisplayName("C9 — resumo executivo do dashboard (200)")
+    void dashboardSummaryHappyPath() throws Exception {
+        when(westgardViolationRepository.findByAreaAndPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai/dashboard/summary")
+                .param("area", "bioquimica")
+                .param("days", "7")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.summary").value("Resumo executivo gerado."));
+    }
+
+    @Test
+    @DisplayName("C9 — usa default de 7 dias quando days é omitido (200)")
+    void dashboardSummaryDefaultDays() throws Exception {
+        when(westgardViolationRepository.findByAreaAndPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai/dashboard/summary")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.summary").value("Resumo executivo gerado."));
+    }
+
+    // ---------- C10 /api/ai/audit/summary ----------
+
+    @Test
+    @DisplayName("C10 — ADMIN obtém resumo de auditoria (200)")
+    void auditSummaryAdminHappyPath() throws Exception {
+        mockMvc.perform(get("/api/ai/audit/summary")
+                .param("days", "7")
+                .with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.summary").value("Resumo de auditoria gerado."));
+    }
+
+    @Test
+    @DisplayName("C10 — NÃO-ADMIN recebe 403 (autorização)")
+    void auditSummaryForbiddenForNonAdmin() throws Exception {
+        mockMvc.perform(get("/api/ai/audit/summary")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isForbidden());
+    }
+
+    // ---------- A3 /api/ai/qc/root-cause ----------
+
+    @Test
+    @DisplayName("A3 — análise de causa-raiz quando o registro existe (200)")
+    void rootCauseHappyPath() throws Exception {
+        QcRecord record = record();
+        UUID id = record.getId();
+        when(qcRecordRepository.findById(id)).thenReturn(Optional.of(record));
+        when(qcRecordRepository.findByExamNameAndLevelAndAreaOrderByDateDesc(
+            eq("GLICOSE"), eq("N1"), eq("bioquimica"), any(Pageable.class)))
+            .thenReturn(List.of(record));
+        when(reagentLotRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+        when(maintenanceRecordRepository.findByEquipment(any())).thenReturn(List.of());
+
+        mockMvc.perform(post("/api/ai/qc/root-cause")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new RootCauseRequest(id))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.analysis").value("Analise de causa-raiz gerada."));
+    }
+
+    @Test
+    @DisplayName("A3 — retorna 404 quando o UUID não corresponde a nenhum registro")
+    void rootCauseNotFound() throws Exception {
+        when(qcRecordRepository.findById(any(UUID.class))).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/ai/qc/root-cause")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(new RootCauseRequest(UUID.randomUUID()))))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("A3 — retorna 400 quando recordId é nulo")
+    void rootCauseNullRecordId() throws Exception {
+        mockMvc.perform(post("/api/ai/qc/root-cause")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content("{}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    // ---------- D12 /api/ai/priorities ----------
+
+    @Test
+    @DisplayName("D12 — lista vazia: items=[] e recommendation vazia (200)")
+    void prioritiesEmpty() throws Exception {
+        when(reagentLotRepository.findExpiredWithStock()).thenReturn(List.of());
+        when(reagentLotRepository.findExpiringLots(any(), any())).thenReturn(List.of());
+        when(maintenanceRecordRepository.findOverdue(any())).thenReturn(List.of());
+        when(maintenanceRecordRepository.findUpcoming(any(), any())).thenReturn(List.of());
+        when(westgardViolationRepository.findByAreaAndPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai/priorities")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items").isArray())
+            .andExpect(jsonPath("$.items").isEmpty())
+            .andExpect(jsonPath("$.recommendation").value(""));
+    }
+
+    @Test
+    @DisplayName("D12 — com itens: items determinísticos + recommendation da IA (200)")
+    void prioritiesWithItems() throws Exception {
+        com.biodiagnostico.entity.ReagentLot lot = com.biodiagnostico.entity.ReagentLot.builder()
+            .name("HDL")
+            .lotNumber("L1")
+            .manufacturer("ACME")
+            .expiryDate(LocalDate.now().minusDays(1))
+            .build();
+        when(reagentLotRepository.findExpiredWithStock()).thenReturn(List.of(lot));
+        when(reagentLotRepository.findExpiringLots(any(), any())).thenReturn(List.of());
+        when(maintenanceRecordRepository.findOverdue(any())).thenReturn(List.of());
+        when(maintenanceRecordRepository.findUpcoming(any(), any())).thenReturn(List.of());
+        when(westgardViolationRepository.findByAreaAndPeriod(any(), any(), any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai/priorities")
+                .param("area", "bioquimica")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].category").value("REAGENTE"))
+            .andExpect(jsonPath("$.items[0].urgency").value("ALTA"))
+            .andExpect(jsonPath("$.recommendation").value("Recomendacao priorizada."));
+    }
+
     @TestConfiguration
     static class TestBeans {
 
         @Bean
         QcRecordRepository qcRecordRepository() {
             return Mockito.mock(QcRecordRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.service.DashboardService dashboardService() {
+            return new StubDashboardService();
+        }
+
+        @Bean
+        com.biodiagnostico.service.AuditService auditService() {
+            return new StubAuditService();
+        }
+
+        @Bean
+        com.biodiagnostico.repository.ReagentLotRepository reagentLotRepository() {
+            return Mockito.mock(com.biodiagnostico.repository.ReagentLotRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.repository.MaintenanceRecordRepository maintenanceRecordRepository() {
+            return Mockito.mock(com.biodiagnostico.repository.MaintenanceRecordRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.repository.WestgardViolationRepository westgardViolationRepository() {
+            return Mockito.mock(com.biodiagnostico.repository.WestgardViolationRepository.class);
         }
 
         @Bean
@@ -317,6 +486,86 @@ class AiControllerTest {
             List<BatchSuggestionResult> suggestions = List.of(
                 new BatchSuggestionResult(0, "examName", "TYPO", "Exame sugerido: GLICOSE", 0.9));
             return new BatchValidationResult(suggestions, 0.5);
+        }
+
+        @Override
+        public String executiveSummary(String area, int days, String context) {
+            return "Resumo executivo gerado.";
+        }
+
+        @Override
+        public String summarizeAuditLogs(String context) {
+            return "Resumo de auditoria gerado.";
+        }
+
+        @Override
+        public String analyzeRootCause(
+            QcRecord record, List<QcRecord> history, String reagentContext, String maintenanceContext
+        ) {
+            return "Analise de causa-raiz gerada.";
+        }
+
+        @Override
+        public String prioritize(String area, List<String> itemLines) {
+            if (itemLines == null || itemLines.isEmpty()) {
+                return "";
+            }
+            return "Recomendacao priorizada.";
+        }
+    }
+
+    /**
+     * Stub manual de {@link com.biodiagnostico.service.DashboardService} (concreto).
+     * Evita mock de classe concreta (incompatível com o JDK do CI) seguindo o
+     * mesmo padrão de {@link StubAiService}: super(null,...) pois todos os métodos
+     * usados pelo controlador são sobrescritos e devolvem dados vazios fixos.
+     */
+    static class StubDashboardService extends com.biodiagnostico.service.DashboardService {
+
+        StubDashboardService() {
+            super(null, null, null, null);
+        }
+
+        @Override
+        public com.biodiagnostico.dto.response.DashboardKpiResponse getKpis(String area) {
+            return new com.biodiagnostico.dto.response.DashboardKpiResponse(0, 0, 0.0, false, 0);
+        }
+
+        @Override
+        public com.biodiagnostico.dto.response.DashboardAlertsResponse getAlerts() {
+            return new com.biodiagnostico.dto.response.DashboardAlertsResponse(
+                new com.biodiagnostico.dto.response.DashboardAlertsResponse.AlertSection<
+                    com.biodiagnostico.dto.response.ReagentLotResponse>(0L, List.of()),
+                new com.biodiagnostico.dto.response.DashboardAlertsResponse.AlertSection<
+                    com.biodiagnostico.dto.response.MaintenanceResponse>(0L, List.of()),
+                new com.biodiagnostico.dto.response.DashboardAlertsResponse.AlertSection<
+                    com.biodiagnostico.dto.response.QcRecordResponse>(0L, List.of()));
+        }
+
+        @Override
+        public List<com.biodiagnostico.dto.response.QcRecordResponse> getRecentRecords(int limit) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Stub manual de {@link com.biodiagnostico.service.AuditService} (concreto).
+     * Mesmo motivo do {@link StubDashboardService}.
+     */
+    static class StubAuditService extends com.biodiagnostico.service.AuditService {
+
+        StubAuditService() {
+            super(null, null, null);
+        }
+
+        @Override
+        public List<com.biodiagnostico.entity.AuditLog> getRecentLogs(int limit) {
+            return List.of();
+        }
+
+        @Override
+        public List<com.biodiagnostico.entity.AuditLog> getLogsByUser(java.util.UUID userId) {
+            return List.of();
         }
     }
 }

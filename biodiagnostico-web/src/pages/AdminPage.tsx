@@ -1,3 +1,4 @@
+import axios from 'axios'
 import {
   Activity,
   Check,
@@ -9,14 +10,17 @@ import {
   Search,
   Shield,
   ShieldCheck,
+  Sparkles,
   UserCheck,
   UserPlus,
   UserX,
   Users,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { AiAssistResult } from '../components/proin/AiAssistShared'
 import { Button, Card, EmptyState, Input, Modal, Select, StatCard, useToast } from '../components/ui'
 import { useAuditLogs, useCreateUser, useResetPassword, useUpdateUser, useUsers } from '../hooks/useAdmin'
+import { useAuditSummary } from '../hooks/useAiAssist'
 import { ALL_PERMISSIONS, PERMISSION_LABELS, ROLE_LABELS } from '../lib/permissions'
 import type { User } from '../types'
 
@@ -701,6 +705,14 @@ function ActivityLogSection({ users }: { users: User[] }) {
   const [filterUser, setFilterUser] = useState<string>('')
   const { data: logs = [], isLoading } = useAuditLogs(filterUser || undefined)
 
+  // C10 — sumarizacao assistiva dos audit logs (ADMIN-only). Geracao sob demanda
+  // para nao gastar IA ao abrir a pagina; reflete o filtro de usuario atual.
+  const auditSummary = useAuditSummary()
+  const summaryGenerated = auditSummary.isPending || auditSummary.isError || auditSummary.data != null
+  // A pagina ja e ADMIN-only; ainda assim tratamos 403 do endpoint com mensagem
+  // clara (defesa em profundidade), distinta de uma falha generica.
+  const isForbidden = axios.isAxiosError(auditSummary.error) && auditSummary.error.response?.status === 403
+
   return (
     <Card>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -713,19 +725,49 @@ function ActivityLogSection({ users }: { users: User[] }) {
             <p className="text-sm text-neutral-500">Movimentações e ações dos usuários no sistema</p>
           </div>
         </div>
-        <div className="w-full sm:w-56">
-          <Select
-            label="Filtrar por usuário"
-            value={filterUser}
-            onChange={(e) => setFilterUser(e.target.value)}
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
+          <div className="w-full sm:w-56">
+            <Select
+              label="Filtrar por usuário"
+              value={filterUser}
+              onChange={(e) => setFilterUser(e.target.value)}
+            >
+              <option value="">Todos os usuários</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </Select>
+          </div>
+          <Button
+            variant="secondary"
+            icon={<Sparkles className="h-4 w-4 text-violet-500" />}
+            onClick={() => {
+              if (auditSummary.isPending) return
+              auditSummary.mutate(filterUser ? { userId: filterUser } : {})
+            }}
+            loading={auditSummary.isPending}
           >
-            <option value="">Todos os usuários</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{u.name}</option>
-            ))}
-          </Select>
+            Resumir atividade com IA
+          </Button>
         </div>
       </div>
+
+      {/* C10 — resultado do resumo de auditoria por IA. */}
+      {summaryGenerated ? (
+        <div className="mt-4">
+          <AiAssistResult
+            isPending={auditSummary.isPending}
+            isError={auditSummary.isError}
+            text={auditSummary.data ?? null}
+            loadingLabel="Resumindo atividade com IA..."
+            errorLabel={
+              isForbidden
+                ? 'Sem permissão para gerar o resumo de auditoria (restrito a administradores).'
+                : 'Não foi possível resumir a atividade agora. Tente novamente.'
+            }
+          />
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="mt-4 space-y-3">

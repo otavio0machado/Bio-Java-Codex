@@ -636,6 +636,76 @@ export interface SuggestObservationResponse {
   suggestion: string
 }
 
+/**
+ * Recursos de IA assistiva (Onda 3). Todos os endpoints sao apoio a decisao
+ * (read-only), nao substituem avaliacao tecnica e nao alteram regra de
+ * CQ/Westgard, media, DP, CV, calibracao ou pos-calibracao no frontend.
+ *
+ * Observacao geral: estes endpoints podem devolver um texto de fallback
+ * amigavel (HTTP 200) quando a IA falha; nesse caso a resposta e tratada como
+ * texto normal.
+ */
+
+/** C9 — GET /ai/dashboard/summary. {@code summary} e a narrativa executiva PT-BR. */
+export interface DashboardSummaryRequest {
+  /** Area de CQ opcional (ex.: "bioquimica"); ausente = visao geral. */
+  area?: string
+  /** Janela em dias (default backend = 7). */
+  days?: number
+}
+
+export interface DashboardSummaryResponse {
+  summary: string
+}
+
+/**
+ * C10 — GET /ai/audit/summary. Restrito a ADMIN (403 para nao-admin).
+ * {@code summary} resume os audit logs do periodo por categoria + anomalias.
+ */
+export interface AuditSummaryRequest {
+  /** Janela em dias (default backend = 7). */
+  days?: number
+  /** UUID de usuario para filtrar; ausente = todos. */
+  userId?: string
+}
+
+export interface AuditSummaryResponse {
+  summary: string
+}
+
+/** A3 — POST /ai/qc/root-cause. {@code recordId} e o UUID do registro de CQ. */
+export interface RootCauseRequest {
+  recordId: string
+}
+
+export interface RootCauseResponse {
+  analysis: string
+}
+
+/** D12 — categoria de um item priorizado (determinada pelo backend). */
+export type PriorityCategory = 'REAGENTE' | 'MANUTENCAO' | 'CQ'
+
+/** D12 — urgencia heuristica de um item priorizado (determinada pelo backend). */
+export type PriorityUrgency = 'ALTA' | 'MEDIA' | 'BAIXA'
+
+/**
+ * D12 — um item candidato a prioridade. A lista e DETERMINISTICA (heuristica de
+ * urgencia no backend, sem IA). O frontend apenas exibe; nao reordena nem
+ * recalcula urgencia.
+ */
+export interface PriorityItem {
+  category: PriorityCategory | string
+  title: string
+  urgency: PriorityUrgency | string
+  detail: string
+}
+
+export interface PrioritiesResponse {
+  items: PriorityItem[]
+  /** Narrativa priorizada da IA; pode vir vazia (degradacao graciosa). */
+  recommendation: string
+}
+
 export interface VoiceToFormRequest {
   audioBase64: string
   formType: 'registro' | 'referencia' | 'reagente' | 'manutencao'

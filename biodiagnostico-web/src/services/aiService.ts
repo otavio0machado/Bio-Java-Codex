@@ -1,9 +1,15 @@
 import { api } from './api'
 import type {
   AiAnalysisRequest,
+  AuditSummaryRequest,
+  AuditSummaryResponse,
+  DashboardSummaryRequest,
+  DashboardSummaryResponse,
   ExplainQcResponse,
   InterpretTrendRequest,
   InterpretTrendResponse,
+  PrioritiesResponse,
+  RootCauseResponse,
   SuggestObservationRequest,
   SuggestObservationResponse,
   ValidateBatchRequest,
@@ -42,6 +48,48 @@ export const aiService = {
    */
   async validateBatch(request: ValidateBatchRequest) {
     const response = await api.post<ValidateBatchResponse>('/ai/validate-batch', request)
+    return response.data
+  },
+  /**
+   * C9 — resumo executivo do dashboard (read-only). Geracao sob demanda; passa
+   * {@code area}/{@code days} apenas quando informados (backend usa defaults).
+   */
+  async dashboardSummary(request: DashboardSummaryRequest = {}) {
+    const params: Record<string, string | number> = {}
+    if (request.area) params.area = request.area
+    if (request.days != null) params.days = request.days
+    const response = await api.get<DashboardSummaryResponse>('/ai/dashboard/summary', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    })
+    return response.data.summary
+  },
+  /**
+   * C10 — sumarizacao de audit logs (read-only; ADMIN). Geracao sob demanda.
+   * O backend devolve 403 para nao-admin; o chamador trata o erro.
+   */
+  async auditSummary(request: AuditSummaryRequest = {}) {
+    const params: Record<string, string | number> = {}
+    if (request.days != null) params.days = request.days
+    if (request.userId) params.userId = request.userId
+    const response = await api.get<AuditSummaryResponse>('/ai/audit/summary', {
+      params: Object.keys(params).length > 0 ? params : undefined,
+    })
+    return response.data.summary
+  },
+  /** A3 — analise de causa-raiz correlacionada de um registro de CQ (read-only). */
+  async rootCause(recordId: string) {
+    const response = await api.post<RootCauseResponse>('/ai/qc/root-cause', { recordId })
+    return response.data.analysis
+  },
+  /**
+   * D12 — priorizacao inteligente (read-only). Devolve a resposta completa
+   * ({@code items} deterministicos + {@code recommendation} da IA). Passa
+   * {@code area} apenas quando informada.
+   */
+  async priorities(area?: string) {
+    const response = await api.get<PrioritiesResponse>('/ai/priorities', {
+      params: area ? { area } : undefined,
+    })
     return response.data
   },
 }

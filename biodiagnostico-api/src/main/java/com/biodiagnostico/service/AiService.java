@@ -198,6 +198,82 @@ public class AiService {
         {"items":[{"row":0,"issue":"TYPO","suggestedExamName":"GLICOSE","confidence":0.9}]}
         """;
 
+    private static final String EXECUTIVE_SUMMARY_PROMPT = """
+        Tarefa: redija um RESUMO EXECUTIVO em português do Brasil do estado do controle de qualidade do
+        laboratório no período informado, a partir EXCLUSIVAMENTE dos indicadores e listas acima.
+
+        Estruture em parágrafos curtos (ou tópicos) cobrindo:
+        1. Visão geral (taxa de aprovação e volume do período);
+        2. Destaques positivos;
+        3. Pontos de atenção (reagentes vencendo/vencidos, manutenções pendentes, violações de Westgard);
+        4. Recomendações objetivas e priorizadas para a gestão.
+
+        Travas obrigatórias (não negociáveis):
+        - NÃO invente nem estime valores numéricos (taxas, contagens, média, SD, CV, alvo, Z-score ou limites).
+          Use somente os números já presentes no contexto; se um dado não estiver no contexto, não o cite.
+        - Respeite o rótulo temporal de cada número: a taxa de aprovação fornecida é do MÊS; não a apresente
+          como se fosse da janela de dias informada. Não combine nem recalcule indicadores de janelas diferentes.
+        - Isto é um INSUMO para revisão humana (gestão/responsável técnico), NÃO uma decisão. Não declare
+          liberação ou reprovação de controles — a fonte de verdade do status e das violações é o motor
+          determinístico de Westgard.
+        """;
+
+    private static final String AUDIT_SUMMARY_PROMPT = """
+        Tarefa: resuma, em português do Brasil, os REGISTROS DE AUDITORIA (audit log) listados acima, que
+        descrevem ações de usuários no sistema (ex.: criação, atualização, exclusão de registros).
+
+        Estruture cobrindo:
+        1. Resumo por categoria de ação/entidade (quantas e de que tipo);
+        2. Destaque de anomalias ou padrões dignos de atenção (ex.: muitas exclusões em curto período,
+           concentração de ações em um único usuário, picos fora do horário habitual).
+
+        Travas obrigatórias (não negociáveis):
+        - Descreva APENAS o que está nos registros fornecidos. NÃO invente eventos, usuários, datas nem
+          números que não estejam no contexto.
+        - Isto é um resumo descritivo para revisão humana (administração/auditoria), NÃO uma acusação nem
+          uma decisão disciplinar. Aponte o que MERECE verificação, sem concluir intenção ou culpa.
+        """;
+
+    private static final String ROOT_CAUSE_PROMPT = """
+        Tarefa: faça uma ANÁLISE DE CAUSA-RAIZ correlacionada para o registro de CQ EM DESTAQUE (o primeiro
+        da lista de dados de CQ acima), usando o histórico do mesmo exame+nível+área e as informações de
+        contexto (lotes de reagente ativos na área na data e manutenção/calibração mais recente do
+        equipamento) fornecidas abaixo.
+
+        Estruture a resposta em português do Brasil cobrindo:
+        1. Hipóteses de causa provável, classificando entre erro ALEATÓRIO (imprecisão pontual) e
+           SISTEMÁTICO (viés, deriva, deslocamento, calibração);
+        2. Correlação plausível com reagente (troca/validade de lote), calibração e manutenção — apenas
+           quando o contexto sustentar a correlação; se não houver evidência, diga que não há correlação clara;
+        3. Próximos passos investigativos, objetivos e priorizados.
+
+        Travas obrigatórias (não negociáveis):
+        - NÃO invente nem estime valores numéricos (média, SD, CV, alvo, Z-score ou limites) — use somente os
+          números presentes no contexto.
+        - Correlação NÃO é causalidade: apresente como HIPÓTESE a verificar, nunca como conclusão definitiva.
+        - O vínculo dos dados de contexto é FRACO por construção: os lotes de reagente listados são apenas os
+          vigentes na área na data, sem comprovação de que algum foi usado neste registro; a manutenção é
+          casada por NOME do equipamento, sem identificador formal. Trate qualquer relação como possível
+          coincidência temporal/nominal a confirmar, não como uso ou causa estabelecida.
+        - Isto é uma RECOMENDAÇÃO para revisão humana; NÃO decida liberar nem reprovar o controle. A fonte de
+          verdade do status e das violações é o motor determinístico de Westgard.
+        """;
+
+    private static final String PRIORITIES_PROMPT = """
+        Tarefa: a partir EXCLUSIVAMENTE da LISTA DE ITENS já priorizados de forma determinística pelo sistema
+        (cada um com categoria, urgência e detalhe) acima, redija uma RECOMENDAÇÃO curta em português do
+        Brasil indicando, em ordem, o que a equipe deve tratar primeiro e por quê.
+
+        Travas obrigatórias (não negociáveis):
+        - Use SOMENTE os itens da lista fornecida. NÃO invente itens, prazos, números nem urgências novas; a
+          classificação de urgência já foi feita pelo sistema.
+        - NÃO recalcule nem estime valores (média, SD, CV, Z-score, dias). Apenas organize e explique a fila.
+        - Isto é uma SUGESTÃO de priorização para revisão humana, NÃO uma decisão. Para itens de CQ, a fonte
+          de verdade do status e das violações é o motor determinístico de Westgard.
+
+        Responda apenas com o texto da recomendação (sem rótulos nem JSON), em 2 a 5 frases.
+        """;
+
     private static final Map<String, String> OBSERVATION_KIND_GUIDANCE = Map.of(
         "post-calibration",
         "pós-calibração de equipamento — descreva sucintamente o ajuste/calibração realizado e a conformidade do controle medido APÓS a calibração, como registro de ação corretiva. NÃO afirme que a pós-calibração altera, corrige ou invalida o status original do CQ que motivou a ação.",
@@ -468,6 +544,196 @@ public class AiService {
             sample.stop(aiLatencyTimer("suggest-observation", "error"));
             log.error("Erro na chamada de IA para suggest-observation", exception);
             return FRIENDLY_ERROR;
+        }
+    }
+
+    /**
+     * C9 — Resumo executivo do dashboard (assistivo, read-only).
+     *
+     * <p>NAO grava nem decide; produz narrativa para gestao revisar. O
+     * {@code context} ja vem montado pelo controlador (KPIs, alertas e registros
+     * recentes); este metodo apenas orquestra prompt+modelo+rate-limit+metricas.
+     * Em qualquer falha de IA, devolve {@link #FRIENDLY_ERROR}.
+     *
+     * @param area    area de CQ ({@code null}/vazio = todas) — apenas rotulo no prompt
+     * @param days    janela em dias considerada — apenas rotulo no prompt
+     * @param context contexto factual ja montado (numeros vem somente daqui)
+     */
+    public String executiveSummary(String area, int days, String context) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            ensureRateLimit();
+            String areaLabel = (area == null || area.isBlank()) ? "todas as áreas" : area;
+            String userContent = "Área: " + areaLabel
+                + " | Janela: últimos " + days + " dia(s)\n\n"
+                + safeText(context)
+                + "\n\n" + EXECUTIVE_SUMMARY_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            String result = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.EXECUTIVE_SUMMARY), messages, false);
+            recordAiRequest("dashboard-summary", "success");
+            sample.stop(aiLatencyTimer("dashboard-summary", "success"));
+            return result;
+        } catch (BusinessException exception) {
+            recordAiRequest("dashboard-summary", "business_error");
+            sample.stop(aiLatencyTimer("dashboard-summary", "business_error"));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("dashboard-summary", "error");
+            sample.stop(aiLatencyTimer("dashboard-summary", "error"));
+            log.error("Erro na chamada de IA para dashboard-summary", exception);
+            return FRIENDLY_ERROR;
+        }
+    }
+
+    /**
+     * C10 — Sumarizacao de audit logs (assistiva, read-only; uso restrito a
+     * ADMIN pela camada de seguranca do controlador).
+     *
+     * <p>A IA apenas DESCREVE o que esta no log e aponta anomalias para
+     * verificacao humana; NAO grava, NAO acusa e NAO decide. O {@code context}
+     * (logs do periodo) ja vem montado pelo controlador. Em qualquer falha de
+     * IA, devolve {@link #FRIENDLY_ERROR}.
+     *
+     * @param context texto dos registros de auditoria do periodo
+     */
+    public String summarizeAuditLogs(String context) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            ensureRateLimit();
+            String userContent = safeText(context) + "\n\n" + AUDIT_SUMMARY_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            String result = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.AUDIT_SUMMARY), messages, false);
+            recordAiRequest("audit-summary", "success");
+            sample.stop(aiLatencyTimer("audit-summary", "success"));
+            return result;
+        } catch (BusinessException exception) {
+            recordAiRequest("audit-summary", "business_error");
+            sample.stop(aiLatencyTimer("audit-summary", "business_error"));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("audit-summary", "error");
+            sample.stop(aiLatencyTimer("audit-summary", "error"));
+            log.error("Erro na chamada de IA para audit-summary", exception);
+            return FRIENDLY_ERROR;
+        }
+    }
+
+    /**
+     * A3 — Analise de causa-raiz correlacionada de um registro de CQ (assistiva,
+     * read-only). Tier ADVANCED.
+     *
+     * <p>NAO altera registro, status, referencia nem violacoes. Apresenta
+     * HIPOTESES (aleatorio vs sistematico) e correlacoes plausiveis com
+     * reagente/calibracao/manutencao como RECOMENDACAO; a decisao permanece com o
+     * {@code WestgardEngine} deterministico e o analista. Reusa
+     * {@link #buildQcContext(List)} para o registro+historico e anexa os
+     * contextos de reagente e manutencao ja montados pelo controlador.
+     *
+     * @param record             registro de CQ em foco (nunca {@code null})
+     * @param history            historico recente do MESMO exame+nivel+area (pode ser vazio)
+     * @param reagentContext     texto dos lotes de reagente ativos na area na data (pode ser vazio)
+     * @param maintenanceContext texto da manutencao/calibracao mais recente do equipamento (pode ser vazio)
+     */
+    public String analyzeRootCause(
+        QcRecord record, List<QcRecord> history, String reagentContext, String maintenanceContext
+    ) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            ensureRateLimit();
+            List<QcRecord> contextRecords = new ArrayList<>();
+            if (record != null) {
+                contextRecords.add(record);
+            }
+            if (history != null) {
+                history.stream()
+                    .filter(item -> item != null && (record == null || item != record))
+                    .forEach(contextRecords::add);
+            }
+            String userContent = buildQcContext(contextRecords)
+                + "\nCorrelações de reagente (lotes ativos na área na data do registro):\n"
+                + (reagentContext == null || reagentContext.isBlank()
+                    ? "(sem lotes de reagente correlacionáveis no contexto)\n" : reagentContext)
+                + "\nManutenção/calibração mais recente do equipamento do registro:\n"
+                + (maintenanceContext == null || maintenanceContext.isBlank()
+                    ? "(sem manutenção/calibração registrada para o equipamento)\n" : maintenanceContext)
+                + "\n" + ROOT_CAUSE_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            String result = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.ROOT_CAUSE), messages, false);
+            recordAiRequest("qc-root-cause", "success");
+            sample.stop(aiLatencyTimer("qc-root-cause", "success"));
+            return result;
+        } catch (BusinessException exception) {
+            recordAiRequest("qc-root-cause", "business_error");
+            sample.stop(aiLatencyTimer("qc-root-cause", "business_error"));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("qc-root-cause", "error");
+            sample.stop(aiLatencyTimer("qc-root-cause", "error"));
+            log.error("Erro na chamada de IA para qc-root-cause", exception);
+            return FRIENDLY_ERROR;
+        }
+    }
+
+    /**
+     * D12 — Recomendacao textual de priorizacao (assistiva, read-only).
+     *
+     * <p>NAO inventa itens: recebe a lista de itens JA priorizada de forma
+     * DETERMINISTICA pelo controlador e apenas redige a narrativa que organiza a
+     * fila. <strong>Degradacao graciosa:</strong> se a lista vier vazia ou a IA
+     * falhar, devolve {@code ""} (string vazia) — o controlador ainda entrega os
+     * itens deterministicos. Diferente de outros metodos, NAO devolve
+     * {@link #FRIENDLY_ERROR} para nao poluir a narrativa.
+     *
+     * @param area      area de CQ ({@code null}/vazio = todas) — apenas rotulo no prompt
+     * @param itemLines linhas textuais dos itens ja priorizados (categoria/urgencia/detalhe)
+     * @return narrativa da IA, ou {@code ""} quando nao ha itens ou a IA falha
+     */
+    public String prioritize(String area, List<String> itemLines) {
+        if (itemLines == null || itemLines.isEmpty()) {
+            return "";
+        }
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            ensureRateLimit();
+            String areaLabel = (area == null || area.isBlank()) ? "todas as áreas" : area;
+            StringBuilder builder = new StringBuilder();
+            builder.append("Área: ").append(areaLabel).append('\n');
+            builder.append("LISTA DE ITENS já priorizados pelo sistema (não invente outros):\n");
+            for (String line : itemLines) {
+                builder.append("- ").append(safeText(line)).append('\n');
+            }
+            builder.append('\n').append(PRIORITIES_PROMPT);
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(builder.toString())
+            );
+            String result = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.PRIORITIES), messages, false);
+            recordAiRequest("priorities", "success");
+            sample.stop(aiLatencyTimer("priorities", "success"));
+            return result == null ? "" : result;
+        } catch (BusinessException exception) {
+            recordAiRequest("priorities", "business_error");
+            sample.stop(aiLatencyTimer("priorities", "business_error"));
+            log.warn("Falha de negócio na IA para priorities; degradando para recomendação vazia", exception);
+            return "";
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("priorities", "error");
+            sample.stop(aiLatencyTimer("priorities", "error"));
+            log.error("Erro na chamada de IA para priorities; degradando para recomendação vazia", exception);
+            return "";
         }
     }
 

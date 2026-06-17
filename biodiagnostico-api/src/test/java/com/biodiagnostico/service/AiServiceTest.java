@@ -389,6 +389,201 @@ class AiServiceTest {
             .contains("motor determinístico de Westgard");
     }
 
+    // ---------- C9 executiveSummary ----------
+
+    @Test
+    @DisplayName("C9 — executiveSummary retorna o texto da IA no caminho feliz")
+    void executiveSummaryHappyPath() {
+        AiService service = buildService(StubProvider.returningText("Resumo executivo do período."));
+        String result = service.executiveSummary("bioquimica", 7, "Taxa de aprovação: 95%");
+        assertThat(result).isEqualTo("Resumo executivo do período.");
+    }
+
+    @Test
+    @DisplayName("C9 — executiveSummary retorna mensagem amigável quando a IA falha")
+    void executiveSummaryFriendlyErrorOnFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        String result = service.executiveSummary("bioquimica", 7, "contexto");
+        assertThat(result).isEqualTo("Não foi possível analisar no momento. Tente novamente.");
+    }
+
+    @Test
+    @DisplayName("C9 — executiveSummary roteia para o modelo medium")
+    void executiveSummaryRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.executiveSummary("bioquimica", 7, "contexto");
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("C9 — o prompt carrega a trava anti-invenção de números e a referência a Westgard")
+    void executiveSummaryPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.executiveSummary("bioquimica", 7, "Taxa de aprovação: 95%");
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente")
+            .contains("determinístico de Westgard");
+    }
+
+    // ---------- C10 summarizeAuditLogs ----------
+
+    @Test
+    @DisplayName("C10 — summarizeAuditLogs retorna o texto da IA no caminho feliz")
+    void summarizeAuditLogsHappyPath() {
+        AiService service = buildService(StubProvider.returningText("Resumo dos logs por categoria."));
+        String result = service.summarizeAuditLogs("- 2026-06-17 | usuário=ana | ação=DELETE");
+        assertThat(result).isEqualTo("Resumo dos logs por categoria.");
+    }
+
+    @Test
+    @DisplayName("C10 — summarizeAuditLogs retorna mensagem amigável quando a IA falha")
+    void summarizeAuditLogsFriendlyErrorOnFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        String result = service.summarizeAuditLogs("contexto");
+        assertThat(result).isEqualTo("Não foi possível analisar no momento. Tente novamente.");
+    }
+
+    @Test
+    @DisplayName("C10 — summarizeAuditLogs roteia para o modelo medium")
+    void summarizeAuditLogsRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.summarizeAuditLogs("contexto");
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("C10 — o prompt proíbe inventar eventos e enquadra como descritivo (não acusação)")
+    void summarizeAuditLogsPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.summarizeAuditLogs("contexto");
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente eventos")
+            .containsIgnoringCase("não uma acusação");
+    }
+
+    // ---------- A3 analyzeRootCause ----------
+
+    @Test
+    @DisplayName("A3 — analyzeRootCause retorna o texto da IA no caminho feliz")
+    void analyzeRootCauseHappyPath() {
+        AiService service = buildService(StubProvider.returningText("Hipótese: erro sistemático."));
+        String result = service.analyzeRootCause(
+            record("REPROVADO", "1-3s"),
+            List.of(record("APROVADO", null)),
+            "  - HDL (lote L1)\n",
+            "  - Equipamento AU680: Calibração em 2026-06-10\n");
+        assertThat(result).isEqualTo("Hipótese: erro sistemático.");
+    }
+
+    @Test
+    @DisplayName("A3 — analyzeRootCause aceita contextos de correlação vazios")
+    void analyzeRootCauseEmptyCorrelations() {
+        AiService service = buildService(StubProvider.returningText("Sem correlação clara."));
+        String result = service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        assertThat(result).isEqualTo("Sem correlação clara.");
+    }
+
+    @Test
+    @DisplayName("A3 — analyzeRootCause retorna mensagem amigável quando a IA falha")
+    void analyzeRootCauseFriendlyErrorOnFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        String result = service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        assertThat(result).isEqualTo("Não foi possível analisar no momento. Tente novamente.");
+    }
+
+    @Test
+    @DisplayName("A3 — analyzeRootCause roteia para o modelo advanced (tier ADVANCED)")
+    void analyzeRootCauseRoutesToAdvanced() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.5");
+    }
+
+    @Test
+    @DisplayName("A3 — o prompt carrega travas anti-invenção, correlação≠causalidade e Westgard")
+    void analyzeRootCausePromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "ctx-reagente", "ctx-manut");
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente")
+            .contains("Z-score")
+            .containsIgnoringCase("correlação não é causalidade")
+            .containsIgnoringCase("não decida liberar")
+            .contains("motor determinístico de Westgard");
+        assertThat(prompt)
+            .as("os contextos de correlação devem ir no prompt")
+            .contains("ctx-reagente")
+            .contains("ctx-manut");
+    }
+
+    // ---------- D12 prioritize ----------
+
+    @Test
+    @DisplayName("D12 — prioritize retorna a narrativa da IA quando há itens")
+    void prioritizeHappyPath() {
+        AiService service = buildService(StubProvider.returningText("Trate primeiro os vencidos."));
+        String result = service.prioritize("bioquimica", List.of("REAGENTE | ALTA | HDL — vencido"));
+        assertThat(result).isEqualTo("Trate primeiro os vencidos.");
+    }
+
+    @Test
+    @DisplayName("D12 — prioritize devolve string vazia e NÃO chama a IA quando a lista é vazia")
+    void prioritizeEmptyShortCircuits() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider);
+        assertThat(service.prioritize("bioquimica", List.of())).isEmpty();
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("D12 — prioritize trata lista nula como vazia, sem chamar a IA")
+    void prioritizeNullShortCircuits() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider);
+        assertThat(service.prioritize("bioquimica", null)).isEmpty();
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("D12 — degradação graciosa: IA falha e prioritize devolve string vazia (não FRIENDLY_ERROR)")
+    void prioritizeGracefulDegradationOnFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        String result = service.prioritize("bioquimica", List.of("MANUTENCAO | ALTA | AU680 — atrasada"));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("D12 — prioritize roteia para o modelo medium")
+    void prioritizeRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.prioritize("bioquimica", List.of("CQ | MEDIA | GLICOSE — 1-2s"));
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("D12 — o prompt proíbe inventar itens e enquadra como sugestão para revisão humana")
+    void prioritizePromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        service.prioritize("bioquimica", List.of("REAGENTE | ALTA | HDL — vencido"));
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente itens")
+            .containsIgnoringCase("revisão humana")
+            .as("a lista de itens deve ir no prompt")
+            .contains("REAGENTE | ALTA | HDL");
+    }
+
     // ---------- B5 validateBatch ----------
 
     @Test
