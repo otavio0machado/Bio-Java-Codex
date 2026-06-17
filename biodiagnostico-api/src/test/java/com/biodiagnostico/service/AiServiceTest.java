@@ -584,6 +584,102 @@ class AiServiceTest {
             .contains("REAGENTE | ALTA | HDL");
     }
 
+    // ---------- D11 describeDrift ----------
+
+    @Test
+    @DisplayName("D11 — describeDrift devolve os detalhes da IA reconciliados por id")
+    void describeDriftHappyPath() {
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"id\":0,\"detail\":\"Tendência de alta; verifique calibração.\"},"
+            + "{\"id\":1,\"detail\":\"Sequência do mesmo lado; investigue lote.\"}]}");
+        AiService service = buildService(provider);
+
+        List<String> details = service.describeDrift(List.of(
+            "Exame: GLICOSE | Padrão: DRIFT_UP",
+            "Exame: UREIA | Padrão: RUN"));
+
+        assertThat(details).containsExactly(
+            "Tendência de alta; verifique calibração.",
+            "Sequência do mesmo lado; investigue lote.");
+    }
+
+    @Test
+    @DisplayName("D11 — describeDrift devolve lista vazia e NÃO chama a IA quando não há candidatos")
+    void describeDriftEmptyShortCircuits() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider);
+        assertThat(service.describeDrift(List.of())).isEmpty();
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("D11 — describeDrift trata lista nula como vazia, sem chamar a IA")
+    void describeDriftNullShortCircuits() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider);
+        assertThat(service.describeDrift(null)).isEmpty();
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("D11 — degradação graciosa: IA falha e describeDrift devolve detalhes vazios do mesmo tamanho")
+    void describeDriftGracefulDegradationOnFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        List<String> details = service.describeDrift(List.of(
+            "Exame: GLICOSE | Padrão: DRIFT_UP",
+            "Exame: UREIA | Padrão: RUN"));
+        assertThat(details).hasSize(2).containsOnly("");
+    }
+
+    @Test
+    @DisplayName("D11 — JSON inválido degrada para detalhes vazios do mesmo tamanho")
+    void describeDriftInvalidJsonDegrades() {
+        AiService service = buildService(StubProvider.returningText("isto não é json"));
+        List<String> details = service.describeDrift(List.of("Exame: GLICOSE | Padrão: DRIFT_UP"));
+        assertThat(details).hasSize(1).containsOnly("");
+    }
+
+    @Test
+    @DisplayName("D11 — candidato não coberto pela IA fica com detalhe vazio (reconciliação por id)")
+    void describeDriftPartialCoverage() {
+        // A IA só responde o id 0; o id 1 deve vir vazio.
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"id\":0,\"detail\":\"Só o primeiro.\"}]}");
+        AiService service = buildService(provider);
+
+        List<String> details = service.describeDrift(List.of(
+            "Exame: GLICOSE | Padrão: DRIFT_UP",
+            "Exame: UREIA | Padrão: RUN"));
+
+        assertThat(details).containsExactly("Só o primeiro.", "");
+    }
+
+    @Test
+    @DisplayName("D11 — describeDrift roteia para o modelo medium")
+    void describeDriftRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("{\"items\":[]}");
+        AiService service = buildService(provider);
+        service.describeDrift(List.of("Exame: GLICOSE | Padrão: DRIFT_UP"));
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("D11 — o prompt proíbe inventar números/candidatos e enquadra como alerta preventivo")
+    void describeDriftPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("{\"items\":[]}");
+        AiService service = buildService(provider);
+        service.describeDrift(List.of("Exame: GLICOSE | Padrão: DRIFT_UP | Severidade: ALTA"));
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente")
+            .containsIgnoringCase("alerta preventivo")
+            .containsIgnoringCase("revisão humana")
+            .contains("motor determinístico de Westgard");
+        assertThat(prompt)
+            .as("a lista de candidatos deve ir no prompt")
+            .contains("Exame: GLICOSE | Padrão: DRIFT_UP");
+    }
+
     // ---------- B5 validateBatch ----------
 
     @Test

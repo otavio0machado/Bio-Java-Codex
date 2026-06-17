@@ -706,6 +706,46 @@ export interface PrioritiesResponse {
   recommendation: string
 }
 
+/**
+ * D11 — GET /ai/drift. Deteccao PREVENTIVA de drift, SOB DEMANDA (read-only).
+ *
+ * A DETECCAO dos candidatos e DETERMINISTICA (estatistica pura no backend:
+ * sequencias e inclinacao de regressao linear, sem IA) sobre series que AINDA
+ * NAO violaram a regra de rejeicao Westgard. A IA apenas INTERPRETA os
+ * candidatos ja encontrados (campo {@code detail}). O frontend so EXIBE: nao
+ * reclassifica padrao/severidade, nao recalcula media/DP/CV nem reimplementa
+ * Westgard. A fonte de verdade de status e violacoes continua no backend.
+ *
+ * {@code alerts} vazio = nenhum candidato a drift (estado positivo).
+ */
+
+/** Padrao de drift classificado pelo backend (estatistica deterministica). */
+export type DriftPattern = 'DRIFT_UP' | 'DRIFT_DOWN' | 'SHIFT' | 'RUN'
+
+/** Severidade heuristica do alerta de drift (determinada pelo backend). */
+export type DriftSeverity = 'ALTA' | 'MEDIA' | 'BAIXA'
+
+/**
+ * Um alerta preventivo de drift para uma serie exame+nivel. Espelha
+ * {@code DriftResponse.DriftAlert} do backend.
+ */
+export interface DriftAlert {
+  examName: string
+  /** Nivel do controle (ex.: "N1", "N2"). */
+  level: string
+  pattern: DriftPattern | string
+  severity: DriftSeverity | string
+  /**
+   * Interpretacao textual da IA (recomendacao para revisao humana). Pode vir
+   * vazia em degradacao graciosa quando a IA falha — tratar como texto normal.
+   */
+  detail: string
+}
+
+export interface DriftResponse {
+  alerts: DriftAlert[]
+}
+
 export interface VoiceToFormRequest {
   audioBase64: string
   formType: 'registro' | 'referencia' | 'reagente' | 'manutencao'

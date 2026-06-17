@@ -5,6 +5,7 @@ import type {
   AuditSummaryResponse,
   DashboardSummaryRequest,
   DashboardSummaryResponse,
+  DriftResponse,
   ExplainQcResponse,
   InterpretTrendRequest,
   InterpretTrendResponse,
@@ -89,6 +90,20 @@ export const aiService = {
   async priorities(area?: string) {
     const response = await api.get<PrioritiesResponse>('/ai/priorities', {
       params: area ? { area } : undefined,
+    })
+    return response.data
+  },
+  /**
+   * D11 — deteccao preventiva de drift (read-only). Devolve a resposta completa
+   * ({@code alerts}). Passa {@code area}/{@code days} apenas quando informados
+   * (backend usa visao geral e janela padrao de 14 dias). Lista vazia = sem drift.
+   */
+  async driftDetection(area?: string, days?: number) {
+    const params: Record<string, string | number> = {}
+    if (area) params.area = area
+    if (days != null) params.days = days
+    const response = await api.get<DriftResponse>('/ai/drift', {
+      params: Object.keys(params).length > 0 ? params : undefined,
     })
     return response.data
   },

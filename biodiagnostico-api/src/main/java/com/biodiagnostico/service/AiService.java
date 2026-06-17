@@ -274,6 +274,29 @@ public class AiService {
         Responda apenas com o texto da recomendação (sem rótulos nem JSON), em 2 a 5 frases.
         """;
 
+    private static final String DRIFT_DETECTION_PROMPT = """
+        Tarefa: você recebe uma LISTA DE CANDIDATOS A DRIFT já detectados de forma DETERMINÍSTICA pelo
+        sistema (estatística pura: sequências do mesmo lado da média e inclinação de regressão linear dos
+        Z-scores). Cada candidato traz exame, nível, padrão (DRIFT_UP/DRIFT_DOWN/SHIFT/RUN), severidade
+        heurística (ALTA/MEDIA/BAIXA) e alguns números já calculados (tamanho da sequência, inclinação,
+        Z-score do ponto mais recente). Para CADA candidato, redija em português do Brasil uma breve
+        interpretação (1 a 3 frases) do que o padrão sugere e uma recomendação preventiva de verificação.
+
+        Travas obrigatórias (não negociáveis):
+        - NÃO invente nem estime valores numéricos (média, SD, CV, alvo, Z-score, inclinação ou limites).
+          Use SOMENTE os números já presentes no contexto de cada candidato; se um número não estiver lá,
+          não o cite.
+        - NÃO adicione candidatos novos nem remova os fornecidos. A DETECÇÃO já foi feita pela estatística;
+          você apenas DESCREVE o que ela achou, candidato a candidato.
+        - Isto é um ALERTA PREVENTIVO para revisão humana, NÃO uma decisão de liberar/reprovar. Estas séries
+          AINDA NÃO violaram a regra de rejeição; o objetivo é antecipar tendência. A fonte de verdade do
+          status e das violações é o motor determinístico de Westgard — não declare violação nem aprovação.
+
+        Responda APENAS com JSON válido, sem texto fora do JSON, mantendo a MESMA ordem e o mesmo índice
+        'id' de cada candidato de entrada, no formato:
+        {"items":[{"id":0,"detail":"<interpretação e recomendação preventiva>"}]}
+        """;
+
     private static final Map<String, String> OBSERVATION_KIND_GUIDANCE = Map.of(
         "post-calibration",
         "pós-calibração de equipamento — descreva sucintamente o ajuste/calibração realizado e a conformidade do controle medido APÓS a calibração, como registro de ação corretiva. NÃO afirme que a pós-calibração altera, corrige ou invalida o status original do CQ que motivou a ação.",
@@ -735,6 +758,108 @@ public class AiService {
             log.error("Erro na chamada de IA para priorities; degradando para recomendação vazia", exception);
             return "";
         }
+    }
+
+    /**
+     * D11 — Interpreta os candidatos a drift JA detectados de forma
+     * DETERMINISTICA (assistiva, read-only).
+     *
+     * <p><strong>Principio:</strong> a DETECCAO e estatistica pura (no
+     * {@code DriftDetector}); a IA aqui apenas DESCREVE, candidato a candidato, o
+     * que a estatistica achou. NAO adiciona candidatos, NAO inventa numeros e NAO
+     * decide status — sao series que AINDA NAO violaram rejeicao, e o objetivo e
+     * antecipar tendencia para revisao humana.
+     *
+     * <p><strong>Degradacao graciosa:</strong> se a lista vier vazia ou a IA
+     * falhar (ou nao cobrir um candidato), devolve uma lista do MESMO tamanho com
+     * {@code ""} (string vazia) nas posicoes nao interpretadas — o controlador
+     * ainda entrega os alertas deterministicos com {@code detail} vazio. Diferente
+     * de outros metodos, NAO devolve {@link #FRIENDLY_ERROR} para nao poluir o
+     * alerta.
+     *
+     * @param candidateLines linhas textuais dos candidatos ja detectados
+     *     (exame/nivel/padrao/severidade + numeros calculados), uma por candidato
+     * @return lista de interpretacoes na MESMA ordem/tamanho de {@code candidateLines};
+     *     posicoes sem interpretacao vem como {@code ""}
+     */
+    public List<String> describeDrift(List<String> candidateLines) {
+        if (candidateLines == null || candidateLines.isEmpty()) {
+            return List.of();
+        }
+        int total = candidateLines.size();
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            ensureRateLimit();
+            StringBuilder builder = new StringBuilder();
+            builder.append(
+                "CANDIDATOS A DRIFT já detectados deterministicamente pelo sistema "
+                + "(não invente outros; descreva cada um):\n");
+            for (int index = 0; index < total; index++) {
+                builder.append("id=").append(index).append(" | ")
+                    .append(safeText(candidateLines.get(index))).append('\n');
+            }
+            builder.append('\n').append(DRIFT_DETECTION_PROMPT);
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(builder.toString())
+            );
+            String raw = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.DRIFT_DETECTION), messages, true);
+            List<String> details = parseDriftResponse(raw, total);
+            recordAiRequest("qc-drift", "success");
+            sample.stop(aiLatencyTimer("qc-drift", "success"));
+            return details;
+        } catch (BusinessException exception) {
+            recordAiRequest("qc-drift", "business_error");
+            sample.stop(aiLatencyTimer("qc-drift", "business_error"));
+            log.warn("Falha de negócio na IA para qc-drift; degradando para detalhes vazios", exception);
+            return emptyDetails(total);
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("qc-drift", "error");
+            sample.stop(aiLatencyTimer("qc-drift", "error"));
+            log.error("Erro na chamada de IA para qc-drift; degradando para detalhes vazios", exception);
+            return emptyDetails(total);
+        }
+    }
+
+    /** Lista de {@code n} strings vazias — base da degradacao graciosa do D11. */
+    private List<String> emptyDetails(int n) {
+        List<String> details = new ArrayList<>(n);
+        for (int index = 0; index < n; index++) {
+            details.add("");
+        }
+        return details;
+    }
+
+    /**
+     * Parseia a resposta JSON da IA do D11 e reconcilia por {@code id}: devolve
+     * uma lista de tamanho {@code total} onde cada posicao recebe o {@code detail}
+     * da IA para aquele id, ou {@code ""} quando a IA nao cobriu o candidato.
+     * Qualquer falha de parsing degrada para detalhes vazios.
+     */
+    private List<String> parseDriftResponse(String raw, int total) {
+        List<String> details = emptyDetails(total);
+        try {
+            String cleaned = cleanJsonResponse(raw);
+            JsonNode root = objectMapper.readTree(cleaned);
+            JsonNode items = root.path("items");
+            if (items.isArray()) {
+                for (JsonNode item : items) {
+                    if (!item.path("id").isInt() && !item.path("id").isLong()) {
+                        continue;
+                    }
+                    int id = item.path("id").asInt();
+                    if (id < 0 || id >= total) {
+                        continue;
+                    }
+                    details.set(id, item.path("detail").asText(""));
+                }
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException invalidJson) {
+            log.warn("JSON inválido na resposta de qc-drift; degradando para detalhes vazios", invalidJson);
+            return emptyDetails(total);
+        }
+        return details;
     }
 
     /**

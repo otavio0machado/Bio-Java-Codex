@@ -79,3 +79,15 @@ export function usePriorities() {
     mutationFn: (area?: string) => aiService.priorities(area),
   })
 }
+
+/**
+ * D11 — deteccao preventiva de drift (sob demanda; {@code area}/{@code days}
+ * opcionais). {@code useMutation} para que a chamada (e o custo de IA) ocorra
+ * somente ao clicar — nunca no load. Read-only: nao altera regra de CQ.
+ */
+export function useDriftDetection() {
+  return useMutation({
+    mutationFn: (params: { area?: string; days?: number } = {}) =>
+      aiService.driftDetection(params.area, params.days),
+  })
+}

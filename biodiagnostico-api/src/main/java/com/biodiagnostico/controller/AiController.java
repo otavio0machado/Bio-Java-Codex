@@ -13,6 +13,8 @@ import com.biodiagnostico.dto.response.BatchValidationResponse;
 import com.biodiagnostico.dto.response.BatchValidationResponse.BatchSuggestion;
 import com.biodiagnostico.dto.response.DashboardAlertsResponse;
 import com.biodiagnostico.dto.response.DashboardKpiResponse;
+import com.biodiagnostico.dto.response.DriftResponse;
+import com.biodiagnostico.dto.response.DriftResponse.DriftAlert;
 import com.biodiagnostico.dto.response.ExecutiveSummaryResponse;
 import com.biodiagnostico.dto.response.ExplainQcResponse;
 import com.biodiagnostico.dto.response.InterpretTrendResponse;
@@ -30,17 +32,21 @@ import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.MaintenanceRecordRepository;
+import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.WestgardViolationRepository;
 import com.biodiagnostico.service.AiService;
 import com.biodiagnostico.service.AuditService;
 import com.biodiagnostico.service.DashboardService;
+import com.biodiagnostico.service.DriftDetector;
+import com.biodiagnostico.service.DriftDetector.DriftCandidate;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -75,6 +81,11 @@ public class AiController {
     private static final int PRIORITIES_QC_WINDOW_DAYS = 7;
     private static final int URGENCY_HIGH_DAYS = 7;
 
+    // D11 — detecção proativa de drift (sob demanda, read-only).
+    private static final int DRIFT_DEFAULT_DAYS = 14;
+    private static final int DRIFT_MAX_POINTS = 60;
+    private static final int DRIFT_MAX_ALERTS = 50;
+
     private static final String CATEGORY_REAGENT = "REAGENTE";
     private static final String CATEGORY_MAINTENANCE = "MANUTENCAO";
     private static final String CATEGORY_QC = "CQ";
@@ -89,6 +100,8 @@ public class AiController {
     private final ReagentLotRepository reagentLotRepository;
     private final MaintenanceRecordRepository maintenanceRecordRepository;
     private final WestgardViolationRepository westgardViolationRepository;
+    private final QcExamRepository qcExamRepository;
+    private final DriftDetector driftDetector;
 
     public AiController(
         AiService aiService,
@@ -97,7 +110,9 @@ public class AiController {
         AuditService auditService,
         ReagentLotRepository reagentLotRepository,
         MaintenanceRecordRepository maintenanceRecordRepository,
-        WestgardViolationRepository westgardViolationRepository
+        WestgardViolationRepository westgardViolationRepository,
+        QcExamRepository qcExamRepository,
+        DriftDetector driftDetector
     ) {
         this.aiService = aiService;
         this.qcRecordRepository = qcRecordRepository;
@@ -106,6 +121,8 @@ public class AiController {
         this.reagentLotRepository = reagentLotRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.westgardViolationRepository = westgardViolationRepository;
+        this.qcExamRepository = qcExamRepository;
+        this.driftDetector = driftDetector;
     }
 
     @PostMapping("/analyze")
@@ -304,6 +321,50 @@ public class AiController {
             .toList();
         String recommendation = aiService.prioritize(area, itemLines);
         return ResponseEntity.ok(new PrioritiesResponse(items, recommendation));
+    }
+
+    /**
+     * D11 — Detecção proativa de drift, SOB DEMANDA (assistiva, read-only).
+     *
+     * <p>A DETECÇÃO é DETERMINÍSTICA (estatística pura, no {@link DriftDetector}):
+     * para cada exame+nível ativo (na {@code area} informada, ou em todas se
+     * vazia), carrega a série recente (últimos {@code days} dias, default 14,
+     * limite de pontos) e procura séries que AINDA NÃO violaram rejeição mas
+     * exibem tendência (sequência longa do mesmo lado e/ou inclinação
+     * significativa). Séries com violação de rejeição recente são EXCLUÍDAS
+     * (tratadas pelo CQ/D12). NÃO reimplementa Westgard nem recalcula status.
+     *
+     * <p>Só quando há candidatos a IA é chamada — apenas para INTERPRETAR cada
+     * candidato; ela não adiciona candidatos nem inventa números. Se a IA falhar,
+     * os alertas são retornados com {@code detail} vazio (degradação graciosa).
+     * Lista vazia quando não há candidatos (a IA nem é chamada).
+     */
+    @GetMapping("/drift")
+    public ResponseEntity<DriftResponse> drift(
+        @RequestParam(required = false) String area,
+        @RequestParam(required = false) Integer days
+    ) {
+        int window = days == null ? DRIFT_DEFAULT_DAYS : days;
+        List<DriftCandidate> candidates = collectDriftCandidates(area, window);
+        if (candidates.isEmpty()) {
+            return ResponseEntity.ok(new DriftResponse(List.of()));
+        }
+
+        List<String> candidateLines = candidates.stream()
+            .map(this::driftCandidateLine)
+            .toList();
+        List<String> details = aiService.describeDrift(candidateLines);
+
+        List<DriftAlert> alerts = new ArrayList<>(candidates.size());
+        for (int index = 0; index < candidates.size(); index++) {
+            DriftCandidate candidate = candidates.get(index);
+            String detail = index < details.size() && details.get(index) != null
+                ? details.get(index) : "";
+            alerts.add(new DriftAlert(
+                candidate.examName(), candidate.level(),
+                candidate.pattern(), candidate.severity(), detail));
+        }
+        return ResponseEntity.ok(new DriftResponse(alerts));
     }
 
     // ----------------------------------------------------------------------
@@ -522,6 +583,74 @@ public class AiController {
             return 1;
         }
         return 2;
+    }
+
+    /**
+     * Coleta DETERMINISTICAMENTE (read-only) os candidatos a drift. Para cada
+     * exame ativo (na área, ou em todas se vazia), carrega a série recente da
+     * janela, agrupa por nível e delega ao {@link DriftDetector}. A IA NÃO é
+     * tocada aqui — a detecção é estatística pura. Limita o número de alertas
+     * para proteger o payload.
+     */
+    private List<DriftCandidate> collectDriftCandidates(String area, int days) {
+        LocalDate startDate = LocalDate.now().minusDays(days);
+        boolean allAreas = area == null || area.isBlank();
+
+        List<com.biodiagnostico.entity.QcExam> exams = allAreas
+            ? qcExamRepository.findByIsActiveTrue()
+            : qcExamRepository.findByAreaAndIsActiveTrue(area.toLowerCase(Locale.ROOT));
+
+        List<DriftCandidate> candidates = new ArrayList<>();
+        for (com.biodiagnostico.entity.QcExam exam : exams) {
+            String examName = exam.getName();
+            String examArea = exam.getArea();
+            if (examName == null || examName.isBlank()) {
+                continue;
+            }
+
+            // Série recente do exame na área, mais recente primeiro; janela aplicada em memória.
+            List<QcRecord> records = qcRecordRepository
+                .findByExamNameAndAreaOrderByDateDesc(examName, examArea).stream()
+                .filter(record -> record.getDate() != null && !record.getDate().isBefore(startDate))
+                .limit(DRIFT_MAX_POINTS)
+                .toList();
+            if (records.isEmpty()) {
+                continue;
+            }
+
+            // Agrupa por nível preservando a ordem (mais recente primeiro) dentro de cada nível.
+            Map<String, List<QcRecord>> byLevel = new LinkedHashMap<>();
+            for (QcRecord record : records) {
+                String level = record.getLevel() == null ? "" : record.getLevel();
+                byLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(record);
+            }
+
+            for (Map.Entry<String, List<QcRecord>> entry : byLevel.entrySet()) {
+                driftDetector.detect(examName, entry.getKey(), examArea, entry.getValue())
+                    .ifPresent(candidates::add);
+                if (candidates.size() >= DRIFT_MAX_ALERTS) {
+                    return candidates;
+                }
+            }
+        }
+        return candidates;
+    }
+
+    /**
+     * Linha textual factual de um candidato para o contexto da IA. Os números já
+     * foram calculados deterministicamente; a IA apenas os descreve (não estima).
+     */
+    private String driftCandidateLine(DriftCandidate candidate) {
+        return "Exame: " + safe(candidate.examName())
+            + " | Nível: " + safe(candidate.level())
+            + " | Área: " + safe(candidate.area())
+            + " | Padrão: " + candidate.pattern()
+            + " | Severidade: " + candidate.severity()
+            + " | Pontos na série: " + candidate.points()
+            + " | Sequência recente do mesmo lado: " + candidate.recentSameSideRun()
+            + String.format(Locale.ROOT,
+                " | Inclinação (Z por ponto): %.3f | Z-score do ponto mais recente: %.2f",
+                candidate.slopePerPoint(), candidate.lastZScore());
     }
 
     /** Normaliza a área para as queries que esperam lowercase (ou null = todas). */

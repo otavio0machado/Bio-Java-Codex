@@ -69,6 +69,9 @@ class AiControllerTest {
     @Autowired
     private com.biodiagnostico.repository.WestgardViolationRepository westgardViolationRepository;
 
+    @Autowired
+    private com.biodiagnostico.repository.QcExamRepository qcExamRepository;
+
     private QcRecord record() {
         return QcRecord.builder()
             .id(UUID.randomUUID())
@@ -387,6 +390,99 @@ class AiControllerTest {
             .andExpect(jsonPath("$.recommendation").value("Recomendacao priorizada."));
     }
 
+    // ---------- D11 /api/ai/drift ----------
+
+    /** Série crescente (DRIFT_UP) na ordem do repositório (mais recente primeiro). */
+    private List<QcRecord> upwardDriftSeries() {
+        double target = 100.0;
+        double sd = 2.0;
+        double[] chronologicalZ = {0.0, 0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1};
+        List<QcRecord> chronological = new java.util.ArrayList<>();
+        LocalDate base = LocalDate.now().minusDays(chronologicalZ.length);
+        for (int index = 0; index < chronologicalZ.length; index++) {
+            chronological.add(QcRecord.builder()
+                .examName("GLICOSE")
+                .area("bioquimica")
+                .level("N1")
+                .date(base.plusDays(index))
+                .value(target + chronologicalZ[index] * sd)
+                .targetValue(target)
+                .targetSd(sd)
+                .status("APROVADO")
+                .build());
+        }
+        List<QcRecord> mostRecentFirst = new java.util.ArrayList<>(chronological);
+        java.util.Collections.reverse(mostRecentFirst);
+        return mostRecentFirst;
+    }
+
+    @Test
+    @DisplayName("D11 — sem candidatos: alerts=[] (200) e default de 14 dias")
+    void driftNoCandidates() throws Exception {
+        when(qcExamRepository.findByAreaAndIsActiveTrue(eq("bioquimica")))
+            .thenReturn(List.of(com.biodiagnostico.entity.QcExam.builder()
+                .name("GLICOSE").area("bioquimica").isActive(true).build()));
+        when(qcRecordRepository.findByExamNameAndAreaOrderByDateDesc(eq("GLICOSE"), eq("bioquimica")))
+            .thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai/drift")
+                .param("area", "bioquimica")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.alerts").isArray())
+            .andExpect(jsonPath("$.alerts").isEmpty());
+    }
+
+    @Test
+    @DisplayName("D11 — série com tendência clara gera alerta com pattern/severity e detail da IA (200)")
+    void driftWithCandidate() throws Exception {
+        when(qcExamRepository.findByAreaAndIsActiveTrue(eq("bioquimica")))
+            .thenReturn(List.of(com.biodiagnostico.entity.QcExam.builder()
+                .name("GLICOSE").area("bioquimica").isActive(true).build()));
+        when(qcRecordRepository.findByExamNameAndAreaOrderByDateDesc(eq("GLICOSE"), eq("bioquimica")))
+            .thenReturn(upwardDriftSeries());
+
+        mockMvc.perform(get("/api/ai/drift")
+                .param("area", "bioquimica")
+                .param("days", "14")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.alerts[0].examName").value("GLICOSE"))
+            .andExpect(jsonPath("$.alerts[0].level").value("N1"))
+            .andExpect(jsonPath("$.alerts[0].pattern").value("DRIFT_UP"))
+            .andExpect(jsonPath("$.alerts[0].severity").value(
+                org.hamcrest.Matchers.anyOf(
+                    org.hamcrest.Matchers.is("ALTA"),
+                    org.hamcrest.Matchers.is("MEDIA"),
+                    org.hamcrest.Matchers.is("BAIXA"))))
+            .andExpect(jsonPath("$.alerts[0].detail").value("Interpretacao de drift."));
+    }
+
+    @Test
+    @DisplayName("D11 — sem 'area' varre todos os exames ativos (findByIsActiveTrue)")
+    void driftAllAreasUsesActiveExams() throws Exception {
+        when(qcExamRepository.findByIsActiveTrue())
+            .thenReturn(List.of(com.biodiagnostico.entity.QcExam.builder()
+                .name("GLICOSE").area("bioquimica").isActive(true).build()));
+        when(qcRecordRepository.findByExamNameAndAreaOrderByDateDesc(eq("GLICOSE"), eq("bioquimica")))
+            .thenReturn(upwardDriftSeries());
+
+        mockMvc.perform(get("/api/ai/drift")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.alerts[0].examName").value("GLICOSE"))
+            .andExpect(jsonPath("$.alerts[0].pattern").value("DRIFT_UP"));
+
+        Mockito.verify(qcExamRepository).findByIsActiveTrue();
+    }
+
+    @Test
+    @DisplayName("D11 — exige autenticação (401 sem usuário)")
+    void driftRequiresAuth() throws Exception {
+        mockMvc.perform(get("/api/ai/drift"))
+            .andExpect(status().isUnauthorized());
+    }
+
     @TestConfiguration
     static class TestBeans {
 
@@ -418,6 +514,16 @@ class AiControllerTest {
         @Bean
         com.biodiagnostico.repository.WestgardViolationRepository westgardViolationRepository() {
             return Mockito.mock(com.biodiagnostico.repository.WestgardViolationRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.repository.QcExamRepository qcExamRepository() {
+            return Mockito.mock(com.biodiagnostico.repository.QcExamRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.service.DriftDetector driftDetector() {
+            return new com.biodiagnostico.service.DriftDetector();
         }
 
         @Bean
@@ -511,6 +617,14 @@ class AiControllerTest {
                 return "";
             }
             return "Recomendacao priorizada.";
+        }
+
+        @Override
+        public List<String> describeDrift(List<String> candidateLines) {
+            if (candidateLines == null || candidateLines.isEmpty()) {
+                return List.of();
+            }
+            return candidateLines.stream().map(line -> "Interpretacao de drift.").toList();
         }
     }
 
