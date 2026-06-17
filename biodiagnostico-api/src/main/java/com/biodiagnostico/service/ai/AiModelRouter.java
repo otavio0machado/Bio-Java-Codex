@@ -32,6 +32,7 @@ public class AiModelRouter {
         AiTask.EXPLAIN_VIOLATION, TIER_MEDIUM,
         AiTask.INTERPRET_TREND, TIER_MEDIUM,
         AiTask.SUGGEST_OBSERVATION, TIER_BASIC,
+        AiTask.BATCH_VALIDATION, TIER_MEDIUM,
         AiTask.CHAT, TIER_MEDIUM,
         AiTask.VOICE_FORM, TIER_AUDIO
     );

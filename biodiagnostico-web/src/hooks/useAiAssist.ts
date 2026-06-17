@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { aiService } from '../services/aiService'
-import type { InterpretTrendRequest, SuggestObservationRequest } from '../types'
+import type { InterpretTrendRequest, SuggestObservationRequest, ValidateBatchRequest } from '../types'
 
 /**
  * Hooks de IA assistiva (Onda 1). Todos sao {@code useMutation} — disparam sob
@@ -26,5 +26,16 @@ export function useInterpretTrend() {
 export function useSuggestObservation() {
   return useMutation({
     mutationFn: (request: SuggestObservationRequest) => aiService.suggestObservation(request),
+  })
+}
+
+/**
+ * B5 — validacao assistiva (read-only) de um lote de importacao de CQ antes de
+ * submeter. Dispara sob acao explicita do operador; o resultado e apoio a
+ * decisao (sugestoes + prontidao) e nunca importa, grava ou altera regra de CQ.
+ */
+export function useValidateBatch() {
+  return useMutation({
+    mutationFn: (request: ValidateBatchRequest) => aiService.validateBatch(request),
   })
 }

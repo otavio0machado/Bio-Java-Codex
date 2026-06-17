@@ -8,6 +8,7 @@ import com.biodiagnostico.service.ai.AiMessage;
 import com.biodiagnostico.service.ai.AiProvider;
 import com.biodiagnostico.service.ai.AiModelRouter;
 import com.biodiagnostico.service.ai.AiTask;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -172,6 +173,31 @@ public class AiService {
         Restrições: descreva apenas o que estiver no contexto fornecido. NÃO invente, calcule nem estime valores numéricos (média, SD/desvio-padrão, CV, alvo, Z-score ou limites) — use somente números já presentes no contexto. Não afirme nem sugira liberação ou reprovação de resultado; a decisão de status é do motor determinístico de Westgard e do responsável.
         """;
 
+    private static final String BATCH_VALIDATION_PROMPT = """
+        Tarefa: você recebe (1) a LISTA DE EXAMES VÁLIDOS já cadastrados nesta área do laboratório e
+        (2) algumas LINHAS de uma planilha de importação de controle de qualidade cujo nome de exame NÃO
+        casou exatamente com a lista. Para cada linha, decida se o examName digitado é apenas um ERRO DE
+        DIGITAÇÃO de um exame da lista (ex.: "glicos" -> "GLICOSE", "uréia" -> "UREIA") ou se é um exame
+        DESCONHECIDO que não corresponde a nenhum da lista.
+
+        Travas obrigatórias (não negociáveis):
+        - NÃO invente nem estime valores numéricos (média, SD, CV, alvo, Z-score ou limites). Você NÃO recebe
+          autorização para propor número algum.
+        - Sugira APENAS nomes de exame que estejam LITERALMENTE na lista fornecida. Nunca crie um nome novo.
+        - Isto é uma SUGESTÃO para revisão humana, NÃO uma decisão de importação. Você não aprova, não reprova
+          e não importa nada.
+
+        Para cada linha de entrada, devolva um objeto com:
+          - "row": o índice (inteiro) exatamente como veio na linha de entrada;
+          - "issue": "TYPO" se for erro de digitação de um exame da lista, ou "UNKNOWN_EXAM" caso contrário;
+          - "suggestedExamName": quando issue="TYPO", o nome EXATO da lista que corresponde; quando
+            issue="UNKNOWN_EXAM", use "" (string vazia);
+          - "confidence": número entre 0 e 1 indicando sua confiança.
+
+        Responda APENAS com JSON válido, sem texto fora do JSON, no formato:
+        {"items":[{"row":0,"issue":"TYPO","suggestedExamName":"GLICOSE","confidence":0.9}]}
+        """;
+
     private static final Map<String, String> OBSERVATION_KIND_GUIDANCE = Map.of(
         "post-calibration",
         "pós-calibração de equipamento — descreva sucintamente o ajuste/calibração realizado e a conformidade do controle medido APÓS a calibração, como registro de ação corretiva. NÃO afirme que a pós-calibração altera, corrige ou invalida o status original do CQ que motivou a ação.",
@@ -189,19 +215,22 @@ public class AiService {
     private final Map<String, Deque<Instant>> rateLimitByUser = new ConcurrentHashMap<>();
     private final int maxAudioBytes;
     private final MeterRegistry meterRegistry;
+    private final com.biodiagnostico.repository.QcExamRepository qcExamRepository;
 
     public AiService(
         AiProvider aiProvider,
         AiModelRouter modelRouter,
         ObjectMapper objectMapper,
         AiProperties aiProperties,
-        MeterRegistry meterRegistry
+        MeterRegistry meterRegistry,
+        com.biodiagnostico.repository.QcExamRepository qcExamRepository
     ) {
         this.aiProvider = aiProvider;
         this.modelRouter = modelRouter;
         this.objectMapper = objectMapper;
         this.maxAudioBytes = aiProperties.getVoice().getMaxAudioBytes();
         this.meterRegistry = meterRegistry;
+        this.qcExamRepository = qcExamRepository;
     }
 
     public String analyze(String userPrompt, String context) {
@@ -440,6 +469,307 @@ public class AiService {
             log.error("Erro na chamada de IA para suggest-observation", exception);
             return FRIENDLY_ERROR;
         }
+    }
+
+    /**
+     * B5 — Valida (de forma ASSISTIVA e READ-ONLY) as linhas de um lote de
+     * importacao de CQ ANTES de importar, devolvendo SUGESTOES para revisao
+     * humana.
+     *
+     * <p><strong>Nao importa, nao grava, nao decide aprovar/reprovar.</strong>
+     * Nao recalcula CV/Z-score nem reimplementa Westgard; a deteccao de valor
+     * suspeito aqui e apenas triagem grosseira (ausencia, negativo, fora de uma
+     * banda larguissima) para apontar provavel erro de digitacao/unidade — nunca
+     * um julgamento de regra de CQ.
+     *
+     * <p>Estrategia hibrida: primeiro uma validacao ESTRUTURAL deterministica
+     * (sem IA); depois, apenas para as linhas cujo {@code examName} nao casa com
+     * nenhum exame ativo da area, consulta a IA ({@link AiTask#BATCH_VALIDATION})
+     * para sugerir o nome mais proximo da lista (TYPO) ou confirmar desconhecido.
+     * A IA jamais propoe numero novo. Se a IA falhar, retorna ao menos as
+     * sugestoes estruturais deterministicas (degradacao graciosa) — tratando o
+     * nome nao-reconhecido como {@code UNKNOWN_EXAM}.
+     *
+     * @param area area de CQ das linhas (resolve a lista de exames ativos)
+     * @param rows linhas a validar (nunca {@code null}; pode ser vazia)
+     * @return sugestoes + {@code readinessScore} (fracao de linhas sem problema)
+     */
+    public BatchValidationResult validateBatch(
+        String area, List<com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto> rows
+    ) {
+        List<com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto> safeRows =
+            rows == null ? List.of() : rows;
+        List<BatchSuggestionResult> suggestions = new ArrayList<>();
+
+        // Exames ativos da area (fonte de verdade para nomes); case-insensitive.
+        List<String> validExamNames = qcExamRepository == null ? List.of()
+            : qcExamRepository.findByAreaAndIsActiveTrue(safeText(area)).stream()
+                .map(com.biodiagnostico.entity.QcExam::getName)
+                .filter(name -> name != null && !name.isBlank())
+                .toList();
+        java.util.Set<String> validNormalized = new java.util.HashSet<>();
+        for (String name : validExamNames) {
+            validNormalized.add(normalizeExam(name));
+        }
+
+        // Linhas cujo examName nao casa exatamente: candidatas a TYPO/UNKNOWN_EXAM.
+        List<Integer> examMismatchRows = new ArrayList<>();
+
+        for (int index = 0; index < safeRows.size(); index++) {
+            var row = safeRows.get(index);
+            String examName = row == null ? null : row.examName();
+
+            if (examName == null || examName.isBlank()) {
+                suggestions.add(new BatchSuggestionResult(
+                    index, "examName", "MISSING",
+                    "Nome do exame ausente. Informe o exame da área.", 1.0));
+            } else if (!validNormalized.contains(normalizeExam(examName))) {
+                examMismatchRows.add(index);
+            }
+
+            if (row != null) {
+                appendNumericStructuralSuggestions(index, row, suggestions);
+            }
+        }
+
+        // IA apenas para as linhas com nome de exame nao reconhecido.
+        if (!examMismatchRows.isEmpty()) {
+            suggestions.addAll(resolveExamMismatches(area, safeRows, examMismatchRows, validExamNames));
+        }
+
+        double readinessScore = computeReadinessScore(safeRows.size(), suggestions);
+        return new BatchValidationResult(suggestions, readinessScore);
+    }
+
+    /**
+     * Acrescenta sugestoes ESTRUTURAIS deterministicas dos campos numericos de
+     * uma linha (ausencia, valores negativos/invalidos e valor grosseiramente
+     * fora de banda). Nao decide status de CQ.
+     */
+    private void appendNumericStructuralSuggestions(
+        int index,
+        com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto row,
+        List<BatchSuggestionResult> suggestions
+    ) {
+        Double value = row.value();
+        if (value == null) {
+            suggestions.add(new BatchSuggestionResult(
+                index, "value", "MISSING", "Valor medido ausente.", 1.0));
+        } else if (value < 0) {
+            suggestions.add(new BatchSuggestionResult(
+                index, "value", "SUSPECT_VALUE",
+                "Valor medido negativo — provável erro de digitação ou unidade.", 0.9));
+        }
+
+        Double targetValue = row.targetValue();
+        if (targetValue != null && targetValue < 0) {
+            suggestions.add(new BatchSuggestionResult(
+                index, "targetValue", "OUT_OF_RANGE", "Valor-alvo negativo.", 0.9));
+        }
+
+        Double targetSd = row.targetSd();
+        if (targetSd != null && targetSd <= 0) {
+            suggestions.add(new BatchSuggestionResult(
+                index, "targetSd", "OUT_OF_RANGE",
+                "Desvio-padrão deve ser maior que zero.", 0.9));
+        }
+
+        Double cvLimit = row.cvLimit();
+        if (cvLimit != null && cvLimit < 0) {
+            suggestions.add(new BatchSuggestionResult(
+                index, "cvLimit", "OUT_OF_RANGE", "Limite de CV não pode ser negativo.", 0.9));
+        }
+
+        // Triagem grosseira de valor fora de banda larguissima (|z| > 10): NAO e
+        // regra de Westgard, apenas deteccao de erro grave de digitacao/unidade.
+        if (value != null && value >= 0
+            && targetValue != null && targetValue >= 0
+            && targetSd != null && targetSd > 0) {
+            double distance = Math.abs(value - targetValue) / targetSd;
+            if (distance > 10.0) {
+                suggestions.add(new BatchSuggestionResult(
+                    index, "value", "SUSPECT_VALUE",
+                    "Valor muito distante do alvo (mais de 10 desvios) — verifique digitação/unidade.",
+                    0.7));
+            }
+        }
+    }
+
+    /**
+     * Resolve as linhas com {@code examName} nao reconhecido usando a IA: para
+     * cada uma, TYPO (com nome sugerido da lista) ou UNKNOWN_EXAM. Em qualquer
+     * falha da IA, degrada graciosamente marcando todas como UNKNOWN_EXAM.
+     */
+    private List<BatchSuggestionResult> resolveExamMismatches(
+        String area,
+        List<com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto> rows,
+        List<Integer> mismatchRows,
+        List<String> validExamNames
+    ) {
+        try {
+            ensureRateLimit();
+            String userContent = buildBatchValidationContext(area, rows, mismatchRows, validExamNames);
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            String raw = aiProvider.completeText(
+                modelRouter.modelFor(AiTask.BATCH_VALIDATION), messages, true);
+            List<BatchSuggestionResult> parsed =
+                parseExamMismatchResponse(raw, mismatchRows, validExamNames);
+            recordAiRequest("validate-batch", "success");
+            return parsed;
+        } catch (BusinessException exception) {
+            recordAiRequest("validate-batch", "business_error");
+            log.warn("Falha de negócio na IA para validate-batch; degradando para UNKNOWN_EXAM", exception);
+            return degradeMismatches(mismatchRows);
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("validate-batch", "error");
+            log.error("Erro na chamada de IA para validate-batch; degradando para UNKNOWN_EXAM", exception);
+            return degradeMismatches(mismatchRows);
+        }
+    }
+
+    /** Degradacao graciosa: sem IA, todo nome nao reconhecido vira UNKNOWN_EXAM. */
+    private List<BatchSuggestionResult> degradeMismatches(List<Integer> mismatchRows) {
+        List<BatchSuggestionResult> fallback = new ArrayList<>(mismatchRows.size());
+        for (int rowIndex : mismatchRows) {
+            fallback.add(new BatchSuggestionResult(
+                rowIndex, "examName", "UNKNOWN_EXAM",
+                "Exame não reconhecido na área. Verifique o cadastro ou o nome digitado.", 0.5));
+        }
+        return fallback;
+    }
+
+    private String buildBatchValidationContext(
+        String area,
+        List<com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto> rows,
+        List<Integer> mismatchRows,
+        List<String> validExamNames
+    ) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("Área: ").append(safeText(area)).append('\n');
+        builder.append("EXAMES VÁLIDOS desta área (use somente estes nomes nas sugestões):\n");
+        if (validExamNames.isEmpty()) {
+            builder.append("(nenhum exame cadastrado para a área)\n");
+        } else {
+            for (String name : validExamNames) {
+                builder.append("- ").append(name).append('\n');
+            }
+        }
+        builder.append("\nLINHAS com examName que não casou (cada uma com seu índice 'row'):\n");
+        for (int rowIndex : mismatchRows) {
+            var row = rows.get(rowIndex);
+            builder.append("row=").append(rowIndex)
+                .append(" | examName=\"").append(row == null ? "" : safeText(row.examName()))
+                .append("\"\n");
+        }
+        builder.append('\n').append(BATCH_VALIDATION_PROMPT);
+        return builder.toString();
+    }
+
+    /**
+     * Parseia a resposta da IA e a reconcilia com a fonte de verdade: o nome
+     * sugerido SO e aceito se existir na lista de exames validos (case-insensitive);
+     * caso contrario rebaixa para UNKNOWN_EXAM. Linhas nao cobertas pela IA viram
+     * UNKNOWN_EXAM. A {@code confidence} e saturada para [0,1].
+     */
+    private List<BatchSuggestionResult> parseExamMismatchResponse(
+        String raw, List<Integer> mismatchRows, List<String> validExamNames
+    ) throws java.io.IOException {
+        java.util.Map<String, String> canonicalByNormalized = new java.util.HashMap<>();
+        for (String name : validExamNames) {
+            canonicalByNormalized.put(normalizeExam(name), name);
+        }
+
+        java.util.Map<Integer, BatchSuggestionResult> byRow = new java.util.LinkedHashMap<>();
+        String cleaned = cleanJsonResponse(raw);
+        JsonNode root = objectMapper.readTree(cleaned);
+        JsonNode items = root.path("items");
+        if (items.isArray()) {
+            for (JsonNode item : items) {
+                if (!item.path("row").isInt() && !item.path("row").isLong()) {
+                    continue;
+                }
+                int rowIndex = item.path("row").asInt();
+                if (!mismatchRows.contains(rowIndex) || byRow.containsKey(rowIndex)) {
+                    continue;
+                }
+                String issue = item.path("issue").asText("");
+                double confidence = clampConfidence(item.path("confidence").asDouble(0.5));
+                String suggestedRaw = item.path("suggestedExamName").asText("");
+                String canonical = suggestedRaw.isBlank()
+                    ? null : canonicalByNormalized.get(normalizeExam(suggestedRaw));
+
+                if ("TYPO".equalsIgnoreCase(issue) && canonical != null) {
+                    byRow.put(rowIndex, new BatchSuggestionResult(
+                        rowIndex, "examName", "TYPO",
+                        "Possível erro de digitação. Exame sugerido: " + canonical, confidence));
+                } else {
+                    byRow.put(rowIndex, new BatchSuggestionResult(
+                        rowIndex, "examName", "UNKNOWN_EXAM",
+                        "Exame não reconhecido na área. Verifique o cadastro ou o nome digitado.",
+                        confidence));
+                }
+            }
+        }
+
+        List<BatchSuggestionResult> result = new ArrayList<>(mismatchRows.size());
+        for (int rowIndex : mismatchRows) {
+            BatchSuggestionResult resolved = byRow.get(rowIndex);
+            result.add(resolved != null ? resolved : new BatchSuggestionResult(
+                rowIndex, "examName", "UNKNOWN_EXAM",
+                "Exame não reconhecido na área. Verifique o cadastro ou o nome digitado.", 0.5));
+        }
+        return result;
+    }
+
+    /**
+     * {@code readinessScore} = fracao de linhas SEM nenhuma sugestao, em [0,1].
+     * Lote vazio devolve {@code 1.0} (nada pendente).
+     */
+    private double computeReadinessScore(int totalRows, List<BatchSuggestionResult> suggestions) {
+        if (totalRows <= 0) {
+            return 1.0;
+        }
+        java.util.Set<Integer> rowsWithIssue = new java.util.HashSet<>();
+        for (BatchSuggestionResult suggestion : suggestions) {
+            rowsWithIssue.add(suggestion.row());
+        }
+        int clean = totalRows - rowsWithIssue.size();
+        return (double) clean / (double) totalRows;
+    }
+
+    private double clampConfidence(double value) {
+        if (Double.isNaN(value)) {
+            return 0.5;
+        }
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    /** Normaliza nome de exame para comparacao: trim + minusculas (Locale ROOT). */
+    private String normalizeExam(String name) {
+        return name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Resultado interno de {@link #validateBatch}, desacoplado dos DTOs de HTTP.
+     * O controlador mapeia para {@code BatchValidationResponse}.
+     */
+    public record BatchValidationResult(
+        List<BatchSuggestionResult> suggestions,
+        double readinessScore
+    ) {
+    }
+
+    /** Uma sugestao assistiva para uma linha do lote (indice 0-based). */
+    public record BatchSuggestionResult(
+        int row,
+        String field,
+        String issue,
+        String suggestion,
+        double confidence
+    ) {
     }
 
     private String safeText(String value) {

@@ -1,16 +1,17 @@
 import axios from 'axios'
-import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Layers, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
-import { useExplainQc } from '../../hooks/useAiAssist'
+import { useExplainQc, useValidateBatch } from '../../hooks/useAiAssist'
 import { qcService } from '../../services/qcService'
-import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
+import type { QcRecord, QcRecordRequest, QcReferenceValue, ValidateBatchRow } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
 import { AiAssistResult } from './AiAssistShared'
+import { BatchValidationPanel } from './BatchValidationPanel'
 import { PostCalibrationModal } from './PostCalibrationModal'
 import { ExamHistoryModal } from './ExamHistoryModal'
-import { getOperationalReferences } from './qcReferenceResolution'
+import { getOperationalReferences, pickRecommendedReference, rankOperationalReferences } from './qcReferenceResolution'
 
 const LeveyJenningsChart = lazy(() =>
   import('../charts/LeveyJenningsChart').then((module) => ({ default: module.LeveyJenningsChart })),
@@ -84,6 +85,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const queryClient = useQueryClient()
   const createRecord = useCreateQcRecord()
   const createBatch = useCreateQcBatch()
+  const validateBatch = useValidateBatch()
   const { data: exams = [] } = useQcExams(area)
   const { data: references = [] } = useQcReferences(undefined, true)
 
@@ -120,19 +122,43 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const [historyExam, setHistoryExam] = useState<{ examName: string; level: string | null } | null>(null)
   const [explainRecord, setExplainRecord] = useState<QcRecord | null>(null)
 
-  // --- Resolucao de referencia silenciosa ---
+  // --- Resolucao de referencia (B4: sugestao deterministica, nao bloqueia) ---
   const referenceCandidates = useMemo(
     () => getOperationalReferences(references, area, form.examName, form.date),
     [area, form.date, form.examName, references],
   )
 
-  const resolvedRef = useMemo<QcReferenceValue | null>(() => {
-    return referenceCandidates.length === 1 ? referenceCandidates[0] : null
-  }, [referenceCandidates])
+  // Candidatas ranqueadas pela heuristica deterministica (ver qcReferenceResolution).
+  const rankedCandidates = useMemo(
+    () => rankOperationalReferences(referenceCandidates, form.date),
+    [referenceCandidates, form.date],
+  )
 
-  const ambiguousRefs = useMemo(() => {
-    return form.examName && !resolvedRef && referenceCandidates.length > 1 ? referenceCandidates : []
-  }, [form.examName, referenceCandidates, resolvedRef])
+  // Override manual: o usuario pode trocar a referencia recomendada.
+  // Guardamos so o id; o efetivo e derivado durante o render contra as
+  // candidatas atuais. Se o id deixar de ser candidato (troca de exame/data),
+  // a derivacao cai automaticamente na recomendada — sem precisar resetar
+  // estado em useEffect (evita o warning react-hooks/set-state-in-effect).
+  const [selectedRefId, setSelectedRefId] = useState<string | null>(null)
+
+  // Quando ha ambiguidade, recomendamos o topo do ranking; com 1 candidata,
+  // ela mesma; com 0, nenhuma. O override so vale se ainda for candidata valida.
+  const recommendedRef = useMemo<QcReferenceValue | null>(
+    () => pickRecommendedReference(rankedCandidates, form.date),
+    [rankedCandidates, form.date],
+  )
+
+  const resolvedRef = useMemo<QcReferenceValue | null>(() => {
+    if (rankedCandidates.length === 0) return null
+    if (selectedRefId) {
+      const chosen = rankedCandidates.find((ref) => ref.id === selectedRefId)
+      if (chosen) return chosen
+    }
+    return recommendedRef
+  }, [rankedCandidates, recommendedRef, selectedRefId])
+
+  // Ha ambiguidade quando mais de uma referencia vigente atende exame+nivel.
+  const hasAmbiguity = rankedCandidates.length > 1
 
   const targetValue = resolvedRef ? resolvedRef.targetValue : form.targetValue || 0
   const targetSd = resolvedRef ? resolvedRef.targetSd : form.targetSd || 0
@@ -171,15 +197,11 @@ export function RegistroTab({ area }: RegistroTabProps) {
       toast.warning('Selecione um exame e informe o valor.')
       return
     }
-    if (!resolvedRef && ambiguousRefs.length === 0) {
+    if (!resolvedRef) {
       setSubmitError('Cadastre uma referência para este exame antes de registrar.')
       return
     }
-    if (!resolvedRef && ambiguousRefs.length > 1) {
-      setSubmitError('Mais de uma referência ativa e vigente foi encontrada para este exame. Revise a aba Referências antes de registrar.')
-      return
-    }
-    const ref = resolvedRef!
+    const ref = resolvedRef
     const payload: QcRecordRequest = {
       ...form, area, referenceId: ref.id,
       lotNumber: form.lotNumber || '',
@@ -242,6 +264,69 @@ export function RegistroTab({ area }: RegistroTabProps) {
       loadRecords()
       toast.success('Registro restaurado.')
     } catch { toast.error('Erro ao restaurar registro.') }
+  }
+
+  // Define o exame de uma linha do lote e re-resolve alvo/DP/CV a partir da
+  // referencia (mesma logica do <select> da linha). Usado pelo seletor e pelo
+  // "Aplicar" da validacao por IA, para manter o comportamento identico.
+  const setBatchRowExam = (rowIndex: number, examName: string) => {
+    const matchingRefs = getOperationalReferences(references, area, examName, form.date)
+    setBatchRows(prev => prev.map((r, idx) => {
+      if (idx !== rowIndex) return r
+      if (matchingRefs.length === 1) {
+        const ref = matchingRefs[0]
+        return {
+          ...r, examName,
+          targetValue: String(ref.targetValue ?? ''),
+          targetSd: String(ref.targetSd ?? ''),
+          cvLimit: String(ref.cvMaxThreshold ?? '10'),
+        }
+      }
+      return { ...r, examName, targetValue: '', targetSd: '', cvLimit: '10' }
+    }))
+  }
+
+  // --- B5: validacao assistiva do lote (read-only, antes de submeter) ---
+  // O backend devolve `row` como indice na LISTA ENVIADA. Como filtramos linhas
+  // vazias antes de enviar, guardamos o mapa indice-enviado -> indice no
+  // batchRows original, para o "Aplicar" corrigir a linha certa do formulario.
+  const [validatedRowMap, setValidatedRowMap] = useState<number[]>([])
+
+  const handleValidateBatch = () => {
+    if (validateBatch.isPending) return
+    const toNumberOrNull = (raw: string): number | null => {
+      const trimmed = raw.trim()
+      if (trimmed === '') return null
+      const parsed = Number(trimmed)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+    // Mantem so linhas com algum conteudo (exame ou valor); preserva o indice
+    // original de cada uma para o mapeamento de volta.
+    const indexed = batchRows
+      .map((r, originalIndex) => ({ r, originalIndex }))
+      .filter(({ r }) => r.examName.trim() || r.value.trim())
+    if (indexed.length === 0) {
+      toast.warning('Preencha ao menos uma linha (exame ou valor) para validar.')
+      return
+    }
+    const rows: ValidateBatchRow[] = indexed.map(({ r }) => ({
+      examName: r.examName.trim() || null,
+      level: 'Normal',
+      value: toNumberOrNull(r.value),
+      targetValue: toNumberOrNull(r.targetValue),
+      targetSd: toNumberOrNull(r.targetSd),
+      cvLimit: toNumberOrNull(r.cvLimit),
+    }))
+    setValidatedRowMap(indexed.map(({ originalIndex }) => originalIndex))
+    validateBatch.mutate({ area, rows })
+  }
+
+  // Aplica um nome de exame sugerido pela IA a uma linha. So edita o formulario;
+  // nada e importado. Traduz o indice da lista enviada de volta para o batchRows.
+  const handleApplyExamName = (sentRow: number, examName: string) => {
+    const originalIndex = validatedRowMap[sentRow] ?? sentRow
+    setBatchRowExam(originalIndex, examName)
+    toast.success(`Exame da linha ${originalIndex + 1} ajustado para ${examName}. Revise antes de registrar.`)
   }
 
   // --- Batch submit handler ---
@@ -325,27 +410,8 @@ export function RegistroTab({ area }: RegistroTabProps) {
             {/* Batch rows */}
             {batchRows.map((row, i) => (
               <div key={i} className="grid grid-cols-[1fr_100px_100px_100px_100px_40px] gap-2 items-center">
-                <select value={row.examName} onChange={e => {
-                  const val = e.target.value
-                  const matchingRefs = getOperationalReferences(references, area, val, form.date)
-                  if (matchingRefs.length === 1) {
-                    const ref = matchingRefs[0]
-                    setBatchRows(prev => prev.map((r, idx) => idx === i ? {
-                      ...r, examName: val,
-                      targetValue: String(ref.targetValue ?? ''),
-                      targetSd: String(ref.targetSd ?? ''),
-                      cvLimit: String(ref.cvMaxThreshold ?? '10'),
-                    } : r))
-                  } else {
-                    setBatchRows(prev => prev.map((r, idx) => idx === i ? {
-                      ...r,
-                      examName: val,
-                      targetValue: '',
-                      targetSd: '',
-                      cvLimit: '10',
-                    } : r))
-                  }
-                }} className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm">
+                <select value={row.examName} onChange={e => setBatchRowExam(i, e.target.value)}
+                  className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm">
                   <option value="">Selecione...</option>
                   {exams.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
                 </select>
@@ -370,13 +436,36 @@ export function RegistroTab({ area }: RegistroTabProps) {
               </button>
             </div>
 
-            <Button
-              onClick={handleBatchSubmit}
-              loading={createBatch.isPending}
-              disabled={batchRows.every(r => !r.examName || !r.value)}
-            >
-              Registrar Todos ({batchRows.filter(r => r.examName && r.value).length})
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                onClick={handleBatchSubmit}
+                loading={createBatch.isPending}
+                disabled={batchRows.every(r => !r.examName || !r.value)}
+              >
+                Registrar Todos ({batchRows.filter(r => r.examName && r.value).length})
+              </Button>
+              {/* B5 — Passo opcional, ANTES de registrar: a IA aponta erros de
+                  digitacao, exames desconhecidos e valores suspeitos. Read-only;
+                  nao importa nada. O operador revisa e (opcionalmente) aplica. */}
+              <Button
+                variant="secondary"
+                icon={<Sparkles className="h-4 w-4 text-violet-500" />}
+                onClick={handleValidateBatch}
+                loading={validateBatch.isPending}
+                disabled={batchRows.every(r => !r.examName.trim() && !r.value.trim())}
+              >
+                Validar planilha com IA
+              </Button>
+            </div>
+
+            <BatchValidationPanel
+              isPending={validateBatch.isPending}
+              isError={validateBatch.isError}
+              result={validateBatch.data ?? null}
+              examOptions={exams.map(e => e.name)}
+              onApplyExamName={handleApplyExamName}
+              resolveLineNumber={(row) => (validatedRowMap[row] ?? row) + 1}
+            />
           </div>
         ) : (
           /* --- Normal Mode --- */
@@ -410,17 +499,23 @@ export function RegistroTab({ area }: RegistroTabProps) {
 
             {/* Indicador de referência compacto */}
             {resolvedRef ? (
-              <div className="mt-3 flex flex-wrap items-center gap-1 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
-                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                <span className="text-sm font-semibold text-neutral-600">Ref:</span>
-                <span className="text-sm">{resolvedRef.name}</span>
-                <span className="text-sm text-neutral-500">| Alvo: {resolvedRef.targetValue} | DP: {resolvedRef.targetSd}</span>
-              </div>
-            ) : form.examName && ambiguousRefs.length > 1 ? (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                <div className="font-semibold">Registro bloqueado: referências ambíguas.</div>
-                <div>
-                  Há {ambiguousRefs.length} referências ativas e vigentes para este exame. Revise a aba Referências antes de registrar.
+              <div className="mt-3 space-y-2">
+                {/* B4 — Seletor de desambiguacao: quando ha >1 referencia vigente,
+                    pre-selecionamos a recomendada (topo do ranking deterministico)
+                    e deixamos o usuario trocar, sem bloquear o lancamento. */}
+                {hasAmbiguity ? (
+                  <ReferenceAmbiguityPicker
+                    candidates={rankedCandidates}
+                    recommendedId={recommendedRef?.id ?? null}
+                    selectedRef={resolvedRef}
+                    onSelect={setSelectedRefId}
+                  />
+                ) : null}
+                <div className="flex flex-wrap items-center gap-1 rounded-xl border border-green-200 bg-green-50 px-3 py-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <span className="text-sm font-semibold text-neutral-600">Ref:</span>
+                  <span className="text-sm">{resolvedRef.name}</span>
+                  <span className="text-sm text-neutral-500">| Alvo: {resolvedRef.targetValue} | DP: {resolvedRef.targetSd}</span>
                 </div>
               </div>
             ) : form.examName ? (
@@ -630,6 +725,100 @@ export function RegistroTab({ area }: RegistroTabProps) {
       )}
     </div>
   )
+}
+
+interface ReferenceAmbiguityPickerProps {
+  candidates: QcReferenceValue[]
+  recommendedId: string | null
+  selectedRef: QcReferenceValue
+  onSelect: (id: string) => void
+}
+
+/**
+ * B4 — Seletor de desambiguacao de referencia.
+ *
+ * Quando ha mais de uma referencia vigente para o mesmo exame+nivel, em vez de
+ * bloquear, mostramos as candidatas ranqueadas (mais provavel pre-selecionada)
+ * e deixamos o operador trocar. A escolha alimenta o calculo de alvo/DP/CV.
+ * A ordem das opcoes ja vem ranqueada pela heuristica deterministica; nao ha
+ * IA nem calculo de regra de CQ aqui — apenas selecao da fonte.
+ */
+function ReferenceAmbiguityPicker({ candidates, recommendedId, selectedRef, onSelect }: ReferenceAmbiguityPickerProps) {
+  const usingRecommended = selectedRef.id === recommendedId
+  // Domínio (B4): se as candidatas vigentes divergem em alvo ou DP, e provavel
+  // erro de cadastro (dois lotes diferentes ativos ao mesmo tempo). Avisamos de
+  // forma discreta para o operador confirmar o lote em uso. So sinal visual —
+  // nao altera ranking nem calculo de CQ.
+  const divergentTargets = referencesDiverge(candidates)
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-amber-900">
+      <div className="flex items-start gap-2">
+        <Layers className="mt-0.5 h-4 w-4 flex-none text-amber-600" />
+        <div className="flex-1 space-y-2">
+          <p className="text-sm">
+            <span className="font-semibold">{candidates.length} referências vigentes</span> para este exame/nível
+            {usingRecommended ? ' — usando a mais recente: ' : ' — usando: '}
+            <span className="font-semibold">{selectedRef.name}</span>
+            {selectedRef.lotNumber ? <> (lote {selectedRef.lotNumber}{selectedRef.validUntil ? `, validade ${formatRefDate(selectedRef.validUntil)}` : ''})</> : selectedRef.validUntil ? <> (validade {formatRefDate(selectedRef.validUntil)})</> : null}
+            . Trocar?
+          </p>
+          {divergentTargets ? (
+            <p className="flex items-start gap-1.5 text-sm font-medium text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-none" />
+              <span>Atenção: as referências vigentes têm alvo/DP diferentes — confirme qual lote está em uso.</span>
+            </p>
+          ) : null}
+          <select
+            aria-label="Referência operacional"
+            value={selectedRef.id}
+            onChange={(e) => onSelect(e.target.value)}
+            className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-neutral-800 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20"
+          >
+            {candidates.map((ref) => (
+              <option key={ref.id} value={ref.id}>
+                {formatRefOption(ref, ref.id === recommendedId)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * B4 (domínio): detecta divergencia de alvo/DP entre as candidatas vigentes.
+ * Qualquer diferenca em targetValue OU targetSd entre as referencias dispara o
+ * aviso (cvMaxThreshold e opcional e nao entra aqui). Comparacao simples por
+ * unicidade — nao toca em nenhuma regra de calculo de CQ.
+ */
+function referencesDiverge(candidates: QcReferenceValue[]): boolean {
+  if (candidates.length < 2) return false
+  const first = candidates[0]
+  return candidates.some(
+    (ref) => ref.targetValue !== first.targetValue || ref.targetSd !== first.targetSd,
+  )
+}
+
+/** Rotulo de uma opcao do seletor: nome, lote, validade e alvo/DP. */
+function formatRefOption(ref: QcReferenceValue, isRecommended: boolean): string {
+  const parts: string[] = [ref.name]
+  if (ref.lotNumber) parts.push(`lote ${ref.lotNumber}`)
+  if (ref.validUntil) parts.push(`val. ${formatRefDate(ref.validUntil)}`)
+  parts.push(`alvo ${ref.targetValue} ± ${ref.targetSd}`)
+  const label = parts.join(' · ')
+  return isRecommended ? `★ ${label} (recomendada)` : label
+}
+
+/** Formata uma data ISO (YYYY-MM-DD...) como dd/mm/aaaa; vazio vira string vazia. */
+function formatRefDate(value: string): string {
+  const iso = value.slice(0, 10)
+  if (!iso) return ''
+  try {
+    return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  } catch {
+    return iso
+  }
 }
 
 interface FeedbackPanelProps {

@@ -142,7 +142,7 @@ class DefaultReportAiCommentatorTest {
 
     private AiService stubAnalyze(java.util.function.BiFunction<String, String, String> fn) {
         return new AiService(null, null, null, new com.biodiagnostico.config.AiProperties(),
-            new io.micrometer.core.instrument.simple.SimpleMeterRegistry()) {
+            new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), null) {
             @Override
             public String analyze(String userPrompt, String context) {
                 return fn.apply(userPrompt, context);

@@ -6,6 +6,8 @@ import type {
   InterpretTrendResponse,
   SuggestObservationRequest,
   SuggestObservationResponse,
+  ValidateBatchRequest,
+  ValidateBatchResponse,
   VoiceFormData,
   VoiceToFormRequest,
 } from '../types'
@@ -33,5 +35,13 @@ export const aiService = {
   async suggestObservation(request: SuggestObservationRequest) {
     const response = await api.post<SuggestObservationResponse>('/ai/suggest-observation', request)
     return response.data.suggestion
+  },
+  /**
+   * B5 — valida (read-only) um lote de importacao de CQ antes de submeter.
+   * Devolve sugestoes estruturais e um readinessScore; nao importa nem grava.
+   */
+  async validateBatch(request: ValidateBatchRequest) {
+    const response = await api.post<ValidateBatchResponse>('/ai/validate-batch', request)
+    return response.data
   },
 }

@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.biodiagnostico.config.AiProperties;
+import com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto;
+import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.BusinessException;
+import com.biodiagnostico.repository.QcExamRepository;
+import com.biodiagnostico.service.AiService.BatchSuggestionResult;
+import com.biodiagnostico.service.AiService.BatchValidationResult;
 import com.biodiagnostico.service.ai.AiMessage;
 import com.biodiagnostico.service.ai.AiModelRouter;
 import com.biodiagnostico.service.ai.AiProvider;
@@ -20,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 /**
  * Testa os metodos assistivos de IA (A1/A2/C8) e voice-form do {@link AiService}.
@@ -90,9 +96,29 @@ class AiServiceTest {
     }
 
     private AiService buildService(AiProvider provider) {
+        return buildService(provider, null);
+    }
+
+    private AiService buildService(AiProvider provider, QcExamRepository examRepository) {
         AiProperties properties = new AiProperties();
         AiModelRouter router = new AiModelRouter(properties);
-        return new AiService(provider, router, new ObjectMapper(), properties, new SimpleMeterRegistry());
+        return new AiService(
+            provider, router, new ObjectMapper(), properties, new SimpleMeterRegistry(), examRepository);
+    }
+
+    /** Mock de QcExamRepository devolvendo os exames ativos informados para a área. */
+    private QcExamRepository examRepositoryWith(String area, String... examNames) {
+        QcExamRepository repository = Mockito.mock(QcExamRepository.class);
+        List<QcExam> exams = new ArrayList<>();
+        for (String name : examNames) {
+            exams.add(QcExam.builder().name(name).area(area).isActive(true).build());
+        }
+        Mockito.when(repository.findByAreaAndIsActiveTrue(area)).thenReturn(exams);
+        return repository;
+    }
+
+    private BatchRowDto goodRow() {
+        return new BatchRowDto("GLICOSE", "N1", 100.0, 100.0, 2.0, 5.0);
     }
 
     private QcRecord record(String status, String rule) {
@@ -361,5 +387,226 @@ class AiServiceTest {
         assertThat(prompt)
             .as("o prompt deve atribuir a decisão de status ao motor de Westgard")
             .contains("motor determinístico de Westgard");
+    }
+
+    // ---------- B5 validateBatch ----------
+
+    @Test
+    @DisplayName("B5 — linha boa (exame da área, numéricos OK) não gera sugestão e readiness=1.0")
+    void validateBatchGoodRowNoSuggestion() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(goodRow()));
+
+        assertThat(result.suggestions()).isEmpty();
+        assertThat(result.readinessScore()).isEqualTo(1.0);
+        assertThat(provider.textCalls.get()).as("linha boa não aciona a IA").isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — typo de examName: IA sugere o nome da lista (TYPO) com o nome canônico")
+    void validateBatchTypoSuggestsNameFromList() {
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"row\":0,\"issue\":\"TYPO\",\"suggestedExamName\":\"GLICOSE\",\"confidence\":0.92}]}");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE", "UREIA"));
+
+        BatchRowDto typo = new BatchRowDto("glicos", "N1", 100.0, 100.0, 2.0, 5.0);
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(typo));
+
+        assertThat(result.suggestions()).hasSize(1);
+        BatchSuggestionResult suggestion = result.suggestions().get(0);
+        assertThat(suggestion.row()).isZero();
+        assertThat(suggestion.field()).isEqualTo("examName");
+        assertThat(suggestion.issue()).isEqualTo("TYPO");
+        assertThat(suggestion.suggestion()).contains("GLICOSE");
+        assertThat(suggestion.confidence()).isEqualTo(0.92);
+        assertThat(result.readinessScore()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("B5 — IA roteia para o modelo medium (gpt-5.4) na resolução de exame")
+    void validateBatchRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"row\":0,\"issue\":\"UNKNOWN_EXAM\",\"suggestedExamName\":\"\",\"confidence\":0.4}]}");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("XPTO", "N1", 10.0, 10.0, 1.0, 5.0)));
+
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("B5 — IA que rebaixa nome inexistente na lista vira UNKNOWN_EXAM (reconciliação)")
+    void validateBatchRejectsSuggestedNameNotInList() {
+        // A IA "alucina" um nome fora da lista; o serviço deve rebaixar para UNKNOWN_EXAM.
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"row\":0,\"issue\":\"TYPO\",\"suggestedExamName\":\"COLESTEROL\",\"confidence\":0.9}]}");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("colest", "N1", 180.0, 180.0, 5.0, 5.0)));
+
+        assertThat(result.suggestions()).hasSize(1);
+        assertThat(result.suggestions().get(0).issue()).isEqualTo("UNKNOWN_EXAM");
+    }
+
+    @Test
+    @DisplayName("B5 — valor ausente: validação estrutural marca MISSING sem depender da IA")
+    void validateBatchMissingValueStructural() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchRowDto missingValue = new BatchRowDto("GLICOSE", "N1", null, 100.0, 2.0, 5.0);
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(missingValue));
+
+        assertThat(result.suggestions()).hasSize(1);
+        BatchSuggestionResult suggestion = result.suggestions().get(0);
+        assertThat(suggestion.field()).isEqualTo("value");
+        assertThat(suggestion.issue()).isEqualTo("MISSING");
+        assertThat(provider.textCalls.get()).as("exame válido + numérico ausente não aciona IA").isZero();
+        assertThat(result.readinessScore()).isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("B5 — SD <= 0 e valor negativo geram OUT_OF_RANGE/SUSPECT_VALUE (estrutural)")
+    void validateBatchNumericOutOfRangeStructural() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchRowDto bad = new BatchRowDto("GLICOSE", "N1", -5.0, 100.0, 0.0, -1.0);
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(bad));
+
+        assertThat(result.suggestions())
+            .extracting(BatchSuggestionResult::issue)
+            .contains("SUSPECT_VALUE", "OUT_OF_RANGE");
+        assertThat(result.suggestions())
+            .extracting(BatchSuggestionResult::field)
+            .contains("value", "targetSd", "cvLimit");
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — degradação graciosa: IA falha e mismatch de exame vira UNKNOWN_EXAM")
+    void validateBatchGracefulDegradationWhenAiFails() {
+        StubProvider provider = StubProvider.throwing(new RuntimeException("provider down"));
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchRowDto typo = new BatchRowDto("glicos", "N1", 100.0, 100.0, 2.0, 5.0);
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(typo));
+
+        assertThat(result.suggestions()).hasSize(1);
+        BatchSuggestionResult suggestion = result.suggestions().get(0);
+        assertThat(suggestion.field()).isEqualTo("examName");
+        assertThat(suggestion.issue()).isEqualTo("UNKNOWN_EXAM");
+        assertThat(provider.textCalls.get()).as("a IA foi tentada uma vez").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("B5 — readinessScore = fração de linhas SEM problema")
+    void validateBatchReadinessScoreFraction() {
+        // 2 linhas boas + 1 com valor ausente => 2/3 prontas.
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            goodRow(),
+            goodRow(),
+            new BatchRowDto("GLICOSE", "N1", null, 100.0, 2.0, 5.0)));
+
+        assertThat(result.readinessScore()).isEqualTo(2.0 / 3.0);
+    }
+
+    @Test
+    @DisplayName("B5 — múltiplas sugestões na mesma linha contam a linha uma única vez no readiness")
+    void validateBatchMultipleSuggestionsSameRowCountedOnce() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        // Uma linha com value ausente E targetSd inválido: 2 sugestões, 1 linha "suja".
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("GLICOSE", "N1", null, 100.0, 0.0, 5.0)));
+
+        assertThat(result.suggestions()).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(result.readinessScore()).as("linha única toda suja => 0.0").isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("B5 — examName em branco gera MISSING e não vai para a IA")
+    void validateBatchBlankExamNameMissing() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("  ", "N1", 100.0, 100.0, 2.0, 5.0)));
+
+        assertThat(result.suggestions()).hasSize(1);
+        assertThat(result.suggestions().get(0).field()).isEqualTo("examName");
+        assertThat(result.suggestions().get(0).issue()).isEqualTo("MISSING");
+        assertThat(provider.textCalls.get()).as("examName em branco é estrutural, não vai à IA").isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — lote vazio retorna readiness=1.0 sem sugestões e sem IA")
+    void validateBatchEmptyRows() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of());
+
+        assertThat(result.suggestions()).isEmpty();
+        assertThat(result.readinessScore()).isEqualTo(1.0);
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — match de examName é case-insensitive (não aciona IA)")
+    void validateBatchExamNameCaseInsensitive() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("glicose", "N1", 100.0, 100.0, 2.0, 5.0)));
+
+        assertThat(result.suggestions()).isEmpty();
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — valor grosseiramente fora de banda (|z|>10) sinaliza SUSPECT_VALUE sem IA")
+    void validateBatchGrossOutlierSuspect() {
+        StubProvider provider = StubProvider.returningText("não deveria ser chamado");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE"));
+
+        // alvo 100, SD 2, valor 200 => z = 50 >> 10.
+        BatchValidationResult result = service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("GLICOSE", "N1", 200.0, 100.0, 2.0, 5.0)));
+
+        assertThat(result.suggestions())
+            .extracting(BatchSuggestionResult::issue)
+            .contains("SUSPECT_VALUE");
+        assertThat(provider.textCalls.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("B5 — o prompt enviado à IA contém as travas anti-invenção e a lista de exames")
+    void validateBatchPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText(
+            "{\"items\":[{\"row\":0,\"issue\":\"UNKNOWN_EXAM\",\"suggestedExamName\":\"\",\"confidence\":0.3}]}");
+        AiService service = buildService(provider, examRepositoryWith("bioquimica", "GLICOSE", "UREIA"));
+
+        service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("zzz", "N1", 10.0, 10.0, 1.0, 5.0)));
+
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .as("o prompt deve proibir inventar números e só sugerir nomes da lista")
+            .containsIgnoringCase("não invente")
+            .containsIgnoringCase("revisão humana");
+        assertThat(prompt)
+            .as("o prompt deve conter a lista de exames válidos da área")
+            .contains("GLICOSE")
+            .contains("UREIA");
     }
 }

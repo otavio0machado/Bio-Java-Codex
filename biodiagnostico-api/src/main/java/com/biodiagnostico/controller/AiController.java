@@ -1,11 +1,14 @@
 package com.biodiagnostico.controller;
 
 import com.biodiagnostico.dto.request.AiAnalysisRequest;
+import com.biodiagnostico.dto.request.BatchValidationRequest;
 import com.biodiagnostico.dto.request.ExplainQcRequest;
 import com.biodiagnostico.dto.request.InterpretTrendRequest;
 import com.biodiagnostico.dto.request.SuggestObservationRequest;
 import com.biodiagnostico.dto.request.VoiceFormRequest;
 import com.biodiagnostico.dto.response.AiAnalysisResponse;
+import com.biodiagnostico.dto.response.BatchValidationResponse;
+import com.biodiagnostico.dto.response.BatchValidationResponse.BatchSuggestion;
 import com.biodiagnostico.dto.response.ExplainQcResponse;
 import com.biodiagnostico.dto.response.InterpretTrendResponse;
 import com.biodiagnostico.dto.response.SuggestObservationResponse;
@@ -127,5 +130,27 @@ public class AiController {
     ) {
         String suggestion = aiService.suggestObservation(request.kind(), request.context());
         return ResponseEntity.ok(new SuggestObservationResponse(suggestion));
+    }
+
+    /**
+     * B5 — Validação inteligente (assistiva, read-only) de um lote de importação
+     * de CQ ANTES de importar.
+     *
+     * <p>NÃO importa, NÃO grava e NÃO decide aprovar/reprovar: apenas analisa as
+     * linhas enviadas e devolve sugestões para revisão humana. A validação
+     * estrutural é determinística; apenas nomes de exame não reconhecidos passam
+     * pela IA (sugestão de typo a partir da lista da área), com degradação
+     * graciosa quando a IA falha.
+     */
+    @PostMapping("/validate-batch")
+    public ResponseEntity<BatchValidationResponse> validateBatch(
+        @Valid @RequestBody BatchValidationRequest request
+    ) {
+        AiService.BatchValidationResult result = aiService.validateBatch(request.area(), request.rows());
+        List<BatchSuggestion> suggestions = result.suggestions().stream()
+            .map(item -> new BatchSuggestion(
+                item.row(), item.field(), item.issue(), item.suggestion(), item.confidence()))
+            .toList();
+        return ResponseEntity.ok(new BatchValidationResponse(suggestions, result.readinessScore()));
     }
 }

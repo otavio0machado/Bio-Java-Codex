@@ -571,6 +571,59 @@ export interface InterpretTrendResponse {
   interpretation: string
 }
 
+/**
+ * B5 — POST /ai/validate-batch. Validacao assistiva (read-only) de um lote de
+ * importacao de CQ ANTES de submeter. Devolve apenas SUGESTOES para revisao
+ * humana; nao importa, nao grava e nao decide aprovar/reprovar.
+ */
+
+/** Categoria do problema apontado pela validacao do lote. */
+export type BatchValidationIssue =
+  | 'TYPO'
+  | 'UNKNOWN_EXAM'
+  | 'OUT_OF_RANGE'
+  | 'MISSING'
+  | 'SUSPECT_VALUE'
+
+/**
+ * Uma linha do lote a validar. Todos os campos sao anulaveis: a propria
+ * validacao sinaliza ausencias/implausibilidades. Espelha os campos de uma
+ * linha de importacao de CQ (mesmos nomes que o backend espera).
+ */
+export interface ValidateBatchRow {
+  examName: string | null
+  level: string | null
+  value: number | null
+  targetValue: number | null
+  targetSd: number | null
+  cvLimit: number | null
+}
+
+export interface ValidateBatchRequest {
+  /** Area de CQ das linhas (ex.: "bioquimica"); resolve a lista de exames ativos. */
+  area: string
+  rows: ValidateBatchRow[]
+}
+
+/** Uma sugestao de correcao para uma linha do lote (apoio a decisao). */
+export interface BatchSuggestion {
+  /** Indice 0-based da linha na lista enviada. */
+  row: number
+  /** Campo afetado (ex.: "examName", "value", "targetSd", "cvLimit"). */
+  field: string
+  issue: BatchValidationIssue | string
+  /** Texto PT-BR para revisao humana; para TYPO de exame, vem da lista cadastrada. */
+  suggestion: string
+  /** Confianca da sugestao, em [0,1]. */
+  confidence: number
+}
+
+export interface ValidateBatchResponse {
+  suggestions: BatchSuggestion[]
+  /** Fracao de linhas SEM problema, em [0,1]. Indicador de prontidao, nao aprovacao. */
+  readinessScore: number
+}
+
 export type SuggestObservationKind = 'post-calibration' | 'maintenance' | 'reagent' | 'qc'
 
 /** C8 — POST /ai/suggest-observation. {@code kind} restrito ao conjunto aceito pelo backend. */

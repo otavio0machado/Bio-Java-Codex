@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.biodiagnostico.config.SecurityConfig;
+import com.biodiagnostico.dto.request.BatchValidationRequest;
+import com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto;
 import com.biodiagnostico.dto.request.ExplainQcRequest;
 import com.biodiagnostico.dto.request.InterpretTrendRequest;
 import com.biodiagnostico.dto.request.SuggestObservationRequest;
@@ -18,6 +20,8 @@ import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.security.AccessTokenBlacklistService;
 import com.biodiagnostico.security.JwtAuthFilter;
 import com.biodiagnostico.service.AiService;
+import com.biodiagnostico.service.AiService.BatchSuggestionResult;
+import com.biodiagnostico.service.AiService.BatchValidationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
 import java.util.List;
@@ -192,6 +196,53 @@ class AiControllerTest {
             .andExpect(status().isBadRequest());
     }
 
+    // ---------- B5 /api/ai/validate-batch ----------
+
+    @Test
+    @DisplayName("B5 — valida lote e retorna sugestões + readinessScore (200)")
+    void validateBatchHappyPath() throws Exception {
+        BatchValidationRequest request = new BatchValidationRequest(
+            "bioquimica",
+            List.of(new BatchRowDto("glicos", "N1", 100.0, 100.0, 2.0, 5.0)));
+
+        mockMvc.perform(post("/api/ai/validate-batch")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.readinessScore").value(0.5))
+            .andExpect(jsonPath("$.suggestions[0].row").value(0))
+            .andExpect(jsonPath("$.suggestions[0].field").value("examName"))
+            .andExpect(jsonPath("$.suggestions[0].issue").value("TYPO"))
+            .andExpect(jsonPath("$.suggestions[0].suggestion").value("Exame sugerido: GLICOSE"))
+            .andExpect(jsonPath("$.suggestions[0].confidence").value(0.9));
+    }
+
+    @Test
+    @DisplayName("B5 — retorna 400 quando area está em branco")
+    void validateBatchBlankArea() throws Exception {
+        BatchValidationRequest request = new BatchValidationRequest(
+            "", List.of(new BatchRowDto("GLICOSE", "N1", 100.0, 100.0, 2.0, 5.0)));
+
+        mockMvc.perform(post("/api/ai/validate-batch")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("B5 — retorna 400 quando rows está vazio")
+    void validateBatchEmptyRows() throws Exception {
+        BatchValidationRequest request = new BatchValidationRequest("bioquimica", List.of());
+
+        mockMvc.perform(post("/api/ai/validate-batch")
+                .with(user("ana").roles("FUNCIONARIO"))
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(request)))
+            .andExpect(status().isBadRequest());
+    }
+
     @TestConfiguration
     static class TestBeans {
 
@@ -234,7 +285,7 @@ class AiControllerTest {
 
         StubAiService() {
             super(null, null, null, new com.biodiagnostico.config.AiProperties(),
-                new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), null);
         }
 
         @Override
@@ -256,6 +307,16 @@ class AiControllerTest {
                 throw new com.biodiagnostico.exception.BusinessException("Tipo de observação inválido");
             }
             return "Observacao sugerida.";
+        }
+
+        @Override
+        public BatchValidationResult validateBatch(
+            String area,
+            List<com.biodiagnostico.dto.request.BatchValidationRequest.BatchRowDto> rows
+        ) {
+            List<BatchSuggestionResult> suggestions = List.of(
+                new BatchSuggestionResult(0, "examName", "TYPO", "Exame sugerido: GLICOSE", 0.9));
+            return new BatchValidationResult(suggestions, 0.5);
         }
     }
 }
