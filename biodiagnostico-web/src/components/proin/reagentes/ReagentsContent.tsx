@@ -27,7 +27,12 @@ import type { ReagentLabelSummary, ReagentLot, StockMovement } from '../../../ty
 import { cn } from '../../../utils/cn'
 import { formatLongBR } from '../../../utils/date'
 import { Button, Card, EmptyState, Skeleton, StatusBadge } from '../../ui'
-import { MOVEMENT_REASONS, REAGENT_STATUS_LABELS, TAG_STATUS_TABS } from './constants'
+import {
+  getCategoryBadgeClasses,
+  MOVEMENT_REASONS,
+  REAGENT_STATUS_LABELS,
+  TAG_STATUS_TABS,
+} from './constants'
 import {
   canCloseUnit,
   canOpenUnit,
@@ -417,7 +422,12 @@ function ReagentListCard({
             <h4 className="text-lg font-semibold text-neutral-900">{lot.label}</h4>
             <StatusBadge status={lot.status} />
             {lot.category ? (
-              <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800">
+              <span
+                className={cn(
+                  'rounded-full px-2.5 py-1 text-xs font-medium',
+                  getCategoryBadgeClasses(lot.category),
+                )}
+              >
                 {lot.category}
               </span>
             ) : null}
@@ -562,7 +572,12 @@ function ReagentTagCard({
             </h4>
             <StatusBadge status={lot.status} />
             {lot.category ? (
-              <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800">
+              <span
+                className={cn(
+                  'rounded-full px-2.5 py-1 text-xs font-medium',
+                  getCategoryBadgeClasses(lot.category),
+                )}
+              >
                 {lot.category}
               </span>
             ) : null}

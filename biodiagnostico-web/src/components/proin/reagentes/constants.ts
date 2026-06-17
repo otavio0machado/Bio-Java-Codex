@@ -28,6 +28,48 @@ export const CATEGORIES = [
 ]
 
 /**
+ * Cor de identificacao por area/categoria. Cada classificacao recebe um par
+ * (fundo + texto) distinto para diferenciacao visual rapida — especialmente na
+ * etiqueta dos cards de reagente. Sao classes Tailwind completas e estaticas
+ * (purge-safe): nao montar nome de classe por interpolacao.
+ *
+ * A chave canonica e a grafia de {@link CATEGORIES}. O lookup
+ * ({@link getCategoryBadgeClasses}) normaliza acento/caixa, entao tambem resolve
+ * os valores de area do CQ ('bioquimica', 'uroanalise', ...).
+ */
+const CATEGORY_BADGE_CLASS_BY_KEY: Record<string, string> = {
+  bioquimica: 'bg-blue-100 text-blue-800',
+  hematologia: 'bg-red-100 text-red-800',
+  imunologia: 'bg-purple-100 text-purple-800',
+  parasitologia: 'bg-green-100 text-green-800',
+  microbiologia: 'bg-teal-100 text-teal-800',
+  uroanalise: 'bg-amber-100 text-amber-800',
+  'kit diagnostico': 'bg-indigo-100 text-indigo-800',
+  'controle cq': 'bg-cyan-100 text-cyan-800',
+  calibrador: 'bg-fuchsia-100 text-fuchsia-800',
+  geral: 'bg-slate-100 text-slate-700',
+}
+
+const CATEGORY_BADGE_CLASS_DEFAULT = 'bg-neutral-100 text-neutral-700'
+
+function normalizeCategoryKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim()
+    .toLowerCase()
+}
+
+/**
+ * Retorna as classes de cor (fundo + texto) da etiqueta de uma categoria/area.
+ * Categorias desconhecidas ou nulas caem num cinza neutro.
+ */
+export function getCategoryBadgeClasses(category?: string | null): string {
+  if (!category) return CATEGORY_BADGE_CLASS_DEFAULT
+  return CATEGORY_BADGE_CLASS_BY_KEY[normalizeCategoryKey(category)] ?? CATEGORY_BADGE_CLASS_DEFAULT
+}
+
+/**
  * Lista fechada de temperaturas canonicas. Espelhada com
  * {@code StorageTempRegistry.ALL} no backend.
  */
