@@ -65,7 +65,7 @@ export default function App() {
         }
       />
       <Route
-        path="/r/verify/:hash"
+        path="/r/verify/:token"
         element={
           <Suspense fallback={<RouteFallback />}>
             <VerifyReportPage />

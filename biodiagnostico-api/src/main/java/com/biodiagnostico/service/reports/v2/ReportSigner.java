@@ -32,9 +32,16 @@ import org.springframework.stereotype.Component;
 
 /**
  * Estampa uma pagina de assinatura eletronica em um PDF ja gerado. Gera um QR
- * code que aponta para {@code {verifyUrlBase}/r/verify/{sha256}}, adiciona
+ * code que aponta para {@code {verifyUrlBase}/r/verify/{shareToken}}, adiciona
  * bloco textual com responsavel tecnico e timestamp, recalcula o SHA-256 dos
  * bytes finais e devolve tudo em um {@link SignatureResult}.
+ *
+ * <p>Integridade de evidencia: um PDF nao pode conter o hash dos proprios
+ * bytes assinados (seria circular). Por isso o QR aponta para um token estavel
+ * e opaco ({@code shareToken}) — a pagina WEB de verificacao e a fonte
+ * autoritativa do hash da versao assinada. A pagina estampa apenas o
+ * "Hash do documento original (pre-assinatura)" ({@code reportSha256}), que
+ * permanece valido como elo da cadeia de custodia.
  *
  * <p>O PDF original permanece intacto — os bytes assinados sao independentes.
  *
@@ -68,9 +75,12 @@ public class ReportSigner {
         if (req.verifyUrlBase() == null || req.verifyUrlBase().isBlank()) {
             throw new IllegalArgumentException("SignatureRequest.verifyUrlBase obrigatorio");
         }
+        if (req.shareToken() == null || req.shareToken().isBlank()) {
+            throw new IllegalArgumentException("SignatureRequest.shareToken obrigatorio");
+        }
 
         Instant signedAt = Instant.now();
-        String verifyUrl = trimTrailingSlash(req.verifyUrlBase()) + "/r/verify/" + req.reportSha256();
+        String verifyUrl = trimTrailingSlash(req.verifyUrlBase()) + "/r/verify/" + req.shareToken();
 
         byte[] qrPng = generateQrPng(verifyUrl, 220);
         byte[] signedPdf = appendSignaturePage(originalBytes, req, signedAt, verifyUrl, qrPng);
@@ -121,7 +131,7 @@ public class ReportSigner {
             addMetaRow(meta, "Assinado por", safeString(req.signerName()));
             addMetaRow(meta, "Registro", safeString(req.signerRegistration()));
             addMetaRow(meta, "Data/Hora", TIMESTAMP_FMT.format(signedAt.atZone(ZONE)));
-            addMetaRow(meta, "Hash do documento", req.reportSha256());
+            addMetaRow(meta, "Hash do documento original (pre-assinatura)", req.reportSha256());
             document.add(meta);
 
             Paragraph spacer = new Paragraph(" ", SIGN_SMALL_FONT);
@@ -138,7 +148,7 @@ public class ReportSigner {
             }
 
             Paragraph verify = new Paragraph(
-                "Verifique a autenticidade em: " + verifyUrl, SIGN_SMALL_FONT);
+                "Verifique a autenticidade e o hash da versao assinada em: " + verifyUrl, SIGN_SMALL_FONT);
             verify.setAlignment(Element.ALIGN_CENTER);
             verify.setSpacingBefore(10F);
             document.add(verify);
@@ -202,14 +212,24 @@ public class ReportSigner {
     }
 
     /**
-     * Requisicao de assinatura. {@code verifyUrlBase} e tipicamente
-     * {@code publicBaseUrl} das properties; {@code reportSha256} e o hash
-     * dos bytes pre-assinatura.
+     * Requisicao de assinatura.
+     *
+     * @param signerName         nome do responsavel tecnico
+     * @param signerRegistration registro profissional (CRBM/CRM)
+     * @param verifyUrlBase      base publica de verificacao; tipicamente
+     *                           {@code publicBaseUrl} das properties. O QR e o
+     *                           texto codificam {@code {verifyUrlBase}/r/verify/{shareToken}}
+     * @param shareToken         token estavel e opaco do run; e o que o QR
+     *                           aponta (NAO o hash). A pagina WEB de verificacao
+     *                           e a fonte autoritativa do hash da versao assinada
+     * @param reportSha256       hash dos bytes pre-assinatura; estampado apenas
+     *                           no rotulo "Hash do documento original (pre-assinatura)"
      */
     public record SignatureRequest(
         String signerName,
         String signerRegistration,
         String verifyUrlBase,
+        String shareToken,
         String reportSha256
     ) {}
 

@@ -199,10 +199,11 @@ class ReportV2ControllerTest {
     @DisplayName("GET /verify/{hash} publico (sem auth) — hash invalido -> 200 valid=false (Ressalva 5)")
     void verifyPublicHashInvalidoRetorna200ValidFalse() throws Exception {
         service.nextVerifyResponse = new VerifyReportResponse(
-            null, null, null, null, null, null, null, null, null, false, false
+            null, null, null, null, null, null, null, null, null, false, "NOT_FOUND", false
         );
         mockMvc.perform(get("/api/reports/v2/verify/bogus"))
             .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("NOT_FOUND"))
             .andExpect(jsonPath("$.valid").value(false))
             .andExpect(jsonPath("$.signed").value(false));
     }
@@ -212,7 +213,7 @@ class ReportV2ControllerTest {
     void verifyOk() throws Exception {
         service.nextVerifyResponse = new VerifyReportResponse(
             "BIO-202604-000001", "CQ_OPERATIONAL_V2", "Abril/2026",
-            Instant.now(), "ana", "a".repeat(64), null, null, null, false, true
+            Instant.now(), "ana", "a".repeat(64), null, null, null, false, "VALID_UNSIGNED", true
         );
         mockMvc.perform(get("/api/reports/v2/verify/abc"))
             .andExpect(status().isOk())
@@ -226,7 +227,7 @@ class ReportV2ControllerTest {
     @DisplayName("rate limit /verify: 11 requests em 1 min -> 11a 429 + Retry-After")
     void verifyRateLimit() throws Exception {
         service.nextVerifyResponse = new VerifyReportResponse(
-            "BIO", "CODE", null, Instant.now(), null, null, null, null, null, false, true
+            "BIO", "CODE", null, Instant.now(), null, null, null, null, null, false, "VALID_UNSIGNED", true
         );
         // 10 primeiras passam (limite default)
         for (int i = 0; i < 10; i++) {

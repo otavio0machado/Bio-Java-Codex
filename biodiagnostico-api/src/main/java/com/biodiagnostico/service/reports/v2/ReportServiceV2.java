@@ -279,11 +279,21 @@ public class ReportServiceV2 {
                     + "Configure LabSettings.responsibleRegistration ou informe signerRegistration no request."
                 );
             }
+            // Garante token estavel ANTES de assinar. Runs V2 ja nascem com
+            // shareToken (recordSuccessV2); runs legados sem token recebem um
+            // agora, persistido. O QR aponta para {publicBaseUrl}/r/verify/{token},
+            // nunca para o sha256 (que seria circular nos bytes assinados).
+            String shareToken = run.getShareToken();
+            if (shareToken == null || shareToken.isBlank()) {
+                shareToken = reportRunService.ensureShareToken(run.getId());
+                run.setShareToken(shareToken);
+            }
             ReportSigner.SignatureResult signed = reportSigner.sign(
                 original,
                 new ReportSigner.SignatureRequest(
                     signerName, signerReg,
                     properties.getPublicBaseUrl(),
+                    shareToken,
                     run.getSha256()
                 )
             );
@@ -353,34 +363,101 @@ public class ReportServiceV2 {
 
     // ---------- Fluxo D: /verify ----------
 
+    /** Estados enumerados (CONGELADOS) da verificacao publica. */
+    static final String STATUS_VALID_SIGNED = "VALID_SIGNED";
+    static final String STATUS_VALID_UNSIGNED = "VALID_UNSIGNED";
+    static final String STATUS_SUPERSEDED = "SUPERSEDED";
+    static final String STATUS_NOT_FOUND = "NOT_FOUND";
+
+    /** Param que casa exatamente 64 chars hex e tratado como HASH; senao, TOKEN. */
+    private static final java.util.regex.Pattern SHA256_HEX =
+        java.util.regex.Pattern.compile("[0-9a-fA-F]{64}");
+
     /**
-     * Verifica um hash (SHA-256 hex) contra os registros de execucao e log
-     * imutavel de assinatura.
+     * Verifica a autenticidade de um laudo a partir de um parametro publico que
+     * pode ser um <strong>token estavel</strong> (shareToken, estampado no QR da
+     * pagina de assinatura) OU um <strong>hash SHA-256 hex</strong> (que o cliente
+     * confronta com o PDF em maos).
      *
-     * <p>Ressalva 5: NAO lanca 404 quando nao encontra — retorna 200 com
-     * {@code valid=false} e campos nulos. Motivacao: o endpoint e publico
-     * e consumido por leitores de QR code; 404 confundiria clientes sem
-     * valor agregado, ja que o contexto e "esse PDF e meu?".
+     * <p>Discriminacao (CONGELADA): se o parametro casa {@code [0-9a-fA-F]{64}} e
+     * tratado como HASH; caso contrario como TOKEN ({@code findByShareToken}).
+     *
+     * <p>Estados (CONGELADOS): {@code VALID_SIGNED}, {@code VALID_UNSIGNED},
+     * {@code SUPERSEDED}, {@code NOT_FOUND}. {@code valid} e derivado: true apenas
+     * para VALID_SIGNED ou VALID_UNSIGNED.
+     *
+     * <p>Ressalva 5: NUNCA lanca 404 — retorna 200 para todos os estados (inclusive
+     * NOT_FOUND e SUPERSEDED). O endpoint e publico e consumido por leitores de QR
+     * que nao interpretam 404.
      */
     @Transactional(readOnly = true)
-    public VerifyReportResponse verify(String hash) {
-        if (hash == null || hash.isBlank()) {
+    public VerifyReportResponse verify(String param) {
+        if (param == null || param.isBlank()) {
             return invalidVerifyResponse();
         }
-        String trimmed = hash.trim();
-        List<ReportRun> runMatches = reportRunRepository.findBySha256OrSignatureHash(trimmed);
-        Optional<ReportSignatureLog> logBySignature = signatureLogRepository.findBySignatureHash(trimmed);
-        List<ReportSignatureLog> logsByOriginal = signatureLogRepository.findByOriginalSha256OrderBySignedAtDesc(trimmed);
+        String trimmed = param.trim();
+        if (SHA256_HEX.matcher(trimmed).matches()) {
+            return verifyByHash(trimmed);
+        }
+        return verifyByToken(trimmed);
+    }
 
-        if (runMatches.isEmpty() && logBySignature.isEmpty() && logsByOriginal.isEmpty()) {
+    private VerifyReportResponse verifyByToken(String token) {
+        ReportRun run = reportRunRepository.findByShareToken(token).orElse(null);
+        if (run == null) {
             return invalidVerifyResponse();
         }
+        boolean isSigned = run.getSignatureHash() != null;
+        String status = isSigned ? STATUS_VALID_SIGNED : STATUS_VALID_UNSIGNED;
+        return buildVerifyResponse(run, null, status);
+    }
 
-        ReportRun run = runMatches.isEmpty() ? null : runMatches.get(0);
-        ReportSignatureLog signatureLog = logBySignature.orElse(
-            logsByOriginal.isEmpty() ? null : logsByOriginal.get(0)
-        );
+    private VerifyReportResponse verifyByHash(String hash) {
+        List<ReportRun> runMatches = reportRunRepository.findBySha256OrSignatureHash(hash);
+        Optional<ReportSignatureLog> logBySignature = signatureLogRepository.findBySignatureHash(hash);
+        List<ReportSignatureLog> logsByOriginal =
+            signatureLogRepository.findByOriginalSha256OrderBySignedAtDesc(hash);
 
+        // Ordem CONGELADA (evita ambiguidade): PRIMEIRO testar == signatureHash.
+        // signatureHash de um run:
+        for (ReportRun run : runMatches) {
+            if (run.getSignatureHash() != null && run.getSignatureHash().equalsIgnoreCase(hash)) {
+                return buildVerifyResponse(run, null, STATUS_VALID_SIGNED);
+            }
+        }
+        // signatureHash de um signature log (run pode ter sido apagado):
+        if (logBySignature.isPresent()) {
+            return buildVerifyResponse(null, logBySignature.get(), STATUS_VALID_SIGNED);
+        }
+
+        // SENAO == sha256 original:
+        //  - se aquele run/log foi assinado -> SUPERSEDED (PDF em maos e a versao
+        //    pre-assinatura, superada pela assinada)
+        //  - senao -> VALID_UNSIGNED
+        for (ReportRun run : runMatches) {
+            if (run.getSha256() != null && run.getSha256().equalsIgnoreCase(hash)) {
+                // Frozen: run JA assinado (signatureHash != null) -> SUPERSEDED;
+                // run NAO assinado -> VALID_UNSIGNED.
+                boolean runSigned = run.getSignatureHash() != null;
+                String status = runSigned ? STATUS_SUPERSEDED : STATUS_VALID_UNSIGNED;
+                return buildVerifyResponse(run, logsByOriginal.isEmpty() ? null : logsByOriginal.get(0), status);
+            }
+        }
+        // Sem run pelo sha256, mas existe log pelo hash original -> foi assinado -> SUPERSEDED.
+        if (!logsByOriginal.isEmpty()) {
+            return buildVerifyResponse(null, logsByOriginal.get(0), STATUS_SUPERSEDED);
+        }
+
+        return invalidVerifyResponse();
+    }
+
+    /**
+     * Monta a resposta a partir de um run e/ou signature log ja resolvidos e do
+     * status enumerado. {@code valid} e derivado do status.
+     */
+    private VerifyReportResponse buildVerifyResponse(
+        ReportRun run, ReportSignatureLog signatureLog, String status
+    ) {
         String reportNumber = run != null ? run.getReportNumber()
             : (signatureLog != null ? signatureLog.getReportNumber() : null);
         String reportCode = run != null
@@ -393,15 +470,16 @@ public class ReportServiceV2 {
             : (signatureLog != null ? signatureLog.getOriginalSha256() : null);
         String signatureHash = run != null ? run.getSignatureHash()
             : (signatureLog != null ? signatureLog.getSignatureHash() : null);
-        Instant signedAt = run != null ? run.getSignedAt()
+        // Quando o run ainda nao tem signatureHash mas existe log (run apagado/legado),
+        // expoe o hash assinado a partir do log.
+        if (signatureHash == null && signatureLog != null) {
+            signatureHash = signatureLog.getSignatureHash();
+        }
+        Instant signedAt = run != null && run.getSignedAt() != null ? run.getSignedAt()
             : (signatureLog != null ? signatureLog.getSignedAt() : null);
         String signedByName = signatureLog != null ? signatureLog.getSignedByName() : null;
-        boolean signed = signedAt != null;
-
-        // valid: pelo menos um registro coerente foi encontrado e o hash informado
-        // bate com sha256 original OU signatureHash conhecido.
-        boolean valid = (sha256 != null && sha256.equalsIgnoreCase(trimmed))
-            || (signatureHash != null && signatureHash.equalsIgnoreCase(trimmed));
+        boolean signed = STATUS_VALID_SIGNED.equals(status) || signedAt != null;
+        boolean valid = STATUS_VALID_SIGNED.equals(status) || STATUS_VALID_UNSIGNED.equals(status);
 
         return new VerifyReportResponse(
             reportNumber,
@@ -414,13 +492,14 @@ public class ReportServiceV2 {
             signedAt,
             signedByName,
             signed,
+            status,
             valid
         );
     }
 
     private VerifyReportResponse invalidVerifyResponse() {
         return new VerifyReportResponse(
-            null, null, null, null, null, null, null, null, null, false, false
+            null, null, null, null, null, null, null, null, null, false, STATUS_NOT_FOUND, false
         );
     }
 

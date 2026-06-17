@@ -115,6 +115,8 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   }
 
   const handleSave = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (createReference.isPending || updateReference.isPending) return
     if (!canManageReferences) {
       toast.error('Você não tem permissão para alterar referências de CQ.')
       return
@@ -146,6 +148,8 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   }
 
   const handleDelete = async (id: string) => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a exclusao esta em voo.
+    if (deleteReference.isPending) return
     if (!canManageReferences) {
       toast.error('Você não tem permissão para excluir referências de CQ.')
       return
@@ -324,6 +328,8 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
   const [newExamName, setNewExamName] = useState('')
 
   const handleCreateExam = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a criacao esta em voo.
+    if (createExam.isPending) return
     if (!canManageReferences) {
       toast.error('Você não tem permissão para criar exames de CQ.')
       return

@@ -17,6 +17,8 @@ export function PostCalibrationModal({ record, isOpen, onClose, onSaved }: PostC
   const [form, setForm] = useState(() => buildInitialForm(record))
 
   const handleSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (mutation.isPending) return
     if (!record || !form.postCalibrationValue) {
       toast.warning('Informe o valor pós-calibração para salvar.')
       return

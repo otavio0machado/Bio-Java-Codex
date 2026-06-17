@@ -90,6 +90,41 @@ class CalibracaoPrePostGeneratorTest {
     }
 
     @Test
+    @DisplayName("classifyCalibrations separa 4 baldes mutuamente exclusivos e fecha o total")
+    void classifyCalibrationsBuckets() {
+        LocalDate today = LocalDate.now();
+        List<PostCalibrationRecord> records = List.of(
+            rec("Glicose",    5.0,  3.0,  today),   // EFICAZ (delta -2.0)
+            rec("Colesterol", 3.0,  5.0,  today),   // PIOROU (delta +2.0)
+            rec("Ureia",      4.0,  4.0,  today),   // SEM EFEITO (delta 0)
+            rec("Sodio",      null, 4.0,  today),   // SEM MEDICAO (originalCv null)
+            rec("Potassio",   4.0,  null, today)    // SEM MEDICAO (postCalibrationCv null)
+        );
+
+        CalibracaoPrePostGenerator.CalibrationBuckets buckets =
+            generator().classifyCalibrations(records);
+
+        assertThat(buckets.eficazes()).isEqualTo(1);
+        assertThat(buckets.semEfeito()).isEqualTo(1);
+        assertThat(buckets.pioraram()).isEqualTo(1);
+        assertThat(buckets.semMedicao()).isEqualTo(2);
+        // INVARIANTE: a soma dos baldes fecha o total de registros.
+        assertThat(buckets.total()).isEqualTo(records.size());
+    }
+
+    @Test
+    @DisplayName("classifyCalibrations com lista vazia retorna baldes zerados")
+    void classifyCalibrationsEmpty() {
+        CalibracaoPrePostGenerator.CalibrationBuckets buckets =
+            generator().classifyCalibrations(List.of());
+        assertThat(buckets.eficazes()).isZero();
+        assertThat(buckets.semEfeito()).isZero();
+        assertThat(buckets.pioraram()).isZero();
+        assertThat(buckets.semMedicao()).isZero();
+        assertThat(buckets.total()).isZero();
+    }
+
+    @Test
     @DisplayName("generate com includeAiCommentary injeta IA")
     void generateWithAiCommentary() {
         when(repository.findByQcRecordAreaAndDateRange(eq("bioquimica"), any(LocalDate.class), any(LocalDate.class)))

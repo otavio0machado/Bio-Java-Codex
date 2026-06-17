@@ -32,7 +32,7 @@ class ReagentesRastreabilidadeGeneratorTest {
         // Stubs default: lote sem movimentos, sem usos em CQ. Generators robustos a vazios.
         org.mockito.Mockito.lenient().when(movementRepository.findByReagentLotIdOrderByCreatedAtDesc(org.mockito.ArgumentMatchers.any()))
             .thenReturn(java.util.List.of());
-        org.mockito.Mockito.lenient().when(qcRecordRepository.findAll())
+        org.mockito.Mockito.lenient().when(qcRecordRepository.findByLotNumberOperational(org.mockito.ArgumentMatchers.anyString()))
             .thenReturn(java.util.List.of());
         return new ReagentesRastreabilidadeGenerator(
             lotRepository,
@@ -117,6 +117,47 @@ class ReagentesRastreabilidadeGeneratorTest {
 
         String text = GeneratorTestSupport.extractPdfText(artifact.bytes());
         assertThat(text).containsIgnoringCase("Vencidos com estoque");
+    }
+
+    @Test
+    @DisplayName("Uso em CQ usa query por lote (findByLotNumberOperational), nunca findAll")
+    void usoEmCqUsaQueryPorLoteSemFindAll() {
+        LocalDate today = LocalDate.now();
+        ReagentLot fixture = lot("Reagente Glicose", ReagentStatus.EM_USO, today.plusDays(30), 50D, "Bioquimica");
+        when(lotRepository.findAll()).thenReturn(List.of(fixture));
+
+        // O lote tem lotNumber "L-Reagente Glicose" (vide helper lot()).
+        com.biodiagnostico.entity.QcRecord qc = com.biodiagnostico.entity.QcRecord.builder()
+            .id(UUID.randomUUID())
+            .examName("Glicose")
+            .area("bioquimica")
+            .level("N1")
+            .date(today.minusDays(1))
+            .lotNumber(fixture.getLotNumber())
+            .value(95.0)
+            .zScore(0.4)
+            .status("APROVADO")
+            .build();
+        ReagentesRastreabilidadeGenerator gen = generator();
+        // Stub especifico apos generator() para sobrepor o default lenient (anyString).
+        when(qcRecordRepository.findByLotNumberOperational(fixture.getLotNumber()))
+            .thenReturn(List.of(qc));
+
+        ReportArtifact artifact = gen.generate(
+            new ReportFilters(Map.of("detailEachLot", true)),
+            GeneratorTestSupport.ctx()
+        );
+
+        // A query direcionada foi consultada com o lotNumber exato do lote.
+        org.mockito.Mockito.verify(qcRecordRepository)
+            .findByLotNumberOperational(fixture.getLotNumber());
+        // E o full table scan jamais foi acionado.
+        org.mockito.Mockito.verify(qcRecordRepository, org.mockito.Mockito.never()).findAll();
+
+        // O registro retornado pela query aparece na secao Uso em CQ.
+        String text = GeneratorTestSupport.extractPdfText(artifact.bytes());
+        assertThat(text).containsIgnoringCase("Uso em CQ");
+        assertThat(text).contains("Glicose");
     }
 
     @Test

@@ -120,12 +120,17 @@ export function useEquipmentSuggestions() {
   })
 }
 
-export function useVerifyReport(hash: string | undefined) {
+/**
+ * Verificacao publica. O {@code param} e um TOKEN estavel (do QR) OU um
+ * SHA-256 de 64 hex (retrocompat). O backend resolve ambos e devolve
+ * {@code status} enumerado.
+ */
+export function useVerifyReport(param: string | undefined) {
   return useQuery({
-    queryKey: ['reports', 'v2', 'verify', hash],
-    queryFn: () => reportsV2Service.verify(hash as string),
-    enabled: Boolean(hash),
-    // /verify retorna 200 mesmo em hash desconhecido (valid=false),
+    queryKey: ['reports', 'v2', 'verify', param],
+    queryFn: () => reportsV2Service.verify(param as string),
+    enabled: Boolean(param),
+    // /verify retorna 200 mesmo em hash desconhecido (status=NOT_FOUND),
     // entao reenfileirar falha apenas em erros transientes.
     retry: 1,
     staleTime: 60 * 1000,

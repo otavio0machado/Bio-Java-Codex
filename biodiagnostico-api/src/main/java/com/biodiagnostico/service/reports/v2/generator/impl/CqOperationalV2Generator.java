@@ -197,6 +197,11 @@ public class CqOperationalV2Generator implements ReportGenerator {
                     .append(": <strong style=\"color:").append(color).append("\">")
                     .append(String.format(PT_BR, "%+.1f%%", delta)).append(" ").append(arrow)
                     .append("</strong></p>");
+                if (rf.isPartialCurrentMonth()) {
+                    html.append("<p style=\"color:#b45309\"><em>")
+                        .append(escape(partialCurrentMonthNotice(LocalDate.now())))
+                        .append("</em></p>");
+                }
             } else {
                 html.append("<p style=\"color:#b45309\">Comparativo indisponivel para periodo customizado.</p>");
             }
@@ -331,6 +336,15 @@ public class CqOperationalV2Generator implements ReportGenerator {
                         com.lowagie.text.FontFactory.HELVETICA_BOLD, 10, c));
                 p.setSpacingAfter(6F);
                 document.add(p);
+                if (rf.isPartialCurrentMonth()) {
+                    Paragraph notice = new Paragraph(
+                        partialCurrentMonthNotice(LocalDate.now()),
+                        com.lowagie.text.FontFactory.getFont(
+                            com.lowagie.text.FontFactory.HELVETICA_OBLIQUE, 8,
+                            ReportV2PdfTheme.STATUS_ALERTA));
+                    notice.setSpacingAfter(6F);
+                    document.add(notice);
+                }
             }
         }
     }
@@ -565,16 +579,27 @@ public class CqOperationalV2Generator implements ReportGenerator {
         ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
         boolean alt = false;
         for (PostCalibrationRecord r : post) {
-            double origCv = r.getOriginalCv() == null ? 0 : r.getOriginalCv();
-            double postCv = r.getPostCalibrationCv() == null ? 0 : r.getPostCalibrationCv();
-            double delta = postCv - origCv;
-            String status = classifyCalibrationDelta(delta);
+            // Espelha CalibracaoPrePostGenerator: CV original/pos null = "SEM MEDICAO".
+            // Nao houve medicao, logo nao e decisao de eficacia. NAO coage a 0 nem
+            // classifica via classifyCalibrationDelta (evita "EFICAZ"/"SEM EFEITO"
+            // espurio contra base 0). CV nulos renderizados como "-" (formatDecimal).
+            boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+            String deltaTxt;
+            String status;
+            if (medido) {
+                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                status = classifyCalibrationDelta(delta);
+            } else {
+                deltaTxt = "N/D";
+                status = "SEM MEDICAO";
+            }
             ReportV2PdfTheme.bodyRow(t, alt,
                 ReportV2PdfTheme.safe(r.getExamName()),
                 ReportV2PdfTheme.safe(r.getQcRecord() == null ? null : r.getQcRecord().getLotNumber()),
-                ReportV2PdfTheme.formatDecimal(origCv),
-                ReportV2PdfTheme.formatDecimal(postCv),
-                String.format(PT_BR, "%+.2f", delta),
+                ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
+                deltaTxt,
                 status,
                 ReportV2PdfTheme.formatDate(r.getDate())
             );
@@ -602,6 +627,16 @@ public class CqOperationalV2Generator implements ReportGenerator {
         renderComparisonRow(t, false, "Alertas", current.alerted, prevSummary.alerted);
         renderComparisonRow(t, true, "Reprovados", current.rejected, prevSummary.rejected);
         document.add(t);
+        if (rf.isPartialCurrentMonth()) {
+            Paragraph notice = new Paragraph(
+                partialCurrentMonthNotice(LocalDate.now()),
+                com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA_OBLIQUE, 8,
+                    ReportV2PdfTheme.STATUS_ALERTA));
+            notice.setSpacingBefore(4F);
+            notice.setSpacingAfter(6F);
+            document.add(notice);
+        }
     }
 
     private void renderComparisonRow(PdfPTable t, boolean alt, String label, int current, int prev) {
@@ -1080,7 +1115,40 @@ public class CqOperationalV2Generator implements ReportGenerator {
         ResolvedPeriod toResolvedPeriod() {
             return new ResolvedPeriod(periodType, start, end, periodLabel);
         }
+
+        /**
+         * Detecta o "mes corrente parcial": periodType current-month, com o
+         * mes/ano do periodo igual ao mes/ano de hoje e hoje ANTES do fim do
+         * mes. Nesse caso o periodo cobre apenas dados ate hoje, enquanto o
+         * comparativo confronta contra um mes anterior COMPLETO — o que pode
+         * subestimar a taxa/tendencia. Usado apenas para emitir ressalva
+         * textual; nao altera valores calculados.
+         */
+        boolean isPartialCurrentMonth() {
+            return isPartialCurrentMonth(LocalDate.now());
+        }
+
+        boolean isPartialCurrentMonth(LocalDate today) {
+            if (!"current-month".equals(periodType) || start == null || end == null) {
+                return false;
+            }
+            YearMonth periodMonth = YearMonth.from(start);
+            return periodMonth.equals(YearMonth.from(today)) && today.isBefore(end);
+        }
     }
+
+    /**
+     * Ressalva exibida junto ao bloco comparativo quando o periodo e o mes
+     * corrente parcial. Texto sem acento por padrao do arquivo.
+     */
+    static String partialCurrentMonthNotice(LocalDate today) {
+        String dia = today.format(PARTIAL_NOTICE_DATE_FMT);
+        return "Comparativo parcial: o mes corrente inclui dados somente ate " + dia
+            + "; a comparacao com o mes anterior completo pode estar subestimada.";
+    }
+
+    private static final DateTimeFormatter PARTIAL_NOTICE_DATE_FMT =
+        DateTimeFormatter.ofPattern("dd/MM");
 
     /** Resumo rapido por periodo (contagens). */
     static final class PeriodSummary {

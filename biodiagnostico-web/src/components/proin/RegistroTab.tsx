@@ -2,7 +2,7 @@ import axios from 'axios'
 import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Trash2, X, XCircle } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
+import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
 import { qcService } from '../../services/qcService'
 import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
@@ -82,6 +82,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const createRecord = useCreateQcRecord()
+  const createBatch = useCreateQcBatch()
   const { data: exams = [] } = useQcExams(area)
   const { data: references = [] } = useQcReferences(undefined, true)
 
@@ -161,6 +162,8 @@ export function RegistroTab({ area }: RegistroTabProps) {
   }
 
   const handleSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (createRecord.isPending) return
     clearMessages()
     if (!form.examName || !form.value) {
       toast.warning('Selecione um exame e informe o valor.')
@@ -241,6 +244,8 @@ export function RegistroTab({ area }: RegistroTabProps) {
 
   // --- Batch submit handler ---
   const handleBatchSubmit = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto o lote esta em voo.
+    if (createBatch.isPending) return
     const validRows = batchRows.filter(r => r.examName && r.value)
     if (validRows.length === 0) return
     const referenceErrors = validRows
@@ -274,10 +279,9 @@ export function RegistroTab({ area }: RegistroTabProps) {
       referenceId: getOperationalReferences(references, area, row.examName, form.date)[0]?.id,
     }))
     try {
-      await qcService.createBatch(requests)
+      await createBatch.mutateAsync(requests)
       toast.success(`${validRows.length} registros criados com sucesso!`)
       setBatchRows([{ examName: '', value: '', targetValue: '', targetSd: '', cvLimit: '10' }])
-      loadRecords()
     } catch (err: unknown) {
       const msg = axios.isAxiosError(err) && err.response?.data?.message
         ? err.response.data.message : 'Erro ao criar registros em lote.'
@@ -378,7 +382,11 @@ export function RegistroTab({ area }: RegistroTabProps) {
               </button>
             </div>
 
-            <Button onClick={handleBatchSubmit} disabled={batchRows.every(r => !r.examName || !r.value)}>
+            <Button
+              onClick={handleBatchSubmit}
+              loading={createBatch.isPending}
+              disabled={batchRows.every(r => !r.examName || !r.value)}
+            >
               Registrar Todos ({batchRows.filter(r => r.examName && r.value).length})
             </Button>
           </div>

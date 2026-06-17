@@ -73,6 +73,8 @@ export function AreaQcModule({ area, title, description, analytes }: AreaQcModul
   )
 
   const saveParameter = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (createParameter.isPending) return
     if (!parameterForm.analito || !parameterForm.alvoValor) {
       toast.warning('Preencha ao menos analito e valor alvo.')
       return
@@ -88,6 +90,8 @@ export function AreaQcModule({ area, title, description, analytes }: AreaQcModul
   }
 
   const saveMeasurement = async () => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
+    if (createMeasurement.isPending) return
     setMeasurementError(null)
     if (!measurementForm.analito || !measurementForm.valorMedido) {
       toast.warning('Preencha analito e valor medido.')
@@ -109,6 +113,8 @@ export function AreaQcModule({ area, title, description, analytes }: AreaQcModul
   }
 
   const removeParameter = async (id: string) => {
+    // Trava anti-duplo-submit: ignora cliques enquanto a exclusao esta em voo.
+    if (deleteParameter.isPending) return
     try {
       await deleteParameter.mutateAsync(id)
       toast.success('Parâmetro removido.')
