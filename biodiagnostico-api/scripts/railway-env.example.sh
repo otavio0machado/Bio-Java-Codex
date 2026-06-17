@@ -23,7 +23,12 @@ SUPABASE_DB_SSL_MODE=require
 # Transitório até a governança de migrations versionadas (Flyway/Liquibase).
 JPA_DDL_AUTO=update
 JWT_SECRET=<chave-64-chars-aleatoria>
-GEMINI_API_KEY=<chave-gemini>
+# IA generativa — OpenAI (substitui o Gemini, removido na migracao)
+OPENAI_API_KEY=<chave-openai>
+# Modelos por tier (defaults abaixo; troque pelos IDs reais da sua conta OpenAI)
+AI_MODEL_ADVANCED=gpt-5.5
+AI_MODEL_MEDIUM=gpt-5.4
+AI_MODEL_BASIC=gpt-5.4-mini
 CORS_ORIGINS=https://seu-frontend.up.railway.app
 APP_FRONTEND_URL=https://seu-frontend.up.railway.app
 JAVA_OPTS=-Xmx512m
