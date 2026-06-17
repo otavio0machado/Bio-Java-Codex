@@ -1,8 +1,11 @@
 import axios from 'axios'
+import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useCreatePostCalibration } from '../../hooks/useQcRecords'
+import { useSuggestObservation } from '../../hooks/useAiAssist'
 import type { PostCalibrationRecord, QcRecord } from '../../types'
 import { Button, Input, Modal, TextArea, useToast } from '../ui'
+import { AiAssistDisclaimer } from './AiAssistShared'
 
 interface PostCalibrationModalProps {
   record: QcRecord | null
@@ -14,7 +17,39 @@ interface PostCalibrationModalProps {
 export function PostCalibrationModal({ record, isOpen, onClose, onSaved }: PostCalibrationModalProps) {
   const { toast } = useToast()
   const mutation = useCreatePostCalibration(record?.id ?? '')
+  const suggestObservation = useSuggestObservation()
   const [form, setForm] = useState(() => buildInitialForm(record))
+
+  // C8 — Sugere uma observacao a partir do contexto que o modal ja conhece.
+  // A sugestao apenas preenche o campo; o operador edita e decide salvar.
+  const handleSuggestObservation = async () => {
+    if (!record || suggestObservation.isPending) return
+    const violations = record.violations?.length
+      ? record.violations.map((v) => `${v.rule} (${v.description})`).join('; ')
+      : 'sem violação Westgard registrada'
+    const contextParts = [
+      `Exame: ${record.examName}`,
+      `Área: ${record.area}`,
+      `Nível: ${record.level}`,
+      `Valor original: ${record.value.toFixed(2)}`,
+      `Alvo: ${record.targetValue.toFixed(2)} (DP ${record.targetSd.toFixed(2)})`,
+      `CV original: ${record.cv.toFixed(2)}% (limite ${record.cvLimit.toFixed(2)}%)`,
+      `Status do CQ: ${record.status}`,
+      `Regras Westgard: ${violations}`,
+    ]
+    if (form.postCalibrationValue) {
+      contextParts.push(`Novo valor pós-calibração informado: ${Number(form.postCalibrationValue).toFixed(2)}`)
+    }
+    try {
+      const suggestion = await suggestObservation.mutateAsync({
+        kind: 'post-calibration',
+        context: contextParts.join(' | '),
+      })
+      setForm((current) => ({ ...current, notes: suggestion }))
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Não foi possível gerar a sugestão agora.'))
+    }
+  }
 
   const handleSubmit = async () => {
     // Trava anti-duplo-submit: ignora cliques enquanto a gravacao esta em voo.
@@ -85,11 +120,24 @@ export function PostCalibrationModal({ record, isOpen, onClose, onSaved }: PostC
         />
       </div>
       <div className="mt-4">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-neutral-700">Observações</span>
+          <button
+            type="button"
+            onClick={handleSuggestObservation}
+            disabled={!record || suggestObservation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title="Sugestão assistiva gerada por IA"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {suggestObservation.isPending ? 'Gerando...' : 'Sugerir observação'}
+          </button>
+        </div>
         <TextArea
-          label="Observações"
           value={form.notes}
           onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
         />
+        {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
       </div>
     </Modal>
   )

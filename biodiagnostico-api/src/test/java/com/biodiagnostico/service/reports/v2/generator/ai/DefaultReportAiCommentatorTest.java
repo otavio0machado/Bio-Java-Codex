@@ -3,7 +3,7 @@ package com.biodiagnostico.service.reports.v2.generator.ai;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.biodiagnostico.exception.BusinessException;
-import com.biodiagnostico.service.GeminiAiService;
+import com.biodiagnostico.service.AiService;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
 import java.time.Duration;
@@ -24,9 +24,9 @@ class DefaultReportAiCommentatorTest {
         ZoneId.of("America/Sao_Paulo"), null, "corr", "req");
 
     @Test
-    @DisplayName("commentary retorna o texto quando Gemini responde normalmente")
+    @DisplayName("commentary retorna o texto quando a IA responde normalmente")
     void commentaryReturnsTextOnSuccess() {
-        GeminiAiService gemini = stubAnalyze((p, c) -> "Comentario valido de 3 frases.");
+        AiService gemini = stubAnalyze((p, c) -> "Comentario valido de 3 frases.");
         DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
             gemini, prompts, Executors.newSingleThreadExecutor(), Duration.ofSeconds(5));
         String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
@@ -34,9 +34,9 @@ class DefaultReportAiCommentatorTest {
     }
 
     @Test
-    @DisplayName("commentary retorna fallback quando Gemini retorna 'Nao foi possivel analisar'")
+    @DisplayName("commentary retorna fallback quando a IA retorna 'Nao foi possivel analisar'")
     void commentaryFallbackOnFriendlyError() {
-        GeminiAiService gemini = stubAnalyze((p, c) -> "Não foi possível analisar no momento. Tente novamente.");
+        AiService gemini = stubAnalyze((p, c) -> "Não foi possível analisar no momento. Tente novamente.");
         DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
             gemini, prompts, Executors.newSingleThreadExecutor(), Duration.ofSeconds(5));
         String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
@@ -44,10 +44,10 @@ class DefaultReportAiCommentatorTest {
     }
 
     @Test
-    @DisplayName("commentary retorna fallback quando Gemini lanca excecao")
+    @DisplayName("commentary retorna fallback quando a IA lanca excecao")
     void commentaryFallbackOnException() {
-        GeminiAiService gemini = stubAnalyze((p, c) -> {
-            throw new RuntimeException("Gemini down");
+        AiService gemini = stubAnalyze((p, c) -> {
+            throw new RuntimeException("IA down");
         });
         DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
             gemini, prompts, Executors.newSingleThreadExecutor(), Duration.ofSeconds(5));
@@ -58,7 +58,7 @@ class DefaultReportAiCommentatorTest {
     @Test
     @DisplayName("commentary retorna fallback em timeout")
     void commentaryFallbackOnTimeout() {
-        GeminiAiService gemini = stubAnalyze((p, c) -> {
+        AiService gemini = stubAnalyze((p, c) -> {
             try { Thread.sleep(2000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             return "nunca chega";
         });
@@ -71,7 +71,7 @@ class DefaultReportAiCommentatorTest {
     @Test
     @DisplayName("commentary retorna fallback para resposta vazia")
     void commentaryFallbackOnBlank() {
-        GeminiAiService gemini = stubAnalyze((p, c) -> "");
+        AiService gemini = stubAnalyze((p, c) -> "");
         DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
             gemini, prompts, Executors.newSingleThreadExecutor(), Duration.ofSeconds(5));
         String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
@@ -84,7 +84,7 @@ class DefaultReportAiCommentatorTest {
     @DisplayName("T3 — retenta ate 3x em timeout/erro transiente e retorna sucesso se 3a tentativa OK")
     void retriesThreeTimesOnTimeout() {
         AtomicInteger attempts = new AtomicInteger();
-        GeminiAiService gemini = stubAnalyze((p, c) -> {
+        AiService gemini = stubAnalyze((p, c) -> {
             int n = attempts.incrementAndGet();
             if (n < 3) {
                 throw new RuntimeException("temporary-network-glitch");
@@ -103,9 +103,9 @@ class DefaultReportAiCommentatorTest {
     @DisplayName("T3 — NAO retenta em falha deterministica (BusinessException / API key)")
     void giveUpOnInvalidApiKeyImmediately() {
         AtomicInteger attempts = new AtomicInteger();
-        GeminiAiService gemini = stubAnalyze((p, c) -> {
+        AiService gemini = stubAnalyze((p, c) -> {
             attempts.incrementAndGet();
-            throw new BusinessException("GEMINI_API_KEY nao configurada");
+            throw new BusinessException("OPENAI_API_KEY nao configurada");
         });
         DefaultReportAiCommentator commentator = new DefaultReportAiCommentator(
             gemini, prompts, Executors.newSingleThreadExecutor(),
@@ -120,7 +120,7 @@ class DefaultReportAiCommentatorTest {
     @DisplayName("T3 — circuit breaker abre apos threshold e retorna fallback direto")
     void circuitBreakerOpensAfterThreshold() {
         AtomicInteger attempts = new AtomicInteger();
-        GeminiAiService gemini = stubAnalyze((p, c) -> {
+        AiService gemini = stubAnalyze((p, c) -> {
             attempts.incrementAndGet();
             throw new RuntimeException("always-fails");
         });
@@ -132,16 +132,16 @@ class DefaultReportAiCommentatorTest {
             commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
         }
         int afterOpen = attempts.get();
-        // Proxima chamada deve bater no circuit aberto: nao chama mais gemini.
+        // Proxima chamada deve bater no circuit aberto: nao chama mais a IA.
         String result = commentator.commentary(ReportCode.CQ_OPERATIONAL_V2, "ctx", ctx);
         assertThat(result).isEqualTo(ReportAiCommentator.FALLBACK_COMMENTARY);
         assertThat(attempts.get())
-            .as("nao deve chamar Gemini quando circuit esta aberto")
+            .as("nao deve chamar a IA quando circuit esta aberto")
             .isEqualTo(afterOpen);
     }
 
-    private GeminiAiService stubAnalyze(java.util.function.BiFunction<String, String, String> fn) {
-        return new GeminiAiService(null, null, "stub", "stub-model", 1024,
+    private AiService stubAnalyze(java.util.function.BiFunction<String, String, String> fn) {
+        return new AiService(null, null, null, new com.biodiagnostico.config.AiProperties(),
             new io.micrometer.core.instrument.simple.SimpleMeterRegistry()) {
             @Override
             public String analyze(String userPrompt, String context) {

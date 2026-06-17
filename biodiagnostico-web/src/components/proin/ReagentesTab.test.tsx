@@ -54,12 +54,6 @@ vi.mock('../../services/reportService', () => ({
   },
 }))
 
-vi.mock('./VoiceRecorderModal', () => ({
-  VoiceRecorderModal: ({ buttonLabel = 'Preencher por voz' }: { buttonLabel?: string }) => (
-    <button type="button">{buttonLabel}</button>
-  ),
-}))
-
 const createLotMutation = { mutateAsync: vi.fn(), isPending: false }
 const updateLotMutation = { mutateAsync: vi.fn(), isPending: false }
 const deleteLotMutation = { mutateAsync: vi.fn(), isPending: false }

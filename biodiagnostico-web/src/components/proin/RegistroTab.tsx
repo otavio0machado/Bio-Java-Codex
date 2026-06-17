@@ -1,13 +1,14 @@
 import axios from 'axios'
-import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Trash2, X, XCircle } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
+import { useExplainQc } from '../../hooks/useAiAssist'
 import { qcService } from '../../services/qcService'
 import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
+import { AiAssistResult } from './AiAssistShared'
 import { PostCalibrationModal } from './PostCalibrationModal'
-import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ExamHistoryModal } from './ExamHistoryModal'
 import { getOperationalReferences } from './qcReferenceResolution'
 
@@ -117,6 +118,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const { data: allRecords = [], isLoading } = useQcRecords({ area })
   const [chartRecord, setChartRecord] = useState<{ examName: string; level: string } | null>(null)
   const [historyExam, setHistoryExam] = useState<{ examName: string; level: string | null } | null>(null)
+  const [explainRecord, setExplainRecord] = useState<QcRecord | null>(null)
 
   // --- Resolucao de referencia silenciosa ---
   const referenceCandidates = useMemo(
@@ -302,20 +304,6 @@ export function RegistroTab({ area }: RegistroTabProps) {
               className={`rounded-full px-3 py-1 text-sm ${batchMode ? 'bg-green-700 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
               {batchMode ? 'Modo Normal' : 'Modo Planilha'}
             </button>
-            <VoiceRecorderModal
-              formType="registro"
-              title="Preencher por voz"
-              onApply={(data) => {
-                setForm((c) => ({
-                  ...c,
-                  examName: typeof data.exam_name === 'string' ? data.exam_name : c.examName,
-                  value: typeof data.value === 'number' ? data.value : c.value,
-                  targetValue: typeof data.target_value === 'number' ? data.target_value : c.targetValue,
-                  equipment: typeof data.equipment === 'string' ? data.equipment : c.equipment,
-                  analyst: typeof data.analyst === 'string' ? data.analyst : c.analyst,
-                }))
-              }}
-            />
           </div>
         </div>
 
@@ -580,9 +568,14 @@ export function RegistroTab({ area }: RegistroTabProps) {
                         )}
                       </td>
                       <td className="px-3 py-2.5">
-                        <button onClick={() => setChartRecord({ examName: r.examName, level: r.level })} className="rounded-lg p-1.5 text-green-700 hover:bg-green-50" title="Levey-Jennings">
-                          <Activity className="h-5 w-5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => setChartRecord({ examName: r.examName, level: r.level })} className="rounded-lg p-1.5 text-green-700 hover:bg-green-50" title="Levey-Jennings">
+                            <Activity className="h-5 w-5" />
+                          </button>
+                          <button onClick={() => setExplainRecord(r)} className="rounded-lg p-1.5 text-violet-600 hover:bg-violet-50" title="Entender este resultado (IA)">
+                            <Sparkles className="h-5 w-5" />
+                          </button>
+                        </div>
                       </td>
                       <td className="px-3 py-2.5 text-right">
                         <button onClick={() => handleDeleteRecord(r)}
@@ -623,6 +616,9 @@ export function RegistroTab({ area }: RegistroTabProps) {
         onClose={() => setHistoryExam(null)}
       />
 
+      {/* Modal A1 — Explicacao assistiva de Westgard (linha do historico) */}
+      <ExplainRecordModal record={explainRecord} onClose={() => setExplainRecord(null)} />
+
       {/* Undo delete banner */}
       {deletedRecord && (
         <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-lg animate-slideUp">
@@ -643,6 +639,15 @@ interface FeedbackPanelProps {
 }
 
 function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps) {
+  const explainQc = useExplainQc()
+  const [explanationOpen, setExplanationOpen] = useState(false)
+
+  const handleExplain = () => {
+    if (explainQc.isPending) return
+    setExplanationOpen(true)
+    explainQc.mutate(record.id)
+  }
+
   const status = record.status
   const tone =
     status === 'APROVADO'
@@ -697,8 +702,8 @@ function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps)
             <div className="mt-2 text-sm opacity-80">Valor dentro da faixa aceitável. Pode liberar os resultados.</div>
           ) : null}
 
-          {record.needsCalibration ? (
-            <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {record.needsCalibration ? (
               <button
                 type="button"
                 onClick={onOpenPostCal}
@@ -706,11 +711,80 @@ function FeedbackPanel({ record, onDismiss, onOpenPostCal }: FeedbackPanelProps)
               >
                 Registrar pós-calibração agora
               </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={handleExplain}
+              disabled={explainQc.isPending}
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Explicação assistiva gerada por IA"
+            >
+              <Sparkles className="h-4 w-4" />
+              Entender este resultado
+            </button>
+          </div>
+
+          {explanationOpen ? (
+            <div className="mt-3">
+              <AiAssistResult
+                isPending={explainQc.isPending}
+                isError={explainQc.isError}
+                text={explainQc.data ?? null}
+                loadingLabel="Gerando explicação com IA..."
+              />
             </div>
           ) : null}
         </div>
       </div>
     </div>
+  )
+}
+
+interface ExplainRecordModalProps {
+  record: QcRecord | null
+  onClose: () => void
+}
+
+/**
+ * A1 — Modal de explicacao assistiva de um registro de CQ acionado pela linha
+ * do historico. Dispara a chamada quando o registro muda (keyed por id) e
+ * exibe a explicacao com estados de loading/erro. Read-only: nao altera o CQ.
+ */
+function ExplainRecordModal({ record, onClose }: ExplainRecordModalProps) {
+  const explainQc = useExplainQc()
+  const reset = explainQc.reset
+
+  useEffect(() => {
+    if (!record) {
+      reset()
+      return
+    }
+    explainQc.mutate(record.id)
+    // Dispara apenas quando o id do registro muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record?.id])
+
+  return (
+    <Modal
+      isOpen={record !== null}
+      onClose={onClose}
+      title={record ? `Entender resultado — ${record.examName}` : ''}
+      size="md"
+    >
+      {record ? (
+        <div className="space-y-3">
+          <div className="rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+            {record.examName} · {record.value.toFixed(2)} · Alvo {record.targetValue.toFixed(2)} ± {record.targetSd.toFixed(2)} · Z {record.zScore.toFixed(2)}
+          </div>
+          <AiAssistResult
+            isPending={explainQc.isPending}
+            isError={explainQc.isError}
+            text={explainQc.data ?? null}
+            loadingLabel="Gerando explicação com IA..."
+          />
+        </div>
+      ) : null}
+    </Modal>
   )
 }
 

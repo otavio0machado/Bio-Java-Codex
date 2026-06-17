@@ -1,7 +1,7 @@
 package com.biodiagnostico.service.reports.v2.generator.ai;
 
 import com.biodiagnostico.exception.BusinessException;
-import com.biodiagnostico.service.GeminiAiService;
+import com.biodiagnostico.service.AiService;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
 import java.time.Duration;
@@ -24,17 +24,18 @@ import org.springframework.stereotype.Component;
 
 /**
  * Implementacao padrao de {@link ReportAiCommentator}. Submete a chamada ao
- * {@link GeminiAiService} num executor dedicado com timeout de 15s por
+ * {@link AiService} num executor dedicado com timeout de 15s por
  * tentativa, ate 3 tentativas com backoff exponencial (200ms, 600ms, 1800ms)
  * quando a falha for retriavel. Falhas determinnsticas (API key invalida,
- * rate limit, resposta vazia ou mensagem amigavel do Gemini) NAO retentam.
+ * rate limit, resposta vazia ou mensagem amigavel da IA) NAO retentam.
  *
  * <p>Circuit-breaker: janela deslizante de 5 min; se taxa &gt; 60% falha em
- * 10+ requests, abre por 2 min retornando fallback sem chamar Gemini.
+ * 10+ requests, abre por 2 min retornando fallback sem chamar a IA.
  *
  * <p>Qualquer falha (excecao, timeout, circuit aberto, mensagem amigavel)
- * resulta em {@link #FALLBACK_COMMENTARY} — o relatorio sempre pode ser
- * emitido; a analise textual e um plus, nao requisito regulatorio.
+ * resulta em {@link ReportAiCommentator#FALLBACK_COMMENTARY} — o relatorio
+ * sempre pode ser emitido; a analise textual e um plus, nao requisito
+ * regulatorio.
  *
  * <p>Observabilidade: cada tentativa loga um evento estruturado com
  * {@code correlationId} (do MDC), {@code attempt}, {@code latencyMs} e
@@ -46,8 +47,8 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
 
     private static final Logger LOG = LoggerFactory.getLogger(DefaultReportAiCommentator.class);
 
-    private static final String GEMINI_FRIENDLY_PREFIX = "Nao foi possivel analisar";
-    private static final String GEMINI_FRIENDLY_PREFIX_ACCENT = "Não foi possível analisar";
+    private static final String AI_FRIENDLY_PREFIX = "Nao foi possivel analisar";
+    private static final String AI_FRIENDLY_PREFIX_ACCENT = "Não foi possível analisar";
 
     /** Timeout padrao por tentativa (15s). */
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(15);
@@ -66,7 +67,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
     /** Duracao do estado aberto em millis. */
     private static final long CB_OPEN_MS = Duration.ofMinutes(2).toMillis();
 
-    private final GeminiAiService geminiAiService;
+    private final AiService aiService;
     private final ReportAiPrompts prompts;
     private final ExecutorService executor;
     private final Duration timeout;
@@ -81,30 +82,30 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
     private final AtomicLong cbOpenUntil = new AtomicLong(0L);
 
     @Autowired
-    public DefaultReportAiCommentator(GeminiAiService geminiAiService, ReportAiPrompts prompts) {
-        this(geminiAiService, prompts, buildDefaultExecutor(), DEFAULT_TIMEOUT, MAX_ATTEMPTS, BASE_BACKOFF);
+    public DefaultReportAiCommentator(AiService aiService, ReportAiPrompts prompts) {
+        this(aiService, prompts, buildDefaultExecutor(), DEFAULT_TIMEOUT, MAX_ATTEMPTS, BASE_BACKOFF);
     }
 
     /** Construtor para testes — permite injetar executor, timeout, attempts, backoff. */
     public DefaultReportAiCommentator(
-        GeminiAiService geminiAiService,
+        AiService aiService,
         ReportAiPrompts prompts,
         ExecutorService executor,
         Duration timeout
     ) {
-        this(geminiAiService, prompts, executor, timeout, MAX_ATTEMPTS, BASE_BACKOFF);
+        this(aiService, prompts, executor, timeout, MAX_ATTEMPTS, BASE_BACKOFF);
     }
 
     /** Construtor completo para testes. */
     public DefaultReportAiCommentator(
-        GeminiAiService geminiAiService,
+        AiService aiService,
         ReportAiPrompts prompts,
         ExecutorService executor,
         Duration timeout,
         int maxAttempts,
         Duration baseBackoff
     ) {
-        this.geminiAiService = geminiAiService;
+        this.aiService = aiService;
         this.prompts = prompts;
         this.executor = executor;
         this.timeout = timeout == null ? DEFAULT_TIMEOUT : timeout;
@@ -128,7 +129,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             long startMs = System.currentTimeMillis();
             CompletableFuture<String> future = CompletableFuture.supplyAsync(
-                () -> geminiAiService.analyze(prompt, context), executor);
+                () -> aiService.analyze(prompt, context), executor);
             try {
                 String result = future.orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS).join();
                 long latency = System.currentTimeMillis() - startMs;
@@ -139,11 +140,11 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
                     return FALLBACK_COMMENTARY;
                 }
                 String trimmed = result.trim();
-                if (trimmed.startsWith(GEMINI_FRIENDLY_PREFIX) || trimmed.startsWith(GEMINI_FRIENDLY_PREFIX_ACCENT)) {
-                    // Mensagem amigavel do proprio GeminiAiService (ja tratou
+                if (trimmed.startsWith(AI_FRIENDLY_PREFIX) || trimmed.startsWith(AI_FRIENDLY_PREFIX_ACCENT)) {
+                    // Mensagem amigavel do proprio AiService (ja tratou
                     // exception internamente). Deterministico — nao retenta.
                     recordOutcome(false);
-                    logStructured(correlationId, code, attempt, latency, "gemini-friendly-error", null);
+                    logStructured(correlationId, code, attempt, latency, "ai-friendly-error", null);
                     return FALLBACK_COMMENTARY;
                 }
                 recordOutcome(true);
@@ -185,7 +186,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
             }
         }
         if (lastError != null) {
-            LOG.warn("Gemini falhou apos {} tentativas para code={}: {}", maxAttempts, code,
+            LOG.warn("IA falhou apos {} tentativas para code={}: {}", maxAttempts, code,
                 lastError.getMessage());
         }
         return FALLBACK_COMMENTARY;
@@ -223,7 +224,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
         if (total >= CB_MIN_REQUESTS && (failures * 1.0 / total) > CB_FAIL_RATE_THRESHOLD) {
             long target = now + CB_OPEN_MS;
             cbOpenUntil.updateAndGet(prev -> Math.max(prev, target));
-            LOG.warn("Circuit breaker Gemini ABERTO: {}/{} falhas na janela — reativa em {}s",
+            LOG.warn("Circuit breaker IA ABERTO: {}/{} falhas na janela — reativa em {}s",
                 failures, total, CB_OPEN_MS / 1000);
         }
     }
@@ -240,7 +241,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
 
     private boolean isDeterministicError(Throwable t) {
         if (t == null) return false;
-        // BusinessException do GeminiAiService indica rate-limit ou API key
+        // BusinessException do AiService indica rate-limit ou API key
         // nao configurada — retentar nao adianta e apenas gasta cota.
         if (t instanceof BusinessException) return true;
         String msg = t.getMessage();
@@ -249,7 +250,7 @@ public class DefaultReportAiCommentator implements ReportAiCommentator {
         return lower.contains("api key") || lower.contains("api_key")
             || lower.contains("unauthorized") || lower.contains("forbidden")
             || lower.contains("limite de")
-            || lower.contains("gemini_api_key");
+            || lower.contains("openai_api_key");
     }
 
     private void sleepBackoff(int attempt) {

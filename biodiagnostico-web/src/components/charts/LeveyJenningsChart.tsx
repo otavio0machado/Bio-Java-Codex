@@ -10,9 +10,11 @@ import {
 } from 'recharts'
 import { useState } from 'react'
 import { useLeveyJennings } from '../../hooks/useQcRecords'
+import { useInterpretTrend } from '../../hooks/useAiAssist'
 import type { LeveyJenningsPoint } from '../../types'
 import { Card, EmptyState, Skeleton, StatusBadge } from '../ui'
-import { Activity } from 'lucide-react'
+import { AiAssistResult } from '../proin/AiAssistShared'
+import { Activity, Sparkles } from 'lucide-react'
 import { formatShortBR, formatLongBR } from '../../utils/date'
 
 interface LeveyJenningsChartProps {
@@ -61,6 +63,22 @@ export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChart
   const parsedDays = parseInt(daysInput, 10)
   const effectiveDays = !isNaN(parsedDays) && parsedDays > 0 ? parsedDays : 30
   const { data, isLoading } = useLeveyJennings(examName, level, area, effectiveDays)
+
+  // A2 — Interpretacao assistiva da tendencia. Usa exatamente os mesmos
+  // parametros do grafico exibido (exame, nivel, area e dias efetivos).
+  const interpretTrend = useInterpretTrend()
+  // Snapshot dos parametros que geraram a interpretacao atual. Permite
+  // descartar (sem efeito colateral) um texto que ficaria sob uma curva
+  // diferente da que o gerou, quando o operador muda exame/nivel/dias.
+  const [interpretKey, setInterpretKey] = useState<string | null>(null)
+  const currentKey = `${examName}|${level}|${area}|${effectiveDays}`
+  const showInterpretation = interpretKey === currentKey
+
+  const handleInterpret = () => {
+    if (interpretTrend.isPending) return
+    setInterpretKey(currentKey)
+    interpretTrend.mutate({ examName, level, area, days: effectiveDays })
+  }
 
   const filterComponent = (
     <div className="flex flex-col items-start gap-1">
@@ -171,6 +189,28 @@ export function LeveyJenningsChart({ examName, level, area }: LeveyJenningsChart
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* A2 — Interpretacao assistiva da tendencia */}
+      <div className="space-y-3 border-t border-neutral-100 pt-4">
+        <button
+          type="button"
+          onClick={handleInterpret}
+          disabled={interpretTrend.isPending}
+          className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+          title="Interpretação assistiva gerada por IA"
+        >
+          <Sparkles className="h-4 w-4" />
+          Interpretar tendência
+        </button>
+        {showInterpretation ? (
+          <AiAssistResult
+            isPending={interpretTrend.isPending}
+            isError={interpretTrend.isError}
+            text={interpretTrend.data ?? null}
+            loadingLabel="Interpretando tendência com IA..."
+          />
+        ) : null}
       </div>
     </Card>
   )

@@ -6,7 +6,7 @@ import com.biodiagnostico.service.reports.v2.generator.GenerationContext;
 /**
  * Gera comentario textual executivo para cada relatorio V2 com base em
  * contexto estruturado. A implementacao padrao delega para o
- * {@code GeminiAiService} com timeout hard de 15s e fallback seguro.
+ * {@code AiService} com timeout hard de 15s e fallback seguro.
  *
  * <p><strong>Garantias:</strong> nunca lanca excecao — qualquer falha
  * retorna a string fallback {@code FALLBACK_COMMENTARY} para que o relatorio

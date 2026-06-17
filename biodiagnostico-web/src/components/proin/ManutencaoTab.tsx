@@ -6,6 +6,7 @@ import {
   History,
   Pencil,
   Search,
+  Sparkles,
   Trash2,
   Wrench,
   X,
@@ -17,6 +18,7 @@ import {
   useMaintenanceRecords,
   useUpdateMaintenanceRecord,
 } from '../../hooks/useMaintenance'
+import { useSuggestObservation } from '../../hooks/useAiAssist'
 import type { MaintenanceRecord, MaintenanceRequest } from '../../types'
 import {
   Button,
@@ -31,7 +33,7 @@ import {
   useToast,
 } from '../ui'
 import type { ComboboxOption } from '../ui'
-import { VoiceRecorderModal } from './VoiceRecorderModal'
+import { AiAssistDisclaimer } from './AiAssistShared'
 import {
   compareLocalDate,
   diffInDays,
@@ -569,6 +571,35 @@ function MaintenanceModal({
   equipmentOptions,
   technicianOptions,
 }: MaintenanceModalProps) {
+  const { toast } = useToast()
+  const suggestObservation = useSuggestObservation()
+
+  // C8 — Sugere uma nota de manutencao a partir dos dados ja preenchidos.
+  // Apenas preenche o campo; o tecnico revisa e decide salvar.
+  const handleSuggestNotes = async () => {
+    if (suggestObservation.isPending) return
+    if (!form.equipment || !form.type) {
+      toast.warning('Informe equipamento e tipo antes de sugerir a nota.')
+      return
+    }
+    const contextParts = [
+      `Equipamento: ${form.equipment}`,
+      `Tipo de manutenção: ${form.type}`,
+      `Data: ${form.date}`,
+    ]
+    if (form.nextDate) contextParts.push(`Próxima manutenção: ${form.nextDate}`)
+    if (form.technician) contextParts.push(`Técnico: ${form.technician}`)
+    try {
+      const suggestion = await suggestObservation.mutateAsync({
+        kind: 'maintenance',
+        context: contextParts.join(' | '),
+      })
+      setForm((current) => ({ ...current, notes: suggestion }))
+    } catch {
+      toast.error('Não foi possível gerar a sugestão agora.')
+    }
+  }
+
   return (
     <Modal
       isOpen={isOpen}
@@ -581,22 +612,6 @@ function MaintenanceModal({
         </div>
       }
     >
-      <div className="mb-4 flex justify-end">
-        <VoiceRecorderModal
-          formType="manutencao"
-          title="Preencher manutenção por voz"
-          onApply={(data) =>
-            setForm((current) => ({
-              ...current,
-              equipment: typeof data.equipment === 'string' ? data.equipment : current.equipment,
-              type: typeof data.type === 'string' ? data.type : current.type,
-              date: typeof data.date === 'string' ? data.date : current.date,
-              nextDate: typeof data.next_date === 'string' ? data.next_date : current.nextDate,
-              notes: typeof data.notes === 'string' ? data.notes : current.notes,
-            }))
-          }
-        />
-      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Combobox
           label="Equipamento"
@@ -629,7 +644,21 @@ function MaintenanceModal({
         />
       </div>
       <div className="mt-4">
-        <TextArea label="Notas" value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-neutral-700">Notas</span>
+          <button
+            type="button"
+            onClick={handleSuggestNotes}
+            disabled={suggestObservation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title="Sugestão assistiva gerada por IA"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {suggestObservation.isPending ? 'Gerando...' : 'Sugerir nota'}
+          </button>
+        </div>
+        <TextArea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+        {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
       </div>
     </Modal>
   )

@@ -545,6 +545,44 @@ export interface AiAnalysisRequest {
   days?: number
 }
 
+/**
+ * Recursos de IA assistiva (Onda 1). Todos os endpoints sao apoio a decisao,
+ * nao substituem avaliacao tecnica e nao alteram regra de CQ/Westgard.
+ */
+
+/** A1 — POST /ai/qc/explain. {@code recordId} e o UUID do registro de CQ. */
+export interface ExplainQcRequest {
+  recordId: string
+}
+
+export interface ExplainQcResponse {
+  explanation: string
+}
+
+/** A2 — POST /ai/qc/interpret-trend. Mesmos parametros do Levey-Jennings exibido. */
+export interface InterpretTrendRequest {
+  examName: string
+  level: string
+  area: string
+  days?: number
+}
+
+export interface InterpretTrendResponse {
+  interpretation: string
+}
+
+export type SuggestObservationKind = 'post-calibration' | 'maintenance' | 'reagent' | 'qc'
+
+/** C8 — POST /ai/suggest-observation. {@code kind} restrito ao conjunto aceito pelo backend. */
+export interface SuggestObservationRequest {
+  kind: SuggestObservationKind | string
+  context: string
+}
+
+export interface SuggestObservationResponse {
+  suggestion: string
+}
+
 export interface VoiceToFormRequest {
   audioBase64: string
   formType: 'registro' | 'referencia' | 'reagente' | 'manutencao'

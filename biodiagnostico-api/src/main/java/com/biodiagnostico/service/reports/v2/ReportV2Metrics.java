@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
  *   <li>{@code reports_v2_signature_total{code, outcome}} — assinaturas</li>
  *   <li>{@code reports_v2_download_total{code, version}} — downloads por
  *       tipo e versao servida ({@code original|signed})</li>
- *   <li>{@code reports_v2_ai_call_total{code, outcome}} — chamadas Gemini
+ *   <li>{@code reports_v2_ai_call_total{code, outcome}} — chamadas de IA
  *       ({@code success|fallback|timeout})</li>
  * </ul>
  *

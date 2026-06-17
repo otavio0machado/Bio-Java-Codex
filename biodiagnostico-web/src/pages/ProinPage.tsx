@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
+import { AiAssistantPanel } from '../components/proin/AiAssistantPanel'
 import { Card, Skeleton } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { canWriteQc } from '../lib/permissions'
@@ -109,9 +110,12 @@ export function ProinPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
       <header className="space-y-4">
-        <div>
-          <h1 className="text-3xl font-bold text-neutral-900">{currentAreaLabel}</h1>
-          <p className="text-base text-neutral-500">Operação de CQ da área selecionada — lançamento, rastreabilidade e análise.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold text-neutral-900">{currentAreaLabel}</h1>
+            <p className="text-base text-neutral-500">Operação de CQ da área selecionada — lançamento, rastreabilidade e análise.</p>
+          </div>
+          <AiAssistantPanel area={currentArea} areaLabel={currentAreaLabel} />
         </div>
 
         {currentArea === 'bioquimica' ? (

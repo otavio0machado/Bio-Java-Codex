@@ -34,9 +34,23 @@ jwt:
   # Refresh token: 30 dias (2.592.000.000 ms) — janela longa, protegido por cookie httpOnly
   refresh-token-expiry: ${JWT_REFRESH_TOKEN_EXPIRY:2592000000}
 
-gemini:
-  api-key: ${GEMINI_API_KEY:}
-  model: ${GEMINI_MODEL:gemini-1.5-flash}
+ai:
+  openai:
+    api-key: ${OPENAI_API_KEY:}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+  models:
+    advanced: ${AI_MODEL_ADVANCED:gpt-5.5}
+    medium: ${AI_MODEL_MEDIUM:gpt-5.4}
+    basic: ${AI_MODEL_BASIC:gpt-5.4-mini}
+    audio: ${AI_MODEL_AUDIO:gpt-audio-1.5}
+  routing:
+    explain-violation: medium
+    interpret-trend: medium
+    suggest-observation: basic
+    chat: medium
+    voice-form: audio
+  voice:
+    max-audio-bytes: ${VOICE_MAX_AUDIO_BYTES:2097152}
 
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:5173}

@@ -21,7 +21,6 @@ import type {
   StockMovementRequest,
 } from '../../types'
 import { Button, useToast } from '../ui'
-import { VoiceRecorderModal } from './VoiceRecorderModal'
 import { ReagentLotModal, ReagentMovementModal } from './reagentes/ReagentModals'
 import { ArchiveLotModal } from './reagentes/ArchiveLotModal'
 import { DeleteLotModal } from './reagentes/DeleteLotModal'
@@ -422,28 +421,6 @@ export function ReagentesTab() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <VoiceRecorderModal
-            formType="reagente"
-            title="Reagente por voz"
-            onApply={(data) => {
-              setLotForm((current) => ({
-                ...current,
-                label:
-                  typeof data.label === 'string'
-                    ? data.label
-                    : typeof data.name === 'string'
-                      ? data.name
-                      : current.label,
-                lotNumber:
-                  typeof data.lot_number === 'string' ? data.lot_number : current.lotNumber,
-                expiryDate:
-                  typeof data.expiry_date === 'string' ? data.expiry_date : current.expiryDate,
-                manufacturer:
-                  typeof data.manufacturer === 'string' ? data.manufacturer : current.manufacturer,
-              }))
-              setIsLotModalOpen(true)
-            }}
-          />
         <Button onClick={handleOpenCreate} icon={<PackagePlus className="h-4 w-4" />}>
           Novo Lote
         </Button>
