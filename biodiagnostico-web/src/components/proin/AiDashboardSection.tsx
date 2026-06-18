@@ -8,6 +8,7 @@ import type {
 } from '../../types'
 import { Button, Card } from '../ui'
 import { AiAssistDisclaimer, AiAssistResult } from './AiAssistShared'
+import { AiMarkdown } from './AiMarkdown'
 
 /**
  * Onda 3 — bloco assistivo de IA do dashboard. Agrupa C9 (resumo executivo),
@@ -266,9 +267,9 @@ function DriftAlertRow({ alert }: { alert: DriftAlert }) {
         </div>
       </div>
       {alert.detail.trim() ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-neutral-700">
-          {alert.detail}
-        </p>
+        <div className="mt-1.5">
+          <AiMarkdown>{alert.detail}</AiMarkdown>
+        </div>
       ) : null}
     </li>
   )

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAiAnalysis } from '../../hooks/useAiAnalysis'
 import { Button, Modal } from '../ui'
 import { AiAssistDisclaimer } from './AiAssistShared'
+import { AiMarkdown } from './AiMarkdown'
 
 interface AiAssistantPanelProps {
   /** Area de CQ do contexto atual; enviada ao backend quando presente. */
@@ -146,7 +147,7 @@ export function AiAssistantPanel({ area, areaLabel, buttonLabel = 'Assistente de
                     </div>
                   ) : (
                     <div className="max-w-[85%] rounded-2xl border border-violet-100 bg-violet-50/50 px-4 py-2.5">
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">{turn.answer}</p>
+                      <AiMarkdown>{turn.answer ?? ''}</AiMarkdown>
                     </div>
                   )}
                 </div>

@@ -1,4 +1,5 @@
 import { AlertCircle, Loader2, Sparkles } from 'lucide-react'
+import { AiMarkdown } from './AiMarkdown'
 
 /**
  * Rotulo padrao de assistencia por IA. Reforca que a saida e apoio a decisao
@@ -62,7 +63,7 @@ export function AiAssistResult({
 
   return (
     <div className="rounded-2xl border border-violet-100 bg-violet-50/50 px-4 py-3">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-800">{text}</p>
+      <AiMarkdown>{text}</AiMarkdown>
       {withDisclaimer ? <AiAssistDisclaimer className="mt-3" /> : null}
     </div>
   )
