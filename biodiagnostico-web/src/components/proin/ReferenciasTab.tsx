@@ -10,9 +10,10 @@ import {
 } from '../../hooks/useQcRecords'
 import { useAuth } from '../../hooks/useAuth'
 import { canWriteQc } from '../../lib/permissions'
+import { formatQcExamOption, getQcExamUnit, getVisibleQcExams, isQcExamAllowed } from '../../lib/qcAreas'
 import { qcService } from '../../services/qcService'
 import type { QcExam, QcReferenceRequest, QcReferenceValue } from '../../types'
-import { Button, Card, Combobox, EmptyState, Input, Modal, Select, useToast } from '../ui'
+import { Button, Card, Combobox, EmptyState, Input, Modal, Select, TextArea, useToast } from '../ui'
 import type { ComboboxOption } from '../ui'
 
 interface ReferenciasTabProps {
@@ -39,8 +40,9 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const { toast } = useToast()
   const { user } = useAuth()
   const canManageReferences = canWriteQc(user)
-  const { data: exams = [] } = useQcExams(area)
-  const { data: references = [] } = useQcReferences(undefined, false)
+  const { data: fetchedExams = [] } = useQcExams(area)
+  const exams = useMemo(() => getVisibleQcExams(fetchedExams, area), [area, fetchedExams])
+  const { data: references = [] } = useQcReferences({ area, activeOnly: false })
   const createReference = useCreateQcReference()
   const updateReference = useUpdateQcReference()
   const deleteReference = useDeleteQcReference()
@@ -56,7 +58,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const registroNameOptions = useMemo<ComboboxOption[]>(() => {
     const set = new Map<string, number>()
     references
-      .filter((reference) => reference.exam?.area === area)
+      .filter((reference) => reference.exam?.area === area && isQcExamAllowed(area, reference.exam.name))
       .forEach((reference) => {
         const name = reference.name?.trim()
         if (!name) return
@@ -74,7 +76,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
   const filteredReferences = useMemo(() => {
     const today = todayStr()
     return references
-      .filter((reference) => reference.exam?.area === area)
+      .filter((reference) => reference.exam?.area === area && isQcExamAllowed(area, reference.exam.name))
       .filter((reference) => {
         if (validityFilter === 'todas') return true
         const from = reference.validFrom?.slice(0, 10)
@@ -125,11 +127,15 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
       toast.warning('Preencha o nome do registro e selecione o exame.')
       return
     }
+    if (area === 'coagulacao' && !form.lotNumber?.trim()) {
+      toast.warning('Informe o lote do controle para a referência de coagulação.')
+      return
+    }
     const payload: QcReferenceRequest = {
       ...form,
       validFrom: form.validFrom || undefined,
       validUntil: form.validUntil || undefined,
-      lotNumber: form.lotNumber || undefined,
+      lotNumber: form.lotNumber?.trim() || undefined,
       manufacturer: form.manufacturer || undefined,
       notes: form.notes || undefined,
     }
@@ -162,7 +168,9 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
     }
   }
 
-  const hasAnyReferenceInArea = references.some((reference) => reference.exam?.area === area)
+  const hasAnyReferenceInArea = references.some(
+    (reference) => reference.exam?.area === area && isQcExamAllowed(area, reference.exam.name),
+  )
 
   if (!hasAnyReferenceInArea) {
     return (
@@ -205,13 +213,13 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           <p className="text-sm text-neutral-500">Faixas alvo ativas para a área de {area}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={filterButtonClass(validityFilter === 'todas')} onClick={() => setValidityFilter('todas')}>
+          <button type="button" aria-pressed={validityFilter === 'todas'} className={filterButtonClass(validityFilter === 'todas')} onClick={() => setValidityFilter('todas')}>
             Todas
           </button>
-          <button type="button" className={filterButtonClass(validityFilter === 'vencidas')} onClick={() => setValidityFilter('vencidas')}>
+          <button type="button" aria-pressed={validityFilter === 'vencidas'} className={filterButtonClass(validityFilter === 'vencidas')} onClick={() => setValidityFilter('vencidas')}>
             Vencidas
           </button>
-          <button type="button" className={filterButtonClass(validityFilter === 'validas')} onClick={() => setValidityFilter('validas')}>
+          <button type="button" aria-pressed={validityFilter === 'validas'} className={filterButtonClass(validityFilter === 'validas')} onClick={() => setValidityFilter('validas')}>
             Válidas
           </button>
           {canManageReferences ? (
@@ -232,12 +240,15 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-neutral-100 text-xs uppercase tracking-wider text-neutral-500">
-                <th className="px-3 py-2.5">Nome</th>
-                <th className="px-3 py-2.5">Exame</th>
-                <th className="px-3 py-2.5">Alvo</th>
-                <th className="px-3 py-2.5">DP</th>
-                <th className="px-3 py-2.5">Validade</th>
-                {canManageReferences ? <th className="px-3 py-2.5 text-center">Ações</th> : null}
+                <th scope="col" className="px-3 py-2.5">Nome</th>
+                <th scope="col" className="px-3 py-2.5">Exame</th>
+                <th scope="col" className="px-3 py-2.5">Nível</th>
+                <th scope="col" className="px-3 py-2.5">Lote</th>
+                <th scope="col" className="px-3 py-2.5">Média</th>
+                <th scope="col" className="px-3 py-2.5">Desvio padrão</th>
+                <th scope="col" className="px-3 py-2.5">Intervalo estatístico (média ±2 DP)</th>
+                <th scope="col" className="px-3 py-2.5">Validade</th>
+                {canManageReferences ? <th scope="col" className="px-3 py-2.5 text-center">Ações</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -245,8 +256,11 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                 <tr key={reference.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
                   <td className="px-3 py-2.5 font-medium text-neutral-900">{reference.name}</td>
                   <td className="px-3 py-2.5 text-neutral-700">{reference.exam.name}</td>
-                  <td className="px-3 py-2.5 font-mono text-neutral-700">{reference.targetValue.toFixed(2)}</td>
-                  <td className="px-3 py-2.5 font-mono text-neutral-600">{reference.targetSd.toFixed(2)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-neutral-600">{reference.level || 'Normal'}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-600">{reference.lotNumber || '—'}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-700">{formatReferenceValue(reference.targetValue, reference)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-600">{formatReferenceValue(reference.targetSd, reference)}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-700">{formatReferenceInterval(reference)}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-neutral-600">
                     {reference.validFrom ? formatDate(reference.validFrom) : '—'}
                     {' → '}
@@ -260,6 +274,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                           className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
                           onClick={() => openEdit(reference)}
                           title="Editar"
+                          aria-label={`Editar referência ${reference.name}`}
                         >
                           <Pencil className="h-4 w-4" />
                         </button>
@@ -268,6 +283,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
                           className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-600"
                           onClick={() => void handleDelete(reference.id)}
                           title="Excluir"
+                          aria-label={`Excluir referência ${reference.name}`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -279,6 +295,7 @@ export function ReferenciasTab({ area }: ReferenciasTabProps) {
             </tbody>
           </table>
         </div>
+
         )}
       </Card>
 
@@ -305,6 +322,20 @@ function formatDate(value: string) {
   } catch {
     return value
   }
+}
+
+function formatReferenceValue(value: number, reference: QcReferenceValue) {
+  const unit = getQcExamUnit(reference.exam.area, reference.exam)
+  return `${value.toFixed(2)}${unit ? ` ${unit}` : ''}`
+}
+
+function formatReferenceInterval(reference: QcReferenceValue) {
+  const firstLimit = reference.targetValue - (2 * reference.targetSd)
+  const secondLimit = reference.targetValue + (2 * reference.targetSd)
+  const lowerLimit = Math.min(firstLimit, secondLimit)
+  const upperLimit = Math.max(firstLimit, secondLimit)
+  const unit = getQcExamUnit(reference.exam.area, reference.exam)
+  return `${lowerLimit.toFixed(2)} – ${upperLimit.toFixed(2)}${unit ? ` ${unit}` : ''}`
 }
 
 interface ReferenceModalProps {
@@ -384,11 +415,11 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
             <option value="">Selecione o exame</option>
             {exams.map((exam) => (
               <option key={exam.id} value={exam.id}>
-                {exam.name}
+                {formatQcExamOption(area, exam)}
               </option>
             ))}
           </Select>
-          {!showNewExam && canManageReferences ? (
+          {area !== 'coagulacao' && !showNewExam && canManageReferences ? (
             <button
               type="button"
               onClick={() => setShowNewExam(true)}
@@ -396,7 +427,7 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
             >
               + Adicionar exame
             </button>
-          ) : showNewExam ? (
+          ) : area !== 'coagulacao' && showNewExam ? (
             <div className="flex items-end gap-2 rounded-xl bg-neutral-50 p-3">
               <Input
                 label="Nome do exame"
@@ -412,6 +443,36 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
               </Button>
             </div>
           ) : null}
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Input
+            label="Nível"
+            value={form.level}
+            onChange={(event) => setForm((current) => ({ ...current, level: event.target.value }))}
+          />
+          <Input
+            label={area === 'coagulacao' ? 'Lote do controle *' : 'Lote do controle'}
+            value={form.lotNumber ?? ''}
+            required={area === 'coagulacao'}
+            onChange={(event) => setForm((current) => ({ ...current, lotNumber: event.target.value }))}
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Input
+            label="Fabricante"
+            value={form.manufacturer ?? ''}
+            onChange={(event) => setForm((current) => ({ ...current, manufacturer: event.target.value }))}
+          />
+          <Input
+            label="Limite de variação (%)"
+            type="number"
+            min="0"
+            step="0.01"
+            value={String(form.cvMaxThreshold)}
+            onChange={(event) => setForm((current) => ({ ...current, cvMaxThreshold: Number(event.target.value) }))}
+          />
         </div>
 
         {/* Preencher com última referência */}
@@ -466,6 +527,12 @@ function ReferenceModal({ area, exams, registroNameOptions, form, editing, isOpe
             onChange={(event) => setForm((current) => ({ ...current, targetSd: Number(event.target.value) }))}
           />
         </div>
+
+        <TextArea
+          label="Observações"
+          value={form.notes ?? ''}
+          onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+        />
       </div>
     </Modal>
   )

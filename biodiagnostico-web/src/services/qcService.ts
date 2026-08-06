@@ -1,5 +1,6 @@
 import { api } from './api'
 import type {
+  BatchImportResult,
   LeveyJenningsPoint,
   PostCalibrationRecord,
   PostCalibrationRequest,
@@ -21,7 +22,9 @@ export const qcService = {
     return response.data
   },
   async createBatch(requests: QcRecordRequest[]) {
-    const response = await api.post<QcRecord[]>('/qc/records/batch', requests)
+    const response = await api.post<BatchImportResult>('/qc/records/batch-v2', requests, {
+      params: { mode: 'partial' },
+    })
     return response.data
   },
   async getStatistics() {
@@ -46,9 +49,9 @@ export const qcService = {
     const response = await api.post<QcExam>('/qc/exams', request)
     return response.data
   },
-  async getReferences(examId?: string, activeOnly = false) {
+  async getReferences(filters: { examId?: string; area?: string; activeOnly?: boolean } = {}) {
     const response = await api.get<QcReferenceValue[]>('/qc/references', {
-      params: { examId, activeOnly },
+      params: filters,
     })
     return response.data
   },

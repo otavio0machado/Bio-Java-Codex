@@ -143,6 +143,38 @@ class CqOperationalV2GeneratorTest {
     }
 
     @Test
+    @DisplayName("generate produz PDF V2 usando registros de coagulação")
+    void generateCoagulationReturnsPdf() {
+        QcRecord record = QcRecord.builder()
+            .id(UUID.randomUUID())
+            .examName("TTPA")
+            .area("coagulacao")
+            .date(LocalDate.now())
+            .level("N1")
+            .value(31.0)
+            .targetValue(30.0)
+            .targetSd(2.0)
+            .cv(3.3)
+            .cvLimit(10.0)
+            .status("APROVADO")
+            .needsCalibration(false)
+            .build();
+        lenient().when(qcRecordRepository.findByAreaAndDateRange(
+            eq("coagulacao"), any(LocalDate.class), any(LocalDate.class)
+        )).thenReturn(List.of(record));
+        lenient().when(postCalibrationRecordRepository.findByQcRecordAreaAndDateRange(
+            eq("coagulacao"), any(LocalDate.class), any(LocalDate.class)
+        )).thenReturn(List.of());
+
+        ReportArtifact artifact = generator.generate(new ReportFilters(Map.of(
+            "area", "coagulacao",
+            "periodType", "current-month"
+        )), ctx());
+
+        assertThat(new String(artifact.bytes(), 0, 5)).isEqualTo("%PDF-");
+    }
+
+    @Test
     @DisplayName("generate com area=hematologia roteia para hematologyQcMeasurement")
     void generateHematology() {
         HematologyQcMeasurement m = HematologyQcMeasurement.builder()

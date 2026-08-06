@@ -70,8 +70,8 @@ public class FilterValidator {
             }
         }
 
-        // Cross-field: examIds so em area=bioquimica (Ressalva 4 do F1)
-        validateExamIdsOnlyForBioquimica(values, declaredKeys, violations);
+        // Cross-field: examIds somente nas areas que reutilizam QcExam/QcRecord.
+        validateExamIdsOnlyForCanonicalQc(values, declaredKeys, violations);
 
         // Cross-field: periodo deve carregar os campos exigidos pelo tipo.
         validatePeriodDependencies(values, declaredKeys, violations);
@@ -96,10 +96,10 @@ public class FilterValidator {
     }
 
     /**
-     * {@code examIds} e um filtro declarado na spec de CQ_OPERATIONAL_V2 mas hoje
-     * apenas o generator de bioquimica respeita.
+     * {@code examIds} e um filtro declarado na spec de CQ_OPERATIONAL_V2 e e
+     * suportado pelas areas que usam o nucleo canonico QcExam/QcRecord.
      */
-    private void validateExamIdsOnlyForBioquimica(
+    private void validateExamIdsOnlyForCanonicalQc(
         Map<String, Object> values, Set<String> declaredKeys, List<String> violations
     ) {
         if (!declaredKeys.contains("examIds") || !declaredKeys.contains("area")) {
@@ -111,9 +111,9 @@ public class FilterValidator {
 
         Object areaRaw = values.get("area");
         String area = areaRaw == null ? null : areaRaw.toString();
-        if (!"bioquimica".equals(area)) {
+        if (!"bioquimica".equals(area) && !"coagulacao".equals(area)) {
             violations.add(
-                "Filtro 'examIds' so e suportado para area=bioquimica (recebido area="
+                "Filtro 'examIds' so e suportado para area=bioquimica ou coagulacao (recebido area="
                 + (area == null ? "null" : area) + ")"
             );
         }

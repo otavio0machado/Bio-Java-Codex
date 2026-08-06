@@ -1,7 +1,8 @@
 import { AlertTriangle, CheckCircle2, Download, History, LineChart, RefreshCw } from 'lucide-react'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useQcExams } from '../../hooks/useQcRecords'
+import { getVisibleQcExams } from '../../lib/qcAreas'
 import { useReportHistory } from '../../hooks/useReports'
 import { canDownload } from '../../lib/permissions'
 import { reportService } from '../../services/reportService'
@@ -37,7 +38,8 @@ function formatDateTime(iso: string): string {
 export function RelatoriosTab({ area }: RelatoriosTabProps) {
   const { user } = useAuth()
   const { toast } = useToast()
-  const { data: exams = [] } = useQcExams(area)
+  const { data: fetchedExams = [] } = useQcExams(area)
+  const exams = useMemo(() => getVisibleQcExams(fetchedExams, area), [area, fetchedExams])
   const [periodType, setPeriodType] = useState('current-month')
   const [month, setMonth] = useState(String(new Date().getMonth() + 1))
   const [year, setYear] = useState(String(new Date().getFullYear()))

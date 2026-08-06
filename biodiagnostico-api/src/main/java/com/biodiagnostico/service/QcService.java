@@ -70,7 +70,7 @@ public class QcService {
 
     @Transactional
     public QcRecordResponse createRecord(QcRecordRequest request) {
-        ensureExamExists(request.examName(), request.area());
+        validateExamAndLot(request);
 
         QcReferenceValue reference = resolveReference(request);
         QcRecord record = buildRecord(request, reference, null);
@@ -104,7 +104,7 @@ public class QcService {
         for (int index = 0; index < requests.size(); index++) {
             QcRecordRequest request = requests.get(index);
             try {
-                ensureExamExists(request.examName(), request.area());
+                validateExamAndLot(request);
                 QcReferenceValue reference = resolveReference(request);
                 QcRecord record = buildRecord(request, reference, null);
                 List<QcRecord> history = loadWestgardHistory(record, null);
@@ -167,6 +167,7 @@ public class QcService {
     public QcRecordResponse updateRecord(UUID id, QcRecordRequest request) {
         QcRecord existing = qcRecordRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Registro de CQ não encontrado"));
+        validateExamAndLot(request);
         QcReferenceValue reference = resolveReference(request);
         QcRecord updated = buildRecord(request, reference, existing);
         List<QcRecord> history = loadWestgardHistory(updated, existing);
@@ -224,11 +225,23 @@ public class QcService {
     }
 
     private void ensureExamExists(String examName, String area) {
-        boolean exists = qcExamRepository.findByAreaAndIsActiveTrue(area).stream()
-            .map(QcExam::getName)
-            .anyMatch(name -> name.equalsIgnoreCase(examName));
-        if (!exists) {
+        QcExam exam = qcExamRepository.findByAreaAndIsActiveTrue(area).stream()
+            .filter(candidate -> candidate.getName() != null && candidate.getName().equalsIgnoreCase(examName))
+            .findFirst()
+            .orElse(null);
+        if (exam == null) {
             throw new BusinessException("Exame não cadastrado para a área informada");
+        }
+        QcExamService.validateAndNormalizeExam(area, examName, exam.getUnit());
+    }
+
+    private void validateExamAndLot(QcRecordRequest request) {
+        ensureExamExists(request.examName(), request.area());
+        if (
+            QcExamService.COAGULATION_AREA.equalsIgnoreCase(request.area())
+                && normalizeNullable(request.lotNumber()) == null
+        ) {
+            throw new BusinessException("O lote é obrigatório para registros de coagulação.");
         }
     }
 

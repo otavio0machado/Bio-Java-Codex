@@ -10,4 +10,8 @@ public interface QcExamRepository extends JpaRepository<QcExam, UUID> {
     List<QcExam> findByAreaAndIsActiveTrue(String area);
 
     List<QcExam> findByIsActiveTrue();
+
+    boolean existsByAreaIgnoreCaseAndNameIgnoreCase(String area, String name);
+
+    boolean existsByAreaIgnoreCaseAndNameIgnoreCaseAndIdNot(String area, String name, UUID id);
 }
