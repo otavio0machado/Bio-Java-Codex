@@ -33,7 +33,7 @@ export function PostCalibrationModal({ record, isOpen, onClose, onSaved }: PostC
       `Nível: ${record.level}`,
       `Valor original: ${record.value.toFixed(2)}`,
       `Alvo: ${record.targetValue.toFixed(2)} (DP ${record.targetSd.toFixed(2)})`,
-      `CV original: ${record.cv.toFixed(2)}% (limite ${record.cvLimit.toFixed(2)}%)`,
+      `Variação percentual original: ${record.cv.toFixed(2)}% (limite ${record.cvLimit.toFixed(2)}%)`,
       `Status do CQ: ${record.status}`,
       `Regras Westgard: ${violations}`,
     ]

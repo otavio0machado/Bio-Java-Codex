@@ -222,7 +222,8 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 html.append("<p>Medicoes: <strong>").append(meds).append("</strong></p>");
             }
             default -> {
-                html.append("<p>Registros de bioquimica: <strong>").append(summary.total).append("</strong></p>");
+                html.append("<p>Registros de ").append(escape(areaLabel(rf.area)))
+                    .append(": <strong>").append(summary.total).append("</strong></p>");
             }
         }
 
@@ -273,16 +274,16 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 default -> renderBioquimicaTable(document, rf);
             }
 
-            // 4. Graficos Levey-Jennings (bioquimica)
-            if ("bioquimica".equals(rf.area)) {
+            // 4. Graficos Levey-Jennings (areas no nucleo QcRecord)
+            if (usesCanonicalQcRecords(rf.area)) {
                 renderLeveyJenningsCharts(document, rf);
             }
 
             // 5. Westgard detalhado
             renderWestgardSection(document, rf);
 
-            // 6. Pos-calibracao (bioquimica)
-            if ("bioquimica".equals(rf.area)) {
+            // 6. Pos-calibracao (areas no nucleo QcRecord)
+            if (usesCanonicalQcRecords(rf.area)) {
                 renderPostCalibration(document, rf);
             }
 
@@ -376,7 +377,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             LinkedHashMap::new,
             Collectors.toList()));
         PdfPTable table = ReportV2PdfTheme.table(new float[] {2.4F, 1.2F, 1.6F, 1.5F, 1.5F, 1.3F, 1.2F, 1.6F, 1.0F});
-        ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
+        ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "Variação (%)", "Status", "N");
         boolean alt = false;
         for (Map.Entry<String, List<QcRecord>> entry : byReference.entrySet()) {
             List<QcRecord> group = entry.getValue();
@@ -572,11 +573,11 @@ public class CqOperationalV2Generator implements ReportGenerator {
 
     private void renderPostCalibration(Document document, ResolvedFilters rf) throws DocumentException {
         List<PostCalibrationRecord> post = postCalibrationRecordRepository
-            .findByQcRecordAreaAndDateRange("bioquimica", rf.start, rf.end);
+            .findByQcRecordAreaAndDateRange(rf.area, rf.start, rf.end);
         if (post.isEmpty()) return;
         document.add(ReportV2PdfTheme.section("Pos-calibracao"));
         PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.6F, 1.6F, 1.2F, 1.2F, 1.2F, 1.4F});
-        ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
+        ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "Variação antes (%)", "Variação depois (%)", "Delta%", "Status", "Data");
         boolean alt = false;
         for (PostCalibrationRecord r : post) {
             // Espelha CalibracaoPrePostGenerator: CV original/pos null = "SEM MEDICAO".
@@ -658,7 +659,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
      * Para cada dia que teve registros: cabecalho com a data + tabela com TODOS
      * os registros daquele dia + sub-resumo (total, aprovados, alertas, reprovados).
      *
-     * Suporta as 3 estrategias por area: bioquimica/genericas via QcRecord ou
+     * Suporta as 3 estrategias por area: nucleo canonico/genericas via QcRecord ou
      * AreaQcMeasurement; hematologia consolida QcMeasurement + BioRecord.
      *
      * Pedido do laboratorio: a vigilancia precisa ver "o que aconteceu em cada dia".
@@ -712,7 +713,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             renderDayHeader(document, day, dayRecs.size(),
                 dayRecs.stream().map(QcRecord::getStatus).collect(java.util.stream.Collectors.toList()));
             PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.2F});
-            ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
+            ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "Variação (%)",
                 "Z-score", "Equipamento", "Status");
             boolean alt = false;
             java.util.List<QcRecord> sorted = dayRecs.stream()
@@ -904,7 +905,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
     // ---------- Helpers de dados ----------
 
     private List<QcRecord> loadBioquimicaRecords(ResolvedFilters rf) {
-        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange("bioquimica", rf.start, rf.end);
+        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange(rf.area, rf.start, rf.end);
         if (!rf.examIds.isEmpty()) {
             records = records.stream()
                 .filter(r -> r.getReference() != null
@@ -1068,6 +1069,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
 
     private static String areaLabel(String area) {
         return switch (area) {
+            case "coagulacao" -> "Coagulacao";
             case "hematologia" -> "Hematologia";
             case "imunologia" -> "Imunologia";
             case "parasitologia" -> "Parasitologia";
@@ -1075,6 +1077,10 @@ public class CqOperationalV2Generator implements ReportGenerator {
             case "uroanalise" -> "Uroanalise";
             default -> "Bioquimica";
         };
+    }
+
+    private static boolean usesCanonicalQcRecords(String area) {
+        return "bioquimica".equals(area) || "coagulacao".equals(area);
     }
 
     private static String capitalize(String v) {

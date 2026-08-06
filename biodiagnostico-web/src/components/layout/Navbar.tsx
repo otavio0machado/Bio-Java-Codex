@@ -17,16 +17,15 @@ import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../ui'
 import { cn } from '../../utils/cn'
 import { ROLE_LABELS } from '../../lib/permissions'
+import { QC_AREA_OPTIONS } from '../../lib/qcAreas'
 import logoBio from '../../assets/logobio.png'
 
-const areaNavItems = [
-  { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker },
-  { label: 'Hematologia', href: '/qc?area=hematologia', area: 'hematologia', icon: Beaker },
-  { label: 'Imunologia', href: '/qc?area=imunologia', area: 'imunologia', icon: Beaker },
-  { label: 'Parasitologia', href: '/qc?area=parasitologia', area: 'parasitologia', icon: Beaker },
-  { label: 'Microbiologia', href: '/qc?area=microbiologia', area: 'microbiologia', icon: Beaker },
-  { label: 'Uroanálise', href: '/qc?area=uroanalise', area: 'uroanalise', icon: Beaker },
-]
+const areaNavItems = QC_AREA_OPTIONS.map(({ value, label }) => ({
+  label,
+  href: `/qc?area=${value}`,
+  area: value,
+  icon: Beaker,
+}))
 
 const managementNavItems = [
   { label: 'Reagentes', href: '/reagentes', area: null, icon: FlaskConical },

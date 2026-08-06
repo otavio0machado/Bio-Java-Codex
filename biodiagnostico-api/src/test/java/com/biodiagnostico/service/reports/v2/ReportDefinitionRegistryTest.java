@@ -25,6 +25,12 @@ class ReportDefinitionRegistryTest {
     }
 
     @Test
+    @DisplayName("catálogo de relatórios deve expor coagulação")
+    void areasIncludeCoagulation() {
+        assertThat(ReportDefinitionRegistry.AREAS).contains("coagulacao");
+    }
+
+    @Test
     @DisplayName("canAccess retorna true para roles autorizadas")
     void canAccessTrueForAuthorizedRoles() {
         assertThat(registry.canAccess(ReportCode.CQ_OPERATIONAL_V2, Set.of("ADMIN"))).isTrue();

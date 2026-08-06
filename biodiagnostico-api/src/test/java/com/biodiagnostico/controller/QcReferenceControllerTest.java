@@ -55,6 +55,21 @@ class QcReferenceControllerTest {
     }
 
     @Test
+    @DisplayName("deve encaminhar filtro de área ao listar referências")
+    void shouldForwardAreaWhenListingReferences() throws Exception {
+        qcReferenceService.references = List.of(reference());
+
+        mockMvc.perform(get("/api/qc/references")
+                .param("area", "coagulacao")
+                .param("activeOnly", "true")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(qcReferenceService.requestedArea)
+            .isEqualTo("coagulacao");
+    }
+
+    @Test
     @DisplayName("deve criar referência com ADMIN")
     void shouldCreateReferenceAsAdmin() throws Exception {
         qcReferenceService.createResponse = reference();
@@ -161,6 +176,7 @@ class QcReferenceControllerTest {
     static class StubQcReferenceService extends QcReferenceService {
         private List<QcReferenceValue> references = List.of();
         private QcReferenceValue createResponse;
+        private String requestedArea;
 
         StubQcReferenceService() {
             super(null, null);
@@ -168,6 +184,12 @@ class QcReferenceControllerTest {
 
         @Override
         public List<QcReferenceValue> getReferences(UUID examId, Boolean activeOnly) {
+            return references;
+        }
+
+        @Override
+        public List<QcReferenceValue> getReferences(UUID examId, Boolean activeOnly, String area) {
+            requestedArea = area;
             return references;
         }
 

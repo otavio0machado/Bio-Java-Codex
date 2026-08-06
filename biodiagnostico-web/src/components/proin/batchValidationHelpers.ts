@@ -25,7 +25,7 @@ const FIELD_LABEL: Record<string, string> = {
   value: 'valor',
   targetValue: 'alvo',
   targetSd: 'DP',
-  cvLimit: 'CV limite',
+  cvLimit: 'Limite de variação',
 }
 
 export function issueLabel(issue: string): string {

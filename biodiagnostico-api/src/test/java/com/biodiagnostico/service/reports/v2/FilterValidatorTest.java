@@ -143,6 +143,22 @@ class FilterValidatorTest {
     }
 
     @Test
+    @DisplayName("examIds com area=coagulacao e válido")
+    void examIdsComAreaCoagulacaoValido() {
+        ReportFilterSpec spec = new ReportFilterSpec(List.of(
+            new ReportFilterField("area", ReportFilterFieldType.STRING_ENUM, true,
+                List.of("bioquimica", "coagulacao"), "Area", null),
+            new ReportFilterField("examIds", ReportFilterFieldType.UUID_LIST, false,
+                null, "Exames", null)
+        ));
+
+        assertThatCode(() -> validator.validate(spec, Map.of(
+            "area", "coagulacao",
+            "examIds", List.of(UUID.randomUUID().toString())
+        ))).doesNotThrowAnyException();
+    }
+
+    @Test
     @DisplayName("examIds ausente/vazio com area=hematologia e valido")
     void examIdsVazioComAreaHematologiaValido() {
         ReportFilterSpec spec = new ReportFilterSpec(List.of(
