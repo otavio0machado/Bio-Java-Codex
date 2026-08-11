@@ -33,10 +33,9 @@ public class QcReferenceController {
     @GetMapping
     public ResponseEntity<List<QcReferenceResponse>> getReferences(
         @RequestParam(required = false) UUID examId,
-        @RequestParam(required = false) Boolean activeOnly,
-        @RequestParam(required = false) String area
+        @RequestParam(required = false) Boolean activeOnly
     ) {
-        List<QcReferenceResponse> responses = qcReferenceService.getReferences(examId, activeOnly, area)
+        List<QcReferenceResponse> responses = qcReferenceService.getReferences(examId, activeOnly)
             .stream()
             .map(ResponseMapper::toQcReferenceResponse)
             .toList();

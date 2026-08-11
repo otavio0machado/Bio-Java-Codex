@@ -109,11 +109,10 @@ public class PdfReportService {
         String normalizedArea = normalizeArea(area);
         PeriodRange range = resolvePeriod(periodType, month, year);
         GeneratedReport report = switch (normalizedArea) {
-            case "coagulacao" -> buildCanonicalQcReport("coagulacao", range);
             case "hematologia" -> buildHematologyReport(range);
             case "imunologia" -> buildImmunologyReport(range);
             case "parasitologia", "microbiologia", "uroanalise" -> buildGenericAreaReport(normalizedArea, range);
-            default -> buildCanonicalQcReport("bioquimica", range);
+            default -> buildBioquimicaReport(range);
         };
         reportNumberingService.registerGeneration(
             report.reportNumber(), normalizedArea, "PDF", range.label(), report.content(), null);
@@ -162,16 +161,16 @@ public class PdfReportService {
         return report;
     }
 
-    private GeneratedReport buildCanonicalQcReport(String area, PeriodRange range) {
-        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange(area, range.start(), range.end());
+    private GeneratedReport buildBioquimicaReport(PeriodRange range) {
+        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange("bioquimica", range.start(), range.end());
 
         Map<UUID, PostCalibrationRecord> postCalibrations = postCalibrationRecordRepository
-            .findByQcRecordAreaAndDateRange(area, range.start(), range.end()).stream()
+            .findByQcRecordAreaAndDateRange("bioquimica", range.start(), range.end()).stream()
             .collect(Collectors.toMap(record -> record.getQcRecord().getId(), record -> record, (left, right) -> left));
 
         return buildReport(
             "Relatório de Controle de Qualidade",
-            "Área: " + areaLabel(area) + " · Período: " + range.label(),
+            "Área: Bioquímica · Período: " + range.label(),
             document -> {
                 if (records.isEmpty()) {
                     document.add(new Paragraph("Nenhum registro encontrado no período selecionado.", BODY_FONT));
@@ -179,7 +178,7 @@ public class PdfReportService {
                 }
 
                 PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
-                addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "Variação (%)", "Lim.", "Status", "Pós-CQ", "Status Pós");
+                addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ", "Status Pós");
                 boolean alternate = false;
                 for (QcRecord record : records) {
                     PostCalibrationRecord post = postCalibrations.get(record.getId());
@@ -628,7 +627,6 @@ public class PdfReportService {
 
     private String areaLabel(String area) {
         return switch (normalizeArea(area)) {
-            case "coagulacao" -> "Coagulação";
             case "hematologia" -> "Hematologia";
             case "imunologia" -> "Imunologia";
             case "parasitologia" -> "Parasitologia";

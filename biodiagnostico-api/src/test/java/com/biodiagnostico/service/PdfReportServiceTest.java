@@ -125,36 +125,6 @@ class PdfReportServiceTest {
     }
 
     @Test
-    @DisplayName("deve gerar PDF de coagulação usando somente registros da área")
-    void generateQcPdf_coagulacao_retornaPdfValido() {
-        QcRecord record = QcRecord.builder()
-            .id(UUID.randomUUID())
-            .examName("INR")
-            .area("coagulacao")
-            .date(LocalDate.now())
-            .level("N1")
-            .value(1.05)
-            .targetValue(1.0)
-            .targetSd(0.1)
-            .cv(5.0)
-            .cvLimit(10.0)
-            .status("APROVADO")
-            .needsCalibration(false)
-            .build();
-        when(qcRecordRepository.findByAreaAndDateRange(eq("coagulacao"), any(LocalDate.class), any(LocalDate.class)))
-            .thenReturn(List.of(record));
-        when(postCalibrationRecordRepository.findByQcRecordAreaAndDateRange(eq("coagulacao"), any(LocalDate.class), any(LocalDate.class)))
-            .thenReturn(List.of());
-
-        byte[] pdf = pdfReportService.generateQcPdf("coagulacao", "current-month", null, null);
-
-        assertThat(new String(pdf, 0, 5)).isEqualTo("%PDF-");
-        verify(qcRecordRepository).findByAreaAndDateRange(eq("coagulacao"), any(LocalDate.class), any(LocalDate.class));
-        verify(postCalibrationRecordRepository)
-            .findByQcRecordAreaAndDateRange(eq("coagulacao"), any(LocalDate.class), any(LocalDate.class));
-    }
-
-    @Test
     @DisplayName("deve gerar PDF de hematologia com medições e retornar bytes válidos começando com %PDF")
     void generateQcPdf_hematologia_retornaPdfValido() {
         HematologyQcMeasurement measurement = HematologyQcMeasurement.builder()

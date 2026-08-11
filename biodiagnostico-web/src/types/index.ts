@@ -3,7 +3,6 @@ export type QcStatus = 'APROVADO' | 'REPROVADO' | 'ALERTA'
 export type ViolationSeverity = 'WARNING' | 'REJECTION'
 export type LabArea =
   | 'bioquimica'
-  | 'coagulacao'
   | 'hematologia'
   | 'imunologia'
   | 'parasitologia'
@@ -124,22 +123,6 @@ export interface QcRecordRequest {
   equipment?: string
   analyst?: string
   referenceId?: string
-}
-
-export interface RowResult {
-  rowIndex: number
-  success: boolean
-  message?: string | null
-  record?: QcRecord | null
-}
-
-export interface BatchImportResult {
-  runId: string
-  mode: 'PARTIAL' | 'ATOMIC' | string
-  total: number
-  successCount: number
-  failureCount: number
-  results: RowResult[]
 }
 
 export interface QcReferenceValue {

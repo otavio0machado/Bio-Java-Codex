@@ -15,16 +15,6 @@ public interface QcReferenceValueRepository extends JpaRepository<QcReferenceVal
 
     List<QcReferenceValue> findByIsActiveTrue();
 
-    @Query("SELECT r FROM QcReferenceValue r JOIN FETCH r.exam e " +
-           "WHERE (:examId IS NULL OR e.id = :examId) " +
-           "AND (:area IS NULL OR LOWER(e.area) = LOWER(:area)) " +
-           "AND (:activeOnly = false OR r.isActive = true)")
-    List<QcReferenceValue> findByFilters(
-        @Param("examId") UUID examId,
-        @Param("area") String area,
-        @Param("activeOnly") boolean activeOnly
-    );
-
     Optional<QcReferenceValue> findByExam_NameAndLevelAndIsActiveTrue(String examName, String level);
 
     List<QcReferenceValue> findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(

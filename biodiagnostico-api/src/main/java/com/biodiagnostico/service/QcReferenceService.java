@@ -31,16 +31,26 @@ public class QcReferenceService {
 
     @Transactional(readOnly = true)
     public List<QcReferenceValue> getReferences(UUID examId, Boolean activeOnly) {
-        return getReferences(examId, activeOnly, null);
-    }
-
-    @Transactional(readOnly = true)
-    public List<QcReferenceValue> getReferences(UUID examId, Boolean activeOnly, String area) {
-        return qcReferenceValueRepository.findByFilters(
-            examId,
-            normalizeNullable(area),
-            Boolean.TRUE.equals(activeOnly)
-        );
+        boolean onlyActive = Boolean.TRUE.equals(activeOnly);
+        List<QcReferenceValue> results;
+        if (examId != null && onlyActive) {
+            results = qcReferenceValueRepository.findByExamIdAndIsActiveTrue(examId);
+        } else if (examId != null) {
+            results = qcReferenceValueRepository.findAll().stream()
+                .filter(reference -> reference.getExam() != null && examId.equals(reference.getExam().getId()))
+                .toList();
+        } else if (onlyActive) {
+            results = qcReferenceValueRepository.findByIsActiveTrue();
+        } else {
+            results = qcReferenceValueRepository.findAll();
+        }
+        // Forçar inicialização do exam LAZY dentro da transação (open-in-view=false em prod)
+        results.forEach(ref -> {
+            if (ref.getExam() != null) {
+                ref.getExam().getName();
+            }
+        });
+        return results;
     }
 
     @Transactional(readOnly = true)
@@ -89,11 +99,6 @@ public class QcReferenceService {
                     "Existe mais de uma referência ativa e vigente para este exame na data informada. Revise as referências antes de registrar."
                 );
             }
-            if (QcExamService.COAGULATION_AREA.equalsIgnoreCase(normalizedArea)) {
-                throw new BusinessException(
-                    "Nenhuma referência ativa e vigente foi encontrada para o lote de coagulação informado."
-                );
-            }
         }
 
         if (!validCandidates.isEmpty()) {
@@ -109,18 +114,17 @@ public class QcReferenceService {
 
     @Transactional
     public QcReferenceValue createReference(QcReferenceRequest request) {
-        QcExam exam = qcExamRepository.findById(request.examId())
-            .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
         validateReferenceRequest(request);
-        String lotNumber = validateExamAndNormalizeLot(exam, request.lotNumber());
         String level = normalizeLevel(request.level());
         closePreviousReference(request.examId(), level, request.validFrom());
         checkOverlap(request.examId(), level, request.validFrom(), request.validUntil(), null);
+        QcExam exam = qcExamRepository.findById(request.examId())
+            .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
         QcReferenceValue reference = QcReferenceValue.builder()
             .exam(exam)
             .name(request.name())
             .level(level)
-            .lotNumber(lotNumber)
+            .lotNumber(normalizeNullable(request.lotNumber()))
             .manufacturer(request.manufacturer())
             .targetValue(request.targetValue())
             .targetSd(request.targetSd())
@@ -150,18 +154,17 @@ public class QcReferenceService {
 
     @Transactional
     public QcReferenceValue updateReference(UUID id, QcReferenceRequest request) {
+        validateReferenceRequest(request);
+        String level = normalizeLevel(request.level());
+        checkOverlap(request.examId(), level, request.validFrom(), request.validUntil(), id);
         QcReferenceValue reference = qcReferenceValueRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Referência não encontrada"));
         QcExam exam = qcExamRepository.findById(request.examId())
             .orElseThrow(() -> new ResourceNotFoundException("Exame não encontrado"));
-        validateReferenceRequest(request);
-        String lotNumber = validateExamAndNormalizeLot(exam, request.lotNumber());
-        String level = normalizeLevel(request.level());
-        checkOverlap(request.examId(), level, request.validFrom(), request.validUntil(), id);
         reference.setExam(exam);
         reference.setName(request.name());
         reference.setLevel(level);
-        reference.setLotNumber(lotNumber);
+        reference.setLotNumber(normalizeNullable(request.lotNumber()));
         reference.setManufacturer(request.manufacturer());
         reference.setTargetValue(request.targetValue());
         reference.setTargetSd(request.targetSd());
@@ -254,15 +257,6 @@ public class QcReferenceService {
         if (request.validFrom() != null && request.validUntil() != null && request.validUntil().isBefore(request.validFrom())) {
             throw new BusinessException("A validade final da referência não pode ser anterior à validade inicial.");
         }
-    }
-
-    private String validateExamAndNormalizeLot(QcExam exam, String lotNumber) {
-        QcExamService.validateAndNormalizeExam(exam.getArea(), exam.getName(), exam.getUnit());
-        String normalizedLotNumber = normalizeNullable(lotNumber);
-        if (QcExamService.COAGULATION_AREA.equalsIgnoreCase(exam.getArea()) && normalizedLotNumber == null) {
-            throw new BusinessException("O lote é obrigatório para referências de coagulação.");
-        }
-        return normalizedLotNumber;
     }
 
     private String normalizeLevel(String value) {

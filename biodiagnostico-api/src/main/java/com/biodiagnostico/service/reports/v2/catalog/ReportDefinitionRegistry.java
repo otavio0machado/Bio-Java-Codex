@@ -49,7 +49,7 @@ public class ReportDefinitionRegistry {
 
     /** Areas do laboratorio (compartilhado entre varias definitions). */
     public static final List<String> AREAS = List.of(
-        "bioquimica", "coagulacao", "hematologia", "imunologia", "parasitologia",
+        "bioquimica", "hematologia", "imunologia", "parasitologia",
         "microbiologia", "uroanalise"
     );
 
