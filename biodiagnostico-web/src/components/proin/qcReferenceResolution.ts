@@ -1,5 +1,4 @@
 import type { QcReferenceValue } from '../../types'
-import { normalizeQcExamName } from '../../lib/qcAreas'
 
 /**
  * "Hoje" no fuso LOCAL (YYYY-MM-DD). O lab opera em horario de Brasilia
@@ -21,7 +20,7 @@ export function getOperationalReferences(
   return references.filter((reference) =>
     reference.isActive &&
     reference.exam?.area === area &&
-    normalizeQcExamName(reference.exam.name) === normalizeQcExamName(examName) &&
+    reference.exam.name === examName &&
     (reference.level || 'Normal').toLowerCase() === 'normal' &&
     isRefValidOnDate(reference, date),
   )

@@ -4,7 +4,6 @@ import { AiAssistantPanel } from '../components/proin/AiAssistantPanel'
 import { Card, Skeleton } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { canWriteQc } from '../lib/permissions'
-import { hasFullQcCycle, QC_AREA_OPTIONS } from '../lib/qcAreas'
 import { cn } from '../utils/cn'
 
 const DashboardTab = lazy(() => import('../components/proin/DashboardTab').then((module) => ({ default: module.DashboardTab })))
@@ -27,6 +26,15 @@ const RegistroTab = lazy(() => import('../components/proin/RegistroTab').then((m
 const UroanaliseArea = lazy(() =>
   import('../components/proin/UroanaliseArea').then((module) => ({ default: module.UroanaliseArea })),
 )
+
+const areas = [
+  { value: 'bioquimica', label: 'Bioquímica' },
+  { value: 'hematologia', label: 'Hematologia' },
+  { value: 'imunologia', label: 'Imunologia' },
+  { value: 'parasitologia', label: 'Parasitologia' },
+  { value: 'microbiologia', label: 'Microbiologia' },
+  { value: 'uroanalise', label: 'Uroanálise' },
+]
 
 const allTabs = [
   { value: 'dashboard', label: 'Dashboard CQ' },
@@ -52,21 +60,11 @@ export function ProinPage() {
   }, [user])
   const [searchParams, setSearchParams] = useSearchParams()
   const currentArea = searchParams.get('area') ?? 'bioquimica'
-  const isFullCycleArea = hasFullQcCycle(currentArea)
-  const requestedTab = isFullCycleArea ? (searchParams.get('tab') ?? 'dashboard') : 'registro'
-  const currentTab = isFullCycleArea && tabs.some((tab) => tab.value === requestedTab)
-    ? requestedTab
-    : (tabs[0]?.value ?? 'dashboard')
-  const legacyRedirect = currentArea === 'bioquimica' ? legacyTabRedirects[requestedTab] : undefined
+  const currentTab = currentArea === 'bioquimica' ? (searchParams.get('tab') ?? 'dashboard') : 'registro'
+  const legacyRedirect = currentArea === 'bioquimica' ? legacyTabRedirects[currentTab] : undefined
 
   if (legacyRedirect) {
     return <Navigate to={legacyRedirect} replace />
-  }
-
-  if (isFullCycleArea && requestedTab !== currentTab) {
-    const next = new URLSearchParams(searchParams)
-    next.set('tab', currentTab)
-    return <Navigate to={`?${next.toString()}`} replace />
   }
 
   const handleTabChange = (tab: string) => {
@@ -94,7 +92,7 @@ export function ProinPage() {
     }
   }
 
-  const renderFullCycleTab = () => {
+  const renderBioquimicaTab = () => {
     switch (currentTab) {
       case 'dashboard':
         return <DashboardTab area={currentArea} />
@@ -107,7 +105,7 @@ export function ProinPage() {
     }
   }
 
-  const currentAreaLabel = QC_AREA_OPTIONS.find((item) => item.value === currentArea)?.label ?? currentArea
+  const currentAreaLabel = areas.find((item) => item.value === currentArea)?.label ?? currentArea
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
@@ -120,20 +118,19 @@ export function ProinPage() {
           <AiAssistantPanel area={currentArea} areaLabel={currentAreaLabel} />
         </div>
 
-        {isFullCycleArea ? (
-          <nav aria-label={`Seções de CQ de ${currentAreaLabel}`} className="flex gap-2 overflow-x-auto border-b border-neutral-200 sm:gap-6">
+        {currentArea === 'bioquimica' ? (
+          <nav className="flex flex-wrap gap-6 border-b border-neutral-200">
             {tabs.map((tab) => (
               <button
                 key={tab.value}
                 type="button"
                 className={cn(
-                  'whitespace-nowrap border-b-2 pb-3 text-base font-medium transition',
+                  'border-b-2 pb-3 text-base font-medium transition',
                   currentTab === tab.value
                     ? 'border-green-800 text-green-800'
                     : 'border-transparent text-neutral-500 hover:text-neutral-700',
                 )}
                 onClick={() => handleTabChange(tab.value)}
-                aria-current={currentTab === tab.value ? 'page' : undefined}
               >
                 {tab.label}
               </button>
@@ -142,14 +139,14 @@ export function ProinPage() {
         ) : null}
       </header>
 
-      {!isFullCycleArea ? (
+      {currentArea !== 'bioquimica' ? (
         <div>
           <Suspense fallback={<ProinContentFallback />}>{renderSpecializedArea()}</Suspense>
         </div>
       ) : null}
 
-      {isFullCycleArea ? (
-        <Suspense fallback={<ProinContentFallback />}>{renderFullCycleTab()}</Suspense>
+      {currentArea === 'bioquimica' ? (
+        <Suspense fallback={<ProinContentFallback />}>{renderBioquimicaTab()}</Suspense>
       ) : null}
     </div>
   )

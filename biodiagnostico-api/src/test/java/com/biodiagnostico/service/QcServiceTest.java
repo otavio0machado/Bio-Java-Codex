@@ -285,137 +285,6 @@ class QcServiceTest {
     }
 
     @Test
-    @DisplayName("deve rejeitar registro de coagulação com referência de outra área")
-    void shouldRejectCoagulationRecordWithCrossAreaReference() {
-        UUID referenceId = UUID.randomUUID();
-        QcReferenceValue crossAreaReference = reference();
-        crossAreaReference.setId(referenceId);
-        crossAreaReference.getExam().setName("INR");
-        when(examRepository.findByAreaAndIsActiveTrue("coagulacao")).thenReturn(List.of(
-            QcExam.builder().name("INR").area("coagulacao").isActive(Boolean.TRUE).build()
-        ));
-        when(referenceRepository.findById(referenceId)).thenReturn(Optional.of(crossAreaReference));
-        QcRecordRequest request = new QcRecordRequest(
-            "INR", "coagulacao", LocalDate.now(), "Normal", "COAG-01",
-            1.05D, 1D, 0.1D, 10D, "ACL TOP", "Ana", referenceId
-        );
-
-        assertThatThrownBy(() -> qcService.createRecord(request))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("não pertence à área");
-    }
-
-    @Test
-    @DisplayName("deve exigir lote no create de registro de coagulação")
-    void shouldRequireLotOnCoagulationCreate() {
-        mockCanonicalCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.createRecord(coagulationRequestWithoutLot()))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("lote é obrigatório");
-    }
-
-    @Test
-    @DisplayName("deve exigir lote no batch de registros de coagulação")
-    void shouldRequireLotOnCoagulationBatch() {
-        mockCanonicalCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.createRecordsBatch(List.of(coagulationRequestWithoutLot())))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Linha 1")
-            .hasMessageContaining("lote é obrigatório");
-    }
-
-    @Test
-    @DisplayName("deve exigir lote no update de registro de coagulação")
-    void shouldRequireLotOnCoagulationUpdate() {
-        UUID recordId = UUID.randomUUID();
-        when(recordRepository.findById(recordId)).thenReturn(Optional.of(
-            QcRecord.builder().id(recordId).examName("INR").area("coagulacao").build()
-        ));
-        mockCanonicalCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.updateRecord(recordId, coagulationRequestWithoutLot()))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("lote é obrigatório");
-    }
-
-    @Test
-    @DisplayName("deve rejeitar lote sem referência exata no create de coagulação")
-    void shouldRejectUnmatchedCoagulationLotOnCreate() {
-        mockCanonicalCoagulationExam();
-        mockOtherCoagulationReferenceLot();
-
-        assertThatThrownBy(() -> qcService.createRecord(coagulationRequest("COAG-NEW")))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("lote de coagulação informado");
-    }
-
-    @Test
-    @DisplayName("deve rejeitar lote sem referência exata no batch de coagulação")
-    void shouldRejectUnmatchedCoagulationLotOnBatch() {
-        mockCanonicalCoagulationExam();
-        mockOtherCoagulationReferenceLot();
-
-        assertThatThrownBy(() -> qcService.createRecordsBatch(List.of(coagulationRequest("COAG-NEW"))))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Linha 1")
-            .hasMessageContaining("lote de coagulação informado");
-    }
-
-    @Test
-    @DisplayName("deve rejeitar lote sem referência exata no update de coagulação")
-    void shouldRejectUnmatchedCoagulationLotOnUpdate() {
-        UUID recordId = UUID.randomUUID();
-        when(recordRepository.findById(recordId)).thenReturn(Optional.of(
-            QcRecord.builder().id(recordId).examName("INR").area("coagulacao").build()
-        ));
-        mockCanonicalCoagulationExam();
-        mockOtherCoagulationReferenceLot();
-
-        assertThatThrownBy(() -> qcService.updateRecord(recordId, coagulationRequest("COAG-NEW")))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("lote de coagulação informado");
-    }
-
-    @Test
-    @DisplayName("deve rejeitar exame proibido de coagulação no create")
-    void shouldRejectForbiddenCoagulationExamOnCreate() {
-        QcRecordRequest forbidden = forbiddenCoagulationRequest();
-        mockForbiddenCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.createRecord(forbidden))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Atividade (%)");
-    }
-
-    @Test
-    @DisplayName("deve rejeitar exame proibido de coagulação no batch com número da linha")
-    void shouldRejectForbiddenCoagulationExamOnBatch() {
-        mockForbiddenCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.createRecordsBatch(List.of(forbiddenCoagulationRequest())))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Linha 1")
-            .hasMessageContaining("Atividade (%)");
-    }
-
-    @Test
-    @DisplayName("deve revalidar e rejeitar exame proibido de coagulação no update")
-    void shouldRejectForbiddenCoagulationExamOnUpdate() {
-        UUID recordId = UUID.randomUUID();
-        QcRecordRequest forbidden = forbiddenCoagulationRequest();
-        when(recordRepository.findById(recordId)).thenReturn(Optional.of(
-            QcRecord.builder().id(recordId).examName("Fibrinogênio").area("coagulacao").build()
-        ));
-        mockForbiddenCoagulationExam();
-
-        assertThatThrownBy(() -> qcService.updateRecord(recordId, forbidden))
-            .isInstanceOf(BusinessException.class)
-            .hasMessageContaining("Atividade (%)");
-    }
-
-    @Test
     @DisplayName("não deve propagar lote legado da referência quando o request vier sem lote")
     void shouldNotUseReferenceLotWhenRequestLotIsBlank() {
         QcRecordRequest request = new QcRecordRequest(
@@ -604,7 +473,6 @@ class QcServiceTest {
         QcRecordRequest request = request();
         QcReferenceValue reference = reference();
 
-        mockExam();
         when(recordRepository.findById(recordId)).thenReturn(Optional.of(
             QcRecord.builder()
                 .id(recordId)
@@ -734,7 +602,6 @@ class QcServiceTest {
         QcReferenceValue reference = reference();
         Instant currentCreatedAt = Instant.parse("2026-04-04T12:00:00Z");
 
-        mockExam();
         when(recordRepository.findById(recordId)).thenReturn(Optional.of(
             QcRecord.builder()
                 .id(recordId)
@@ -772,7 +639,6 @@ class QcServiceTest {
         QcRecordRequest request = request();
         QcReferenceValue reference = reference();
 
-        mockExam();
         when(recordRepository.findById(recordId)).thenReturn(Optional.of(
             QcRecord.builder()
                 .id(recordId)
@@ -851,67 +717,6 @@ class QcServiceTest {
     private void mockExam() {
         when(examRepository.findByAreaAndIsActiveTrue("bioquimica")).thenReturn(List.of(
             QcExam.builder().name("Glicose").area("bioquimica").build()
-        ));
-    }
-
-    private QcRecordRequest forbiddenCoagulationRequest() {
-        return new QcRecordRequest(
-            "Fibrinogênio", "coagulacao", LocalDate.now(), "Normal", "COAG-01",
-            250D, 240D, 10D, 10D, "ACL TOP", "Ana", null
-        );
-    }
-
-    private void mockForbiddenCoagulationExam() {
-        when(examRepository.findByAreaAndIsActiveTrue("coagulacao")).thenReturn(List.of(
-            QcExam.builder()
-                .name("Fibrinogênio")
-                .area("coagulacao")
-                .unit("mg/dL")
-                .isActive(Boolean.TRUE)
-                .build()
-        ));
-    }
-
-    private QcRecordRequest coagulationRequestWithoutLot() {
-        return new QcRecordRequest(
-            "INR", "coagulacao", LocalDate.now(), "Normal", "  ",
-            1.05D, 1D, 0.1D, 10D, "ACL TOP", "Ana", null
-        );
-    }
-
-    private void mockCanonicalCoagulationExam() {
-        when(examRepository.findByAreaAndIsActiveTrue("coagulacao")).thenReturn(List.of(
-            QcExam.builder()
-                .name("INR")
-                .area("coagulacao")
-                .unit(null)
-                .isActive(Boolean.TRUE)
-                .build()
-        ));
-    }
-
-    private QcRecordRequest coagulationRequest(String lotNumber) {
-        return new QcRecordRequest(
-            "INR", "coagulacao", LocalDate.now(), "Normal", lotNumber,
-            1.05D, 1D, 0.1D, 10D, "ACL TOP", "Ana", null
-        );
-    }
-
-    private void mockOtherCoagulationReferenceLot() {
-        when(referenceRepository.findByExam_NameIgnoreCaseAndExam_AreaIgnoreCaseAndLevelIgnoreCaseAndIsActiveTrue(
-            "INR", "coagulacao", "Normal"
-        )).thenReturn(List.of(
-            QcReferenceValue.builder()
-                .id(UUID.randomUUID())
-                .exam(QcExam.builder().id(UUID.randomUUID()).name("INR").area("coagulacao").build())
-                .name("Controle INR N1")
-                .level("Normal")
-                .lotNumber("COAG-OTHER")
-                .targetValue(1D)
-                .targetSd(0.1D)
-                .cvMaxThreshold(10D)
-                .isActive(Boolean.TRUE)
-                .build()
         ));
     }
 }

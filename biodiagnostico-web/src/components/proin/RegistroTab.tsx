@@ -3,10 +3,7 @@ import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Circl
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
-import { useAuth } from '../../hooks/useAuth'
 import { useExplainQc, useRootCause, useValidateBatch } from '../../hooks/useAiAssist'
-import { canImport } from '../../lib/permissions'
-import { formatQcExamOption, getVisibleQcExams } from '../../lib/qcAreas'
 import { qcService } from '../../services/qcService'
 import type { QcRecord, QcRecordRequest, QcReferenceValue, ValidateBatchRow } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
@@ -85,15 +82,12 @@ function calcCv(value: number, target: number) {
 
 export function RegistroTab({ area }: RegistroTabProps) {
   const { toast } = useToast()
-  const { user } = useAuth()
-  const canUseBatch = canImport(user)
   const queryClient = useQueryClient()
   const createRecord = useCreateQcRecord()
   const createBatch = useCreateQcBatch()
   const validateBatch = useValidateBatch()
-  const { data: fetchedExams = [] } = useQcExams(area)
-  const exams = useMemo(() => getVisibleQcExams(fetchedExams, area), [area, fetchedExams])
-  const { data: references = [] } = useQcReferences({ area, activeOnly: true })
+  const { data: exams = [] } = useQcExams(area)
+  const { data: references = [] } = useQcReferences(undefined, true)
 
   // --- Undo delete ---
   const [deletedRecord, setDeletedRecord] = useState<{ request: QcRecordRequest; timeout: number } | null>(null)
@@ -170,7 +164,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const targetSd = resolvedRef ? resolvedRef.targetSd : form.targetSd || 0
   const cvLimit = form.cvLimit || resolvedRef?.cvMaxThreshold || 10
 
-  // Variacao percentual em tempo real
+  // CV% em tempo real
   const liveCv = calcCv(Number(form.value), targetValue)
   const cvOk = liveCv <= cvLimit
 
@@ -210,7 +204,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
     const ref = resolvedRef
     const payload: QcRecordRequest = {
       ...form, area, referenceId: ref.id,
-      lotNumber: form.lotNumber?.trim() || ref.lotNumber?.trim() || '',
+      lotNumber: form.lotNumber || '',
       value: Number(form.value), targetValue: targetValue,
       targetSd: targetSd, cvLimit: cvLimit,
     }
@@ -272,7 +266,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
     } catch { toast.error('Erro ao restaurar registro.') }
   }
 
-  // Define o exame de uma linha do lote e re-resolve alvo/DP/limite de variacao a partir da
+  // Define o exame de uma linha do lote e re-resolve alvo/DP/CV a partir da
   // referencia (mesma logica do <select> da linha). Usado pelo seletor e pelo
   // "Aplicar" da validacao por IA, para manter o comportamento identico.
   const setBatchRowExam = (rowIndex: number, examName: string) => {
@@ -357,43 +351,24 @@ export function RegistroTab({ area }: RegistroTabProps) {
       toast.error(referenceErrors[0])
       return
     }
-    const requests: QcRecordRequest[] = validRows.map(row => {
-      const reference = getOperationalReferences(references, area, row.examName, form.date)[0]
-      return {
-        examName: row.examName,
-        area,
-        date: form.date || new Date().toISOString().slice(0, 10),
-        level: 'Normal',
-        lotNumber: reference?.lotNumber?.trim() || '',
-        value: parseFloat(row.value),
-        targetValue: parseFloat(row.targetValue) || 0,
-        targetSd: parseFloat(row.targetSd) || 0,
-        cvLimit: parseFloat(row.cvLimit) || 10,
-        equipment: form.equipment || '',
-        analyst: form.analyst || '',
-        referenceId: reference?.id,
-      }
-    })
+    const requests: QcRecordRequest[] = validRows.map(row => ({
+      examName: row.examName,
+      area,
+      date: form.date || new Date().toISOString().slice(0, 10),
+      level: 'Normal',
+      lotNumber: '',
+      value: parseFloat(row.value),
+      targetValue: parseFloat(row.targetValue) || 0,
+      targetSd: parseFloat(row.targetSd) || 0,
+      cvLimit: parseFloat(row.cvLimit) || 10,
+      equipment: form.equipment || '',
+      analyst: form.analyst || '',
+      referenceId: getOperationalReferences(references, area, row.examName, form.date)[0]?.id,
+    }))
     try {
-      const result = await createBatch.mutateAsync(requests)
-      const firstFailure = result.results.find((rowResult) => !rowResult.success)?.message
-      const successLabel = `${result.successCount} ${result.successCount === 1 ? 'registro criado' : 'registros criados'}`
-      const failureLabel = `${result.failureCount} ${result.failureCount === 1 ? 'linha falhou' : 'linhas falharam'}`
-      if (result.failureCount === 0) {
-        toast.success(`${successLabel} com sucesso!`)
-        setBatchRows([{ examName: '', value: '', targetValue: '', targetSd: '', cvLimit: '10' }])
-      } else {
-        const detail = firstFailure ? ` Primeira falha: ${firstFailure}` : ''
-        if (result.successCount > 0) {
-          toast.warning(`${successLabel}; ${failureLabel}.${detail}`)
-        } else {
-          toast.error(`Nenhum registro foi criado; ${failureLabel}.${detail}`)
-        }
-        const failedIndexes = new Set(
-          result.results.filter((rowResult) => !rowResult.success).map((rowResult) => rowResult.rowIndex),
-        )
-        setBatchRows(validRows.filter((_, index) => failedIndexes.has(index)))
-      }
+      await createBatch.mutateAsync(requests)
+      toast.success(`${validRows.length} registros criados com sucesso!`)
+      setBatchRows([{ examName: '', value: '', targetValue: '', targetSd: '', cvLimit: '10' }])
     } catch (err: unknown) {
       const msg = axios.isAxiosError(err) && err.response?.data?.message
         ? err.response.data.message : 'Erro ao criar registros em lote.'
@@ -410,16 +385,14 @@ export function RegistroTab({ area }: RegistroTabProps) {
             <p className="text-base text-neutral-500">Insira os dados diários para cálculo automático da Variação %</p>
           </div>
           <div className="flex items-center gap-2">
-            {canUseBatch ? (
-              <button onClick={() => setBatchMode(!batchMode)}
-                className={`rounded-full px-3 py-1 text-sm ${batchMode ? 'bg-green-700 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
-                {batchMode ? 'Modo Normal' : 'Modo Planilha'}
-              </button>
-            ) : null}
+            <button onClick={() => setBatchMode(!batchMode)}
+              className={`rounded-full px-3 py-1 text-sm ${batchMode ? 'bg-green-700 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'}`}>
+              {batchMode ? 'Modo Normal' : 'Modo Planilha'}
+            </button>
           </div>
         </div>
 
-        {canUseBatch && batchMode ? (
+        {batchMode ? (
           /* --- Batch / Planilha Mode --- */
           <div className="space-y-3">
             {/* Shared fields: date, equipment, analyst */}
@@ -431,18 +404,18 @@ export function RegistroTab({ area }: RegistroTabProps) {
 
             {/* Batch grid header */}
             <div className="grid grid-cols-[1fr_100px_100px_100px_100px_40px] gap-2 text-xs font-medium text-neutral-500 px-1">
-              <span>Exame</span><span>Valor</span><span>Alvo</span><span>DP</span><span>Lim. var. %</span><span></span>
+              <span>Exame</span><span>Valor</span><span>Alvo</span><span>DP</span><span>CV Lim</span><span></span>
             </div>
 
             {/* Batch rows */}
             {batchRows.map((row, i) => (
               <div key={i} className="grid grid-cols-[1fr_100px_100px_100px_100px_40px] gap-2 items-center">
-                <select aria-label={`Exame da linha ${i + 1}`} value={row.examName} onChange={e => setBatchRowExam(i, e.target.value)}
+                <select value={row.examName} onChange={e => setBatchRowExam(i, e.target.value)}
                   className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm">
                   <option value="">Selecione...</option>
-                  {exams.map(e => <option key={e.id} value={e.name}>{formatQcExamOption(area, e)}</option>)}
+                  {exams.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
                 </select>
-                <input aria-label={`Valor da linha ${i + 1}`} type="number" step="0.01" value={row.value}
+                <input type="number" step="0.01" value={row.value}
                   onChange={e => setBatchRows(prev => prev.map((r, idx) => idx === i ? { ...r, value: e.target.value } : r))}
                   className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm" placeholder="0.00" />
                 <input type="number" step="0.01" value={row.targetValue} disabled
@@ -501,16 +474,16 @@ export function RegistroTab({ area }: RegistroTabProps) {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Select label="Exame" value={form.examName} onChange={(e) => setForm((c) => ({ ...c, examName: e.target.value, referenceId: undefined, targetValue: 0, targetSd: 0 }))}>
                 <option value="">Selecione o exame</option>
-                {exams.map((ex) => <option key={ex.id} value={ex.name}>{formatQcExamOption(area, ex)}</option>)}
+                {exams.map((ex) => <option key={ex.id} value={ex.name}>{ex.name}</option>)}
               </Select>
               <Input label="Data" type="date" value={form.date} onChange={(e) => setForm((c) => ({ ...c, date: e.target.value }))} />
               <Input label="Medição" type="number" step="0.01" placeholder="0.00" value={String(form.value)} onChange={(e) => setForm((c) => ({ ...c, value: Number(e.target.value) }))} />
               <Input label="Valor Alvo" type="number" step="0.01" placeholder="0.00" value={String(targetValue)} onChange={(e) => setForm((c) => ({ ...c, targetValue: Number(e.target.value) }))} disabled={Boolean(resolvedRef)} />
             </div>
 
-            {/* Linha 2: limite e variacao percentual em tempo real, lote, equipamento e analista */}
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <Input label="Limite de variação (%)" type="number" step="0.01" placeholder="10" value={String(cvLimit)} onChange={(e) => setForm((c) => ({ ...c, cvLimit: Number(e.target.value) }))} />
+            {/* Linha 2: CV Limite, CV% (tempo real), Equipamento, Analista */}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Input label="CV Limite (%)" type="number" step="0.01" placeholder="10" value={String(cvLimit)} onChange={(e) => setForm((c) => ({ ...c, cvLimit: Number(e.target.value) }))} />
               <div className="space-y-1">
                 <span className="text-base font-medium text-neutral-700">Variação %</span>
                 <div className={`flex items-center gap-2 rounded-xl border px-4 py-3 ${cvOk ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}`}>
@@ -520,7 +493,6 @@ export function RegistroTab({ area }: RegistroTabProps) {
                   {cvOk ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-red-600" />}
                 </div>
               </div>
-              <Input label="Lote do controle" value={form.lotNumber ?? ''} onChange={(e) => setForm((c) => ({ ...c, lotNumber: e.target.value }))} />
               <Input label="Equipamento" placeholder="Ex: Cobas c111" value={form.equipment} onChange={(e) => setForm((c) => ({ ...c, equipment: e.target.value }))} />
               <Input label="Analista" placeholder="Nome do analista" value={form.analyst} onChange={(e) => setForm((c) => ({ ...c, analyst: e.target.value }))} />
             </div>
@@ -543,10 +515,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
                   <CheckCircle2 className="h-4 w-4 text-green-600" />
                   <span className="text-sm font-semibold text-neutral-600">Ref:</span>
                   <span className="text-sm">{resolvedRef.name}</span>
-                  <span className="text-sm text-neutral-500">
-                    | Alvo: {resolvedRef.targetValue} | DP: {resolvedRef.targetSd}
-                    {resolvedRef.lotNumber ? ` | Lote: ${resolvedRef.lotNumber}` : ''}
-                  </span>
+                  <span className="text-sm text-neutral-500">| Alvo: {resolvedRef.targetValue} | DP: {resolvedRef.targetSd}</span>
                 </div>
               </div>
             ) : form.examName ? (
@@ -625,8 +594,8 @@ export function RegistroTab({ area }: RegistroTabProps) {
                   <th className="px-3 py-2.5">Data</th>
                   <th className="px-3 py-2.5">Exame</th>
                   <th className="px-3 py-2.5">Valor</th>
-                  <th className="px-3 py-2.5">Variação %</th>
-                  <th className="px-3 py-2.5">Limite de variação %</th>
+                  <th className="px-3 py-2.5">CV%</th>
+                  <th className="px-3 py-2.5">CV Lim%</th>
                   <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5">Calibrar?</th>
                   <th className="px-3 py-2.5">Pós-Calib</th>
@@ -638,7 +607,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
                 {filteredRecords.map((r) => {
                   const rCv = r.cv ?? 0
                   const rCvLimit = r.cvLimit ?? 10
-                  const needsCal = r.needsCalibration
+                  const needsCal = rCv > rCvLimit
                   return (
                     <tr key={r.id} className="border-b border-neutral-50 hover:bg-neutral-50/50">
                       <td className="whitespace-nowrap px-3 py-2.5 text-base text-neutral-600">{formatDate(r.date)}</td>
@@ -770,7 +739,7 @@ interface ReferenceAmbiguityPickerProps {
  *
  * Quando ha mais de uma referencia vigente para o mesmo exame+nivel, em vez de
  * bloquear, mostramos as candidatas ranqueadas (mais provavel pre-selecionada)
- * e deixamos o operador trocar. A escolha alimenta alvo, DP e limite de variacao.
+ * e deixamos o operador trocar. A escolha alimenta o calculo de alvo/DP/CV.
  * A ordem das opcoes ja vem ranqueada pela heuristica deterministica; nao ha
  * IA nem calculo de regra de CQ aqui — apenas selecao da fonte.
  */

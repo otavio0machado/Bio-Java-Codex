@@ -87,22 +87,6 @@ class DashboardServiceTest {
     }
 
     @Test
-    @DisplayName("getKpis deve consultar coagulação como área canônica")
-    void getKpis_coagulacao_filtraArea() {
-        when(qcRecordRepository.countByDateAndArea(any(LocalDate.class), eq("coagulacao"))).thenReturn(2L);
-        when(qcRecordRepository.countByDateBetweenAndArea(any(LocalDate.class), any(LocalDate.class), eq("coagulacao")))
-            .thenReturn(7L);
-        when(qcRecordRepository.calculateApprovalRateByArea(any(LocalDate.class), any(LocalDate.class), eq("coagulacao")))
-            .thenReturn(100D);
-
-        DashboardKpiResponse kpis = dashboardService.getKpis("coagulacao");
-
-        assertThat(kpis.totalToday()).isEqualTo(2L);
-        assertThat(kpis.totalMonth()).isEqualTo(7L);
-        assertThat(kpis.approvalRate()).isEqualTo(100D);
-    }
-
-    @Test
     @DisplayName("getAlerts retorna alertas de reagentes e manutencao")
     void getAlerts_retornaAlertasDeReagentesEManutencao() {
         ReagentLot lot = reagentLot();
