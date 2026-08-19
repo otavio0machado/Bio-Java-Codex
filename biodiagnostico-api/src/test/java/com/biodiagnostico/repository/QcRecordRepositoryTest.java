@@ -171,7 +171,7 @@ class QcRecordRepositoryTest {
         List<WestgardViolation> violations = westgardViolationRepository
             .findByQcRecordIdInOrderByCreatedAtDescIdDesc(List.of(first.getId(), second.getId()));
         List<UUID> expectedIds = List.of(firstViolation.getId(), secondViolation.getId()).stream()
-            .sorted(Comparator.reverseOrder())
+            .sorted(Comparator.comparing(UUID::toString).reversed())
             .toList();
 
         assertThat(violations).extracting(WestgardViolation::getCreatedAt)
