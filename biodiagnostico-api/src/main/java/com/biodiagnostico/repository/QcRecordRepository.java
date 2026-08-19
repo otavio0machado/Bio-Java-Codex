@@ -2,6 +2,7 @@ package com.biodiagnostico.repository;
 
 import com.biodiagnostico.entity.QcRecord;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -94,17 +95,79 @@ public interface QcRecordRepository extends JpaRepository<QcRecord, UUID> {
 
     @Query("""
         SELECT q FROM QcRecord q
+        LEFT JOIN FETCH q.reference
         WHERE (:area IS NULL OR :area = '' OR LOWER(q.area) = LOWER(:area))
           AND (:examName IS NULL OR :examName = '' OR LOWER(q.examName) = LOWER(:examName))
           AND (CAST(:startDate AS localdate) IS NULL OR q.date >= :startDate)
           AND (CAST(:endDate AS localdate) IS NULL OR q.date <= :endDate)
-        ORDER BY q.date DESC
+        ORDER BY q.date DESC, q.createdAt DESC, q.id DESC
         """)
     List<QcRecord> findByFilters(
         @Param("area") String area,
         @Param("examName") String examName,
         @Param("startDate") LocalDate startDate,
         @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+        SELECT q FROM QcRecord q
+        LEFT JOIN FETCH q.reference
+        WHERE (:area = '' OR LOWER(q.area) = :area)
+          AND (:examName = '' OR LOWER(q.examName) LIKE CONCAT('%', :examName, '%'))
+          AND (CAST(:startDate AS localdate) IS NULL OR q.date >= :startDate)
+          AND (CAST(:endDate AS localdate) IS NULL OR q.date <= :endDate)
+          AND (:status = '' OR q.status = :status)
+          AND (:level = '' OR LOWER(q.level) = :level)
+        ORDER BY q.date DESC, q.createdAt DESC, q.id DESC
+        """)
+    List<QcRecord> findPageByFilters(
+        @Param("area") String area,
+        @Param("examName") String examName,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("status") String status,
+        @Param("level") String level,
+        Pageable pageable
+    );
+
+    @Query("""
+        SELECT q FROM QcRecord q
+        LEFT JOIN FETCH q.reference
+        WHERE (:area = '' OR LOWER(q.area) = :area)
+          AND (:examName = '' OR LOWER(q.examName) LIKE CONCAT('%', :examName, '%'))
+          AND (CAST(:startDate AS localdate) IS NULL OR q.date >= :startDate)
+          AND (CAST(:endDate AS localdate) IS NULL OR q.date <= :endDate)
+          AND (:status = '' OR q.status = :status)
+          AND (:level = '' OR LOWER(q.level) = :level)
+          AND (
+              q.date < :cursorDate
+              OR (q.date = :cursorDate AND q.createdAt < :cursorCreatedAt)
+              OR (q.date = :cursorDate AND q.createdAt = :cursorCreatedAt AND q.id < :cursorId)
+          )
+        ORDER BY q.date DESC, q.createdAt DESC, q.id DESC
+        """)
+    List<QcRecord> findPageAfterCursor(
+        @Param("area") String area,
+        @Param("examName") String examName,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("status") String status,
+        @Param("level") String level,
+        @Param("cursorDate") LocalDate cursorDate,
+        @Param("cursorCreatedAt") Instant cursorCreatedAt,
+        @Param("cursorId") UUID cursorId,
+        Pageable pageable
+    );
+
+    @Query("""
+        SELECT q FROM QcRecord q
+        LEFT JOIN FETCH q.reference
+        WHERE (:area = '' OR LOWER(q.area) = :area)
+        ORDER BY q.createdAt DESC, q.id DESC
+        """)
+    List<QcRecord> findRecentRecords(
+        @Param("area") String area,
+        Pageable pageable
     );
 
     @Query("""

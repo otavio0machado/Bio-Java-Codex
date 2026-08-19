@@ -32,8 +32,11 @@ public class DashboardController {
     }
 
     @GetMapping("/recent-records")
-    public ResponseEntity<List<QcRecordResponse>> getRecentRecords(@RequestParam(defaultValue = "10") int limit) {
+    public ResponseEntity<List<QcRecordResponse>> getRecentRecords(
+        @RequestParam(required = false) String area,
+        @RequestParam(defaultValue = "10") int limit
+    ) {
         int safeLimit = Math.min(Math.max(limit, 1), 50);
-        return ResponseEntity.ok(dashboardService.getRecentRecords(safeLimit));
+        return ResponseEntity.ok(dashboardService.getRecentRecords(area, safeLimit));
     }
 }

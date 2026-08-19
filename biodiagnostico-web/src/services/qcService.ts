@@ -6,6 +6,8 @@ import type {
   QcExam,
   QcExamRequest,
   QcRecord,
+  QcRecordPage,
+  QcRecordPageFilters,
   QcRecordRequest,
   QcReferenceRequest,
   QcReferenceValue,
@@ -14,6 +16,10 @@ import type {
 export const qcService = {
   async getRecords(filters?: { area?: string; examName?: string; startDate?: string; endDate?: string }) {
     const response = await api.get<QcRecord[]>('/qc/records', { params: filters })
+    return response.data
+  },
+  async getRecordsPage(filters: QcRecordPageFilters) {
+    const response = await api.get<QcRecordPage>('/qc/records/page', { params: filters })
     return response.data
   },
   async createRecord(request: QcRecordRequest) {

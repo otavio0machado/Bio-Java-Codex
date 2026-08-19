@@ -5,6 +5,7 @@ import com.biodiagnostico.dto.request.QcRecordRequest;
 import com.biodiagnostico.dto.response.BatchImportResult;
 import com.biodiagnostico.dto.response.ImportRunResponse;
 import com.biodiagnostico.dto.response.LeveyJenningsResponse;
+import com.biodiagnostico.dto.response.QcRecordPageResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.service.ImportRunService;
@@ -60,6 +61,29 @@ public class QcRecordController {
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
     ) {
         return ResponseEntity.ok(qcService.getRecords(area, examName, startDate, endDate));
+    }
+
+    @GetMapping("/page")
+    public ResponseEntity<QcRecordPageResponse> getRecordsPage(
+        @RequestParam(required = false) String area,
+        @RequestParam(required = false) String examName,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String level,
+        @RequestParam(required = false) String cursor,
+        @RequestParam(defaultValue = "50") Integer size
+    ) {
+        return ResponseEntity.ok(qcService.getRecordsPage(
+            area,
+            examName,
+            startDate,
+            endDate,
+            status,
+            level,
+            cursor,
+            size
+        ));
     }
 
     @PostMapping

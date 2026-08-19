@@ -10,8 +10,10 @@ export const dashboardService = {
     const response = await api.get<DashboardAlerts>('/dashboard/alerts')
     return response.data
   },
-  async getRecentRecords(limit: number) {
-    const response = await api.get<QcRecord[]>(`/dashboard/recent-records?limit=${limit}`)
+  async getRecentRecords(area?: string, limit = 10) {
+    const response = await api.get<QcRecord[]>('/dashboard/recent-records', {
+      params: { area, limit },
+    })
     return response.data
   },
 }

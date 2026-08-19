@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -100,10 +99,23 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public List<QcRecordResponse> getRecentRecords(int limit) {
-        return qcRecordRepository.findAll(
-                PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "createdAt"))
-            ).getContent().stream()
-            .map(ResponseMapper::toQcRecordResponse)
+        return getRecentRecords(null, limit);
+    }
+
+    @Transactional(readOnly = true)
+    public List<QcRecordResponse> getRecentRecords(String area, int limit) {
+        List<QcRecord> records = qcRecordRepository.findRecentRecords(
+            normalizeArea(area),
+            PageRequest.of(0, limit)
+        );
+        Map<UUID, List<WestgardViolation>> violations = loadViolations(records);
+        return records.stream()
+            .map(record -> ResponseMapper.toQcRecordResponse(
+                record,
+                null,
+                null,
+                violations.getOrDefault(record.getId(), List.of())
+            ))
             .toList();
     }
 
@@ -124,8 +136,35 @@ public class DashboardService {
                 uniqueRecords.putIfAbsent(violation.getQcRecord().getId(), violation.getQcRecord());
             }
         }
+        Map<UUID, List<WestgardViolation>> violationsByRecord = loadViolations(
+            new ArrayList<>(uniqueRecords.values())
+        );
         List<QcRecordResponse> responses = new ArrayList<>();
-        uniqueRecords.values().forEach(record -> responses.add(ResponseMapper.toQcRecordResponse(record)));
+        uniqueRecords.values().forEach(record -> responses.add(ResponseMapper.toQcRecordResponse(
+            record,
+            null,
+            null,
+            violationsByRecord.getOrDefault(record.getId(), List.of())
+        )));
         return responses;
+    }
+
+    private Map<UUID, List<WestgardViolation>> loadViolations(List<QcRecord> records) {
+        if (records.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> ids = records.stream().map(QcRecord::getId).toList();
+        Map<UUID, List<WestgardViolation>> grouped = new LinkedHashMap<>();
+        westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(ids)
+            .forEach(violation -> grouped
+                .computeIfAbsent(violation.getQcRecord().getId(), ignored -> new ArrayList<>())
+                .add(violation));
+        return grouped;
+    }
+
+    private String normalizeArea(String area) {
+        return area == null || area.isBlank()
+            ? ""
+            : area.trim().toLowerCase(java.util.Locale.ROOT);
     }
 }

@@ -122,7 +122,7 @@ class QcBatchImportServiceTest {
         List<QcRecordResponse> atomicResponse = List.of();
 
         FakeQcService() {
-            super(null, null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override

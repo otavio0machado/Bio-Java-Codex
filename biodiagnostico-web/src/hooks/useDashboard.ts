@@ -22,10 +22,10 @@ export function useDashboardAlerts() {
   })
 }
 
-export function useRecentRecords(limit = 10) {
+export function useRecentRecords(area?: string, limit = 10) {
   return useQuery({
-    queryKey: ['dashboard', 'recent', limit],
-    queryFn: () => dashboardService.getRecentRecords(limit),
+    queryKey: ['dashboard', 'recent', area, limit],
+    queryFn: () => dashboardService.getRecentRecords(area, limit),
     ...dashboardQueryOptions,
   })
 }

@@ -2,10 +2,10 @@ import axios from 'axios'
 import { Activity, AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, CircleX, Layers, Microscope, Search, Sparkles, Trash2, X, XCircle } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCreateQcBatch, useCreateQcRecord, useQcExams, useQcRecords, useQcReferences } from '../../hooks/useQcRecords'
+import { useCreateQcBatch, useCreateQcRecord, useInfiniteQcRecords, useQcExams, useQcReferences } from '../../hooks/useQcRecords'
 import { useExplainQc, useRootCause, useValidateBatch } from '../../hooks/useAiAssist'
 import { qcService } from '../../services/qcService'
-import type { QcRecord, QcRecordRequest, QcReferenceValue, ValidateBatchRow } from '../../types'
+import type { QcRecord, QcRecordRequest, QcReferenceValue, QcStatus, ValidateBatchRow } from '../../types'
 import { Button, Card, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
 import { AiAssistResult } from './AiAssistShared'
 import { BatchValidationPanel } from './BatchValidationPanel'
@@ -75,6 +75,15 @@ function getWestgardInfo(rule: string): WestgardInfo {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
+type HistoryStatusFilter = 'Todos' | 'OK' | 'ALERTA' | 'ERRO'
+
+const HISTORY_STATUS_MAP: Record<HistoryStatusFilter, QcStatus | undefined> = {
+  Todos: undefined,
+  OK: 'APROVADO',
+  ALERTA: 'ALERTA',
+  ERRO: 'REPROVADO',
+}
+
 function calcCv(value: number, target: number) {
   if (!target) return 0
   return (Math.abs(value - target) / Math.abs(target)) * 100
@@ -116,8 +125,20 @@ export function RegistroTab({ area }: RegistroTabProps) {
   // --- Historico ---
   const [historyDate, setHistoryDate] = useState(today())
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('Todos')
-  const { data: allRecords = [], isLoading } = useQcRecords({ area })
+  const [statusFilter, setStatusFilter] = useState<HistoryStatusFilter>('Todos')
+  const {
+    data: recordPages,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQcRecords({
+    area,
+    examName: searchTerm.trim() || undefined,
+    startDate: historyDate,
+    endDate: historyDate,
+    status: HISTORY_STATUS_MAP[statusFilter],
+  })
   const [chartRecord, setChartRecord] = useState<{ examName: string; level: string } | null>(null)
   const [historyExam, setHistoryExam] = useState<{ examName: string; level: string | null } | null>(null)
   const [explainRecord, setExplainRecord] = useState<QcRecord | null>(null)
@@ -168,19 +189,10 @@ export function RegistroTab({ area }: RegistroTabProps) {
   const liveCv = calcCv(Number(form.value), targetValue)
   const cvOk = liveCv <= cvLimit
 
-  // Filtro de historico por dia
-  const filteredRecords = useMemo(() => {
-    return allRecords
-      .filter((r) => r.date === historyDate)
-      .filter((r) => !searchTerm || r.examName.toLowerCase().includes(searchTerm.toLowerCase()))
-      .filter((r) => {
-        if (statusFilter === 'Todos') return true
-        if (statusFilter === 'OK') return r.status === 'APROVADO'
-        if (statusFilter === 'ALERTA') return r.status === 'ALERTA'
-        if (statusFilter === 'ERRO') return r.status === 'REPROVADO'
-        return true
-      })
-  }, [allRecords, historyDate, searchTerm, statusFilter])
+  const records = useMemo(
+    () => recordPages?.pages.flatMap((page) => page.items) ?? [],
+    [recordPages],
+  )
 
   const clearMessages = () => { setFeedback(null); setSubmitError(null) }
 
@@ -572,19 +584,19 @@ export function RegistroTab({ area }: RegistroTabProps) {
             <Input placeholder="Buscar exame..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
           </div>
-          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-[130px]">
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as HistoryStatusFilter)} className="w-[130px]">
             <option>Todos</option>
             <option>OK</option>
             <option>ALERTA</option>
             <option>ERRO</option>
           </Select>
-          <span className="text-sm text-neutral-500">{filteredRecords.length} registros no dia</span>
+          <span className="text-sm text-neutral-500">{records.length} registros carregados no dia</span>
         </div>
 
         {/* Tabela */}
         {isLoading ? (
           <div className="mt-4 space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-neutral-100" />)}</div>
-        ) : filteredRecords.length === 0 ? (
+        ) : records.length === 0 ? (
           <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-8 text-center text-base text-neutral-500">Nenhum registro encontrado.</div>
         ) : (
           <div className="mt-4 overflow-x-auto">
@@ -604,7 +616,7 @@ export function RegistroTab({ area }: RegistroTabProps) {
                 </tr>
               </thead>
               <tbody>
-                {filteredRecords.map((r) => {
+                {records.map((r) => {
                   const rCv = r.cv ?? 0
                   const rCvLimit = r.cvLimit ?? 10
                   const needsCal = rCv > rCvLimit
@@ -685,6 +697,18 @@ export function RegistroTab({ area }: RegistroTabProps) {
             </table>
           </div>
         )}
+
+        {hasNextPage ? (
+          <div className="mt-4 flex justify-center">
+            <Button
+              variant="secondary"
+              loading={isFetchingNextPage}
+              onClick={() => void fetchNextPage()}
+            >
+              Carregar mais
+            </Button>
+          </div>
+        ) : null}
 
         {/* Navegação por dia */}
         <div className="mt-4 flex items-center justify-center gap-3">
