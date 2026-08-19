@@ -1,6 +1,5 @@
 import { AlertTriangle, Beaker, CheckCircle2, TrendingUp } from 'lucide-react'
-import { useDashboardKpis } from '../../hooks/useDashboard'
-import { useQcRecords } from '../../hooks/useQcRecords'
+import { useDashboardKpis, useRecentRecords } from '../../hooks/useDashboard'
 import { Button, Card, EmptyState, Skeleton, StatCard } from '../ui'
 import { formatLongBR } from '../../utils/date'
 
@@ -10,7 +9,7 @@ interface DashboardTabProps {
 
 export function DashboardTab({ area }: DashboardTabProps) {
   const { data: kpis, isLoading: kpisLoading, refetch: refetchKpis } = useDashboardKpis(area)
-  const { data: records, isLoading: recordsLoading } = useQcRecords({ area })
+  const { data: records, isLoading: recordsLoading, refetch: refetchRecords } = useRecentRecords(area, 6)
 
   const isLoading = kpisLoading || recordsLoading
 
@@ -35,7 +34,7 @@ export function DashboardTab({ area }: DashboardTabProps) {
           <h3 className="text-lg font-semibold text-neutral-900">Dashboard CQ</h3>
           <p className="text-sm text-neutral-500">Resumo operacional da área de {area}</p>
         </div>
-        <Button variant="secondary" onClick={() => void refetchKpis()}>
+        <Button variant="secondary" onClick={() => void Promise.all([refetchKpis(), refetchRecords()])}>
           Atualizar dados
         </Button>
       </div>
@@ -51,7 +50,7 @@ export function DashboardTab({ area }: DashboardTabProps) {
         <Card>
           <h4 className="text-base font-semibold text-neutral-900">Últimos registros</h4>
           <div className="mt-4 space-y-3">
-            {records.slice(0, 6).map((record) => (
+            {records.map((record) => (
               <div key={record.id} className="flex items-center justify-between rounded-2xl bg-neutral-50 px-4 py-3">
                 <div>
                   <div className="font-medium text-neutral-900">{record.examName}</div>

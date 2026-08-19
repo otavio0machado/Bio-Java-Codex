@@ -110,6 +110,24 @@ export interface QcRecord {
   postCalibrationStatus?: 'APROVADO' | 'REPROVADO' | null
 }
 
+export interface QcRecordPage {
+  items: QcRecord[]
+  nextCursor: string | null
+  hasNext: boolean
+  size: number
+}
+
+export interface QcRecordPageFilters {
+  area?: string
+  examName?: string
+  startDate?: string
+  endDate?: string
+  status?: QcStatus
+  level?: string
+  cursor?: string
+  size?: number
+}
+
 export interface QcRecordRequest {
   examName: string
   area: string

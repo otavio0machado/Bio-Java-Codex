@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.biodiagnostico.config.SecurityConfig;
 import com.biodiagnostico.dto.request.PostCalibrationRequest;
+import com.biodiagnostico.dto.response.QcRecordPageResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.exception.BusinessException;
@@ -60,6 +61,22 @@ class QcRecordControllerTest {
         mockMvc.perform(get("/api/qc/records").with(user("ana").roles("FUNCIONARIO")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].examName").value("Glicose"));
+    }
+
+    @Test
+    @DisplayName("deve retornar página keyset com contrato aditivo")
+    void shouldReturnKeysetPage() throws Exception {
+        qcService.page = new QcRecordPageResponse(List.of(response()), "proximo-cursor", true, 50);
+
+        mockMvc.perform(get("/api/qc/records/page")
+                .param("area", "bioquimica")
+                .param("status", "APROVADO")
+                .with(user("ana").roles("FUNCIONARIO")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.items[0].examName").value("Glicose"))
+            .andExpect(jsonPath("$.nextCursor").value("proximo-cursor"))
+            .andExpect(jsonPath("$.hasNext").value(true))
+            .andExpect(jsonPath("$.size").value(50));
     }
 
     @Test
@@ -276,6 +293,7 @@ class QcRecordControllerTest {
 
     static class StubQcService extends QcService {
         private List<QcRecordResponse> records = List.of();
+        private QcRecordPageResponse page = new QcRecordPageResponse(List.of(), null, false, 50);
         private QcRecordResponse createResponse;
         private RuntimeException recordException;
 
@@ -283,12 +301,27 @@ class QcRecordControllerTest {
             super(null, null, new com.biodiagnostico.service.WestgardEngine(), null,
                 new com.biodiagnostico.service.AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()),
                 new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
+                null,
                 null);
         }
 
         @Override
         public List<QcRecordResponse> getRecords(String area, String examName, LocalDate startDate, LocalDate endDate) {
             return records;
+        }
+
+        @Override
+        public QcRecordPageResponse getRecordsPage(
+            String area,
+            String examName,
+            LocalDate startDate,
+            LocalDate endDate,
+            String status,
+            String level,
+            String cursor,
+            Integer size
+        ) {
+            return page;
         }
 
         @Override

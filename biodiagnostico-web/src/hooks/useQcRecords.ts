@@ -1,11 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { qcService } from '../services/qcService'
 import type {
   PostCalibrationRequest,
   QcExamRequest,
+  QcRecordPageFilters,
   QcRecordRequest,
   QcReferenceRequest,
 } from '../types'
+
+const QC_RECORDS_PAGE_SIZE = 50
 
 export function useQcRecords(filters?: {
   area?: string
@@ -16,6 +19,21 @@ export function useQcRecords(filters?: {
   return useQuery({
     queryKey: ['qc-records', filters],
     queryFn: () => qcService.getRecords(filters),
+  })
+}
+
+export function useInfiniteQcRecords(filters: Omit<QcRecordPageFilters, 'cursor' | 'size'>) {
+  return useInfiniteQuery({
+    queryKey: ['qc-records', 'page', filters, QC_RECORDS_PAGE_SIZE],
+    queryFn: ({ pageParam }) => qcService.getRecordsPage({
+      ...filters,
+      cursor: pageParam ?? undefined,
+      size: QC_RECORDS_PAGE_SIZE,
+    }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.hasNext && lastPage.nextCursor
+      ? lastPage.nextCursor
+      : undefined,
   })
 }
 

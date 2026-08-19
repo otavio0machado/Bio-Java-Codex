@@ -3,6 +3,7 @@ package com.biodiagnostico.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.dto.response.DashboardAlertsResponse;
@@ -26,8 +27,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 
 @ExtendWith(MockitoExtension.class)
@@ -108,13 +107,37 @@ class DashboardServiceTest {
     @DisplayName("getRecentRecords retorna registros limitados")
     void getRecentRecords_retornaRegistrosLimitados() {
         QcRecord record = qcRecord();
-        Page<QcRecord> page = new PageImpl<>(List.of(record));
-        when(qcRecordRepository.findAll(any(Pageable.class))).thenReturn(page);
+        when(qcRecordRepository.findRecentRecords(eq(""), any(Pageable.class))).thenReturn(List.of(record));
+        when(westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(List.of(record.getId())))
+            .thenReturn(List.of());
 
         List<QcRecordResponse> records = dashboardService.getRecentRecords(5);
 
         assertThat(records).hasSize(1);
         assertThat(records.get(0).examName()).isEqualTo("Glicose");
+    }
+
+    @Test
+    @DisplayName("getRecentRecords filtra por área e carrega violações em lote")
+    void getRecentRecords_filtraAreaECarregaViolacoesEmLote() {
+        QcRecord record = qcRecord();
+        WestgardViolation violation = WestgardViolation.builder()
+            .qcRecord(record)
+            .rule("1-2s")
+            .description("Alerta")
+            .severity("WARNING")
+            .createdAt(Instant.now())
+            .build();
+        when(qcRecordRepository.findRecentRecords(eq("bioquimica"), any(Pageable.class)))
+            .thenReturn(List.of(record));
+        when(westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(List.of(record.getId())))
+            .thenReturn(List.of(violation));
+
+        List<QcRecordResponse> records = dashboardService.getRecentRecords(" Bioquimica ", 6);
+
+        assertThat(records).hasSize(1);
+        assertThat(records.getFirst().violations()).extracting(v -> v.rule()).containsExactly("1-2s");
+        verify(qcRecordRepository).findRecentRecords(eq("bioquimica"), any(Pageable.class));
     }
 
     // --- Helpers ---

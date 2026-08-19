@@ -113,9 +113,23 @@ public final class ResponseMapper {
     }
 
     public static QcRecordResponse toQcRecordResponse(QcRecord record, String referenceWarning, PostCalibrationRecord postCalibration) {
-        List<ViolationResponse> violations = record.getViolations() == null
+        List<WestgardViolation> recordViolations = record.getViolations();
+        return toQcRecordResponse(record, referenceWarning, postCalibration, recordViolations);
+    }
+
+    /**
+     * Variante para fluxos de listagem: as violacoes ja chegam materializadas
+     * em lote, portanto o mapper nao toca na colecao LAZY do registro.
+     */
+    public static QcRecordResponse toQcRecordResponse(
+        QcRecord record,
+        String referenceWarning,
+        PostCalibrationRecord postCalibration,
+        List<WestgardViolation> explicitViolations
+    ) {
+        List<ViolationResponse> violations = explicitViolations == null
             ? List.of()
-            : record.getViolations().stream().map(ResponseMapper::toViolationResponse).toList();
+            : explicitViolations.stream().map(ResponseMapper::toViolationResponse).toList();
         Double postValue = postCalibration != null ? postCalibration.getPostCalibrationValue() : null;
         Double postCv = postCalibration != null ? postCalibration.getPostCalibrationCv() : null;
         String postStatus = computePostCalibrationStatus(postCv, record.getCvLimit());

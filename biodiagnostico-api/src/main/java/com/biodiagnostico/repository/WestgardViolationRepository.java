@@ -3,6 +3,7 @@ package com.biodiagnostico.repository;
 import com.biodiagnostico.entity.WestgardViolation;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -15,7 +16,17 @@ public interface WestgardViolationRepository extends JpaRepository<WestgardViola
 
     @Query("""
         SELECT w FROM WestgardViolation w
+        WHERE w.qcRecord.id IN :qcRecordIds
+        ORDER BY w.createdAt DESC, w.id DESC
+        """)
+    List<WestgardViolation> findByQcRecordIdInOrderByCreatedAtDescIdDesc(
+        @Param("qcRecordIds") Collection<UUID> qcRecordIds
+    );
+
+    @Query("""
+        SELECT w FROM WestgardViolation w
         JOIN FETCH w.qcRecord qr
+        LEFT JOIN FETCH qr.reference
         WHERE w.severity = 'REJECTION'
           AND w.createdAt >= :start
         ORDER BY w.createdAt DESC

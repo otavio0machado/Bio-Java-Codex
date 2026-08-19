@@ -9,14 +9,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.dto.request.QcRecordRequest;
+import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.QcReferenceValue;
+import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.QcReferenceValueRepository;
+import com.biodiagnostico.repository.WestgardViolationRepository;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -47,13 +50,17 @@ class QcServiceTest {
     @Mock
     private com.biodiagnostico.repository.PostCalibrationRecordRepository postCalibrationRecordRepository;
 
+    @Mock
+    private WestgardViolationRepository westgardViolationRepository;
+
     @BeforeEach
     void setUp() {
         QcReferenceService referenceService = new QcReferenceService(referenceRepository, examRepository);
         qcService = new QcService(recordRepository, referenceService, new WestgardEngine(), examRepository,
             new AuditService(null, null, new com.fasterxml.jackson.databind.ObjectMapper()),
             new io.micrometer.core.instrument.simple.SimpleMeterRegistry(),
-            postCalibrationRecordRepository);
+            postCalibrationRecordRepository,
+            westgardViolationRepository);
     }
 
     @Test
@@ -371,14 +378,124 @@ class QcServiceTest {
     @Test
     @DisplayName("deve retornar registros filtrando por área")
     void shouldReturnRecordsFilteredByArea() {
-        when(recordRepository.findByFilters(eq("bioquimica"), eq(null), eq(null), eq(null))).thenReturn(List.of(
-            QcRecord.builder().id(UUID.randomUUID()).examName("Glicose").area("bioquimica").date(LocalDate.now()).build()
-        ));
+        UUID recordId = UUID.randomUUID();
+        QcRecord record = QcRecord.builder()
+            .id(recordId)
+            .examName("Glicose")
+            .area("bioquimica")
+            .date(LocalDate.now())
+            .build();
+        WestgardViolation violation = WestgardViolation.builder()
+            .qcRecord(record)
+            .rule("1-2s")
+            .description("Alerta")
+            .severity("WARNING")
+            .build();
+        when(recordRepository.findByFilters(eq("bioquimica"), eq(null), eq(null), eq(null)))
+            .thenReturn(List.of(record));
+        when(postCalibrationRecordRepository.findByQcRecord_IdIn(List.of(recordId))).thenReturn(List.of());
+        when(westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(List.of(recordId)))
+            .thenReturn(List.of(violation));
 
         var response = qcService.getRecords("bioquimica", null, null, null);
 
         assertThat(response).hasSize(1);
         assertThat(response.getFirst().area()).isEqualTo("bioquimica");
+        assertThat(response.getFirst().violations()).extracting(v -> v.rule()).containsExactly("1-2s");
+    }
+
+    @Test
+    @DisplayName("deve falhar explicitamente quando há pós-calibração duplicada")
+    void shouldRejectDuplicatePostCalibrationRecords() {
+        UUID recordId = UUID.randomUUID();
+        QcRecord record = QcRecord.builder()
+            .id(recordId)
+            .examName("Glicose")
+            .area("bioquimica")
+            .date(LocalDate.now())
+            .build();
+        PostCalibrationRecord first = PostCalibrationRecord.builder()
+            .id(UUID.randomUUID()).qcRecord(record).postCalibrationValue(100D).build();
+        PostCalibrationRecord duplicate = PostCalibrationRecord.builder()
+            .id(UUID.randomUUID()).qcRecord(record).postCalibrationValue(101D).build();
+        when(recordRepository.findByFilters(null, null, null, null)).thenReturn(List.of(record));
+        when(postCalibrationRecordRepository.findByQcRecord_IdIn(List.of(recordId)))
+            .thenReturn(List.of(first, duplicate));
+
+        assertThatThrownBy(() -> qcService.getRecords(null, null, null, null))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("múltiplos registros de pós-calibração");
+    }
+
+    @Test
+    @DisplayName("deve paginar por cursor e preservar a fotografia histórica do CQ")
+    void shouldReturnKeysetPagePreservingQcSnapshot() {
+        QcReferenceValue reference = reference();
+        QcRecord first = pageRecord(
+            UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            reference,
+            LocalDate.of(2026, 8, 19),
+            Instant.parse("2026-08-19T12:00:00Z"),
+            "APROVADO"
+        );
+        QcRecord second = pageRecord(
+            UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+            reference,
+            LocalDate.of(2026, 8, 18),
+            Instant.parse("2026-08-18T12:00:00Z"),
+            "REPROVADO"
+        );
+        QcRecord extra = pageRecord(
+            UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd"),
+            reference,
+            LocalDate.of(2026, 8, 17),
+            Instant.parse("2026-08-17T12:00:00Z"),
+            "ALERTA"
+        );
+        WestgardViolation violation = WestgardViolation.builder()
+            .qcRecord(second)
+            .rule("1-3s")
+            .description("Rejeição")
+            .severity("REJECTION")
+            .createdAt(Instant.parse("2026-08-18T12:01:00Z"))
+            .build();
+
+        when(recordRepository.findPageByFilters(
+            eq("bioquimica"), eq("glic"), isNull(), isNull(), eq(""), eq("normal"), any(Pageable.class)
+        )).thenReturn(List.of(first, second, extra));
+        when(postCalibrationRecordRepository.findByQcRecord_IdIn(List.of(first.getId(), second.getId())))
+            .thenReturn(List.of());
+        when(westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(
+            List.of(first.getId(), second.getId())
+        )).thenReturn(List.of(violation));
+
+        var page = qcService.getRecordsPage(
+            " Bioquimica ", " GLIC ", null, null, null, " Normal ", null, 2
+        );
+
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.hasNext()).isTrue();
+        assertThat(page.nextCursor()).isNotBlank();
+        assertThat(page.size()).isEqualTo(2);
+        assertThat(page.items().get(1).referenceId()).isEqualTo(reference.getId());
+        assertThat(page.items().get(1).targetValue()).isEqualTo(100D);
+        assertThat(page.items().get(1).targetSd()).isEqualTo(5D);
+        assertThat(page.items().get(1).cvLimit()).isEqualTo(10D);
+        assertThat(page.items().get(1).lotNumber()).isEqualTo("L1");
+        assertThat(page.items().get(1).status()).isEqualTo("REPROVADO");
+        assertThat(page.items().get(1).violations()).extracting(v -> v.rule()).containsExactly("1-3s");
+    }
+
+    @Test
+    @DisplayName("deve rejeitar status não canônico e cursor inválido")
+    void shouldRejectInvalidPageFilters() {
+        assertThatThrownBy(() -> qcService.getRecordsPage(
+            null, null, null, null, "REJEITADO", null, null, 50
+        )).isInstanceOf(BusinessException.class).hasMessageContaining("Status de CQ inválido");
+
+        assertThatThrownBy(() -> qcService.getRecordsPage(
+            null, null, null, null, null, null, "cursor-invalido", 50
+        )).isInstanceOf(BusinessException.class).hasMessageContaining("Cursor de paginação inválido");
     }
 
     @Test
@@ -689,6 +806,34 @@ class QcServiceTest {
             .targetSd(5D)
             .cvMaxThreshold(10D)
             .isActive(Boolean.TRUE)
+            .build();
+    }
+
+    private QcRecord pageRecord(
+        UUID id,
+        QcReferenceValue reference,
+        LocalDate date,
+        Instant createdAt,
+        String status
+    ) {
+        return QcRecord.builder()
+            .id(id)
+            .reference(reference)
+            .examName("Glicose")
+            .area("bioquimica")
+            .date(date)
+            .level("Normal")
+            .lotNumber("L1")
+            .value(100D)
+            .targetValue(100D)
+            .targetSd(5D)
+            .cv(0D)
+            .cvLimit(10D)
+            .zScore(0D)
+            .status(status)
+            .needsCalibration(false)
+            .createdAt(createdAt)
+            .updatedAt(createdAt)
             .build();
     }
 

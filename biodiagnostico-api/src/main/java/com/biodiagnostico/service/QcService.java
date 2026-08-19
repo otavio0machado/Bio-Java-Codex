@@ -2,6 +2,7 @@ package com.biodiagnostico.service;
 
 import com.biodiagnostico.dto.request.QcRecordRequest;
 import com.biodiagnostico.dto.response.LeveyJenningsResponse;
+import com.biodiagnostico.dto.response.QcRecordPageResponse;
 import com.biodiagnostico.dto.response.QcRecordResponse;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcExam;
@@ -13,19 +14,24 @@ import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
+import com.biodiagnostico.repository.WestgardViolationRepository;
 import com.biodiagnostico.util.NumericUtils;
 import com.biodiagnostico.util.ResponseMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -41,6 +47,9 @@ public class QcService {
     private static final int MAX_BATCH_SIZE = 1000;
     private static final int WESTGARD_HISTORY_LIMIT = 10;
     private static final int WESTGARD_HISTORY_FETCH_SIZE = 50;
+    private static final int DEFAULT_PAGE_SIZE = 50;
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final Set<String> CANONICAL_STATUSES = Set.of("APROVADO", "ALERTA", "REPROVADO");
 
     private final QcRecordRepository qcRecordRepository;
     private final QcReferenceService qcReferenceService;
@@ -49,6 +58,7 @@ public class QcService {
     private final AuditService auditService;
     private final MeterRegistry meterRegistry;
     private final PostCalibrationRecordRepository postCalibrationRecordRepository;
+    private final WestgardViolationRepository westgardViolationRepository;
 
     public QcService(
         QcRecordRepository qcRecordRepository,
@@ -57,7 +67,8 @@ public class QcService {
         QcExamRepository qcExamRepository,
         AuditService auditService,
         MeterRegistry meterRegistry,
-        PostCalibrationRecordRepository postCalibrationRecordRepository
+        PostCalibrationRecordRepository postCalibrationRecordRepository,
+        WestgardViolationRepository westgardViolationRepository
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.qcReferenceService = qcReferenceService;
@@ -66,6 +77,7 @@ public class QcService {
         this.auditService = auditService;
         this.meterRegistry = meterRegistry;
         this.postCalibrationRecordRepository = postCalibrationRecordRepository;
+        this.westgardViolationRepository = westgardViolationRepository;
     }
 
     @Transactional
@@ -134,9 +146,82 @@ public class QcService {
     ) {
         List<QcRecord> records = qcRecordRepository.findByFilters(area, examName, startDate, endDate);
         Map<UUID, PostCalibrationRecord> postCalibrations = loadPostCalibrations(records);
+        Map<UUID, List<WestgardViolation>> violations = loadViolations(records);
         return records.stream()
-            .map(record -> ResponseMapper.toQcRecordResponse(record, null, postCalibrations.get(record.getId())))
+            .map(record -> ResponseMapper.toQcRecordResponse(
+                record,
+                null,
+                postCalibrations.get(record.getId()),
+                violations.getOrDefault(record.getId(), List.of())
+            ))
             .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public QcRecordPageResponse getRecordsPage(
+        String area,
+        String examName,
+        LocalDate startDate,
+        LocalDate endDate,
+        String status,
+        String level,
+        String cursor,
+        Integer size
+    ) {
+        if (startDate != null && endDate != null && startDate.isAfter(endDate)) {
+            throw new BusinessException("A data inicial não pode ser posterior à data final.");
+        }
+
+        int effectiveSize = normalizePageSize(size);
+        String normalizedArea = normalizeFilter(area);
+        String normalizedExamName = normalizeFilter(examName);
+        String normalizedStatus = normalizeStatus(status);
+        String normalizedLevel = normalizeFilter(level);
+        PageRequest fetchRequest = PageRequest.of(0, effectiveSize + 1);
+
+        PageCursor decodedCursor = decodeCursor(cursor);
+        List<QcRecord> fetched = decodedCursor == null
+            ? qcRecordRepository.findPageByFilters(
+                normalizedArea,
+                normalizedExamName,
+                startDate,
+                endDate,
+                normalizedStatus,
+                normalizedLevel,
+                fetchRequest
+            )
+            : qcRecordRepository.findPageAfterCursor(
+                normalizedArea,
+                normalizedExamName,
+                startDate,
+                endDate,
+                normalizedStatus,
+                normalizedLevel,
+                decodedCursor.date(),
+                decodedCursor.createdAt(),
+                decodedCursor.id(),
+                fetchRequest
+            );
+
+        boolean hasNext = fetched.size() > effectiveSize;
+        List<QcRecord> records = hasNext
+            ? new ArrayList<>(fetched.subList(0, effectiveSize))
+            : fetched;
+        Map<UUID, PostCalibrationRecord> postCalibrations = loadPostCalibrations(records);
+        Map<UUID, List<WestgardViolation>> violations = loadViolations(records);
+        List<QcRecordResponse> items = records.stream()
+            .map(record -> ResponseMapper.toQcRecordResponse(
+                record,
+                null,
+                postCalibrations.get(record.getId()),
+                violations.getOrDefault(record.getId(), List.of())
+            ))
+            .toList();
+
+        String nextCursor = hasNext && !records.isEmpty()
+            ? encodeCursor(records.getLast())
+            : null;
+        return new QcRecordPageResponse(items, nextCursor, hasNext, effectiveSize);
     }
 
     @Transactional(readOnly = true)
@@ -159,8 +244,76 @@ public class QcService {
             .collect(Collectors.toMap(
                 post -> post.getQcRecord().getId(),
                 Function.identity(),
-                (left, right) -> left
+                (left, right) -> {
+                    throw new BusinessException(
+                        "Foram encontrados múltiplos registros de pós-calibração para o mesmo registro de CQ."
+                    );
+                }
             ));
+    }
+
+    private Map<UUID, List<WestgardViolation>> loadViolations(List<QcRecord> records) {
+        if (records.isEmpty()) {
+            return Map.of();
+        }
+        List<UUID> ids = records.stream().map(QcRecord::getId).toList();
+        return westgardViolationRepository.findByQcRecordIdInOrderByCreatedAtDescIdDesc(ids).stream()
+            .collect(Collectors.groupingBy(
+                violation -> violation.getQcRecord().getId(),
+                LinkedHashMap::new,
+                Collectors.toList()
+            ));
+    }
+
+    private int normalizePageSize(Integer size) {
+        if (size == null) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+    }
+
+    private String normalizeFilter(String value) {
+        return value == null || value.isBlank() ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "";
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (!CANONICAL_STATUSES.contains(normalized)) {
+            throw new BusinessException("Status de CQ inválido. Use APROVADO, ALERTA ou REPROVADO.");
+        }
+        return normalized;
+    }
+
+    private String encodeCursor(QcRecord record) {
+        String raw = record.getDate() + "|" + record.getCreatedAt() + "|" + record.getId();
+        return Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private PageCursor decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return null;
+        }
+        try {
+            String raw = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            String[] parts = raw.split("\\|", -1);
+            if (parts.length != 3) {
+                throw new IllegalArgumentException("estrutura inválida");
+            }
+            return new PageCursor(
+                LocalDate.parse(parts[0]),
+                Instant.parse(parts[1]),
+                UUID.fromString(parts[2])
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException("Cursor de paginação inválido.");
+        }
+    }
+
+    private record PageCursor(LocalDate date, Instant createdAt, UUID id) {
     }
 
     @Transactional
