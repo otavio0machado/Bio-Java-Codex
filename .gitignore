@@ -57,3 +57,6 @@ htmlcov/
 
 # Local app secrets
 **/.streamlit/secrets.toml
+
+# Tooling worktrees
+.claude/worktrees/

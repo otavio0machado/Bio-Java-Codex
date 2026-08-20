@@ -26,6 +26,21 @@ body {
   color: #171717;
 }
 
+/* Fix browser autofill background color */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px white inset !important;
+  -webkit-text-fill-color: #171717 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(15, 118, 110, 0.1) 1.2px, transparent 1.2px);
+  background-size: 20px 20px;
+}
+
 * {
   box-sizing: border-box;
 }
