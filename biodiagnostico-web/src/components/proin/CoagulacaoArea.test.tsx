@@ -26,6 +26,25 @@ vi.mock('../../hooks/useQcRecords', () => ({
     mutateAsync: vi.fn(),
     isPending: false,
   }),
+  useCreatePostCalibration: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useLeveyJennings: () => ({
+    data: [],
+    isLoading: false,
+  }),
+}))
+
+vi.mock('../../hooks/useAiAssist', () => ({
+  useInterpretTrend: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useSuggestObservation: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
 }))
 
 vi.mock('../../hooks/useAuth', () => ({
@@ -117,14 +136,14 @@ const mockRecords: QcRecord[] = [
     value: 1.05,
     targetValue: 1.07,
     targetSd: 0.08,
-    cv: 1.8,
+    cv: 18.0, // maior que cvLimit (15) para testar calibração
     cvLimit: 15,
     zScore: -0.25,
-    status: 'APROVADO',
+    status: 'REPROVADO',
     analyst: 'Otávio Machado',
     equipment: 'Coagulômetro CL4',
     violations: [],
-    needsCalibration: false,
+    needsCalibration: true,
     createdAt: '2026-08-20T10:00:00Z',
     updatedAt: '2026-08-20T10:00:00Z',
   },
@@ -147,7 +166,7 @@ describe('CoagulacaoArea', () => {
     mockCreateBatchMutateAsync.mockResolvedValue([])
   })
 
-  it('renderiza o título da área e a barra de entrada rápida', () => {
+  it('renderiza o cabeçalho, a barra de entrada rápida e a seção de Histórico', () => {
     render(
       <ToastProvider>
         <CoagulacaoArea />
@@ -156,20 +175,57 @@ describe('CoagulacaoArea', () => {
 
     expect(screen.getByText('Controle de Qualidade — Coagulação')).toBeInTheDocument()
     expect(screen.getByText('Entrada Rápida da Corrida Diária')).toBeInTheDocument()
-    expect(screen.getByText('Planilha Mensal de Coagulação')).toBeInTheDocument()
-    expect(screen.getByText('Gráfico Levey-Jennings')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Histórico' })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Buscar exame ou lote...')).toBeInTheDocument()
   })
 
-  it('exibe a lista consolidada de corridas na matriz mensal', () => {
+  it('exibe cada parâmetro como uma linha individual no Histórico com valores e calibração', () => {
     render(
       <ToastProvider>
         <CoagulacaoArea />
       </ToastProvider>,
     )
 
-    expect(screen.getAllByText('COAG 03142026').length).toBeGreaterThan(0)
-    expect(screen.getByText('84%')).toBeInTheDocument()
+    expect(screen.getByText('TP - Atividade (%)')).toBeInTheDocument()
+    expect(screen.getByText('TP - INR')).toBeInTheDocument()
+    expect(screen.getByText('84.00 %')).toBeInTheDocument()
     expect(screen.getByText('1.05')).toBeInTheDocument()
+
+    // O rec-1 está com CV 2.1 <= 15 (Calibrar? NÃO)
+    expect(screen.getByText('NÃO')).toBeInTheDocument()
+
+    // O rec-2 está com CV 18 > 15 e needsCalibration = true (Botão Calibrar? SIM)
+    expect(screen.getByRole('button', { name: 'SIM' })).toBeInTheDocument()
+  })
+
+  it('permite abrir o modal de pós-calibração ao clicar em SIM', async () => {
+    const user = userEvent.setup()
+    render(
+      <ToastProvider>
+        <CoagulacaoArea />
+      </ToastProvider>,
+    )
+
+    const simBtn = screen.getByRole('button', { name: 'SIM' })
+    await user.click(simBtn)
+
+    expect(screen.getByText('Registrar Pós-Calibração')).toBeInTheDocument()
+  })
+
+  it('permite abrir o modal de Levey-Jennings ao clicar no botão de gráfico LJ', async () => {
+    const user = userEvent.setup()
+    render(
+      <ToastProvider>
+        <CoagulacaoArea />
+      </ToastProvider>,
+    )
+
+    const ljButtons = screen.getAllByTitle(/Ver gráfico Levey-Jennings/i)
+    expect(ljButtons.length).toBe(2)
+
+    await user.click(ljButtons[0])
+
+    expect(screen.getByText(/Levey-Jennings — TP - Atividade/i)).toBeInTheDocument()
   })
 
   it('permite preencher e submeter a corrida diária de coagulação', async () => {
