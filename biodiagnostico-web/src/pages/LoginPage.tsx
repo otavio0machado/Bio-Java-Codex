@@ -3,42 +3,6 @@ import { Eye, EyeOff, Lock, UserIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { Navigate } from 'react-router-dom'
-import { Button, Input, useToast } from '../components/ui'
-import { useAuth } from '../hooks/useAuth'
-import { type LoginFormValues, loginSchema } from '../lib/authSchemas'
-import logoBio from '../assets/logobio.png'
-
-export function LoginPage() {
-  const { isAuthenticated, login } = useAuth()
-  const { toast } = useToast()
-  const [showPassword, setShowPassword] = useState(false)
-  const loginForm = useForm<LoginFormValues>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: {
-      username: '',
-      password: '',
-    },
-    mode: 'onChange',
-  })
-
-  if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />
-  }
-
-  const handleLogin = loginForm.handleSubmit(async (data) => {
-    try {
-      await login(data.username, data.password)
-    } catch {
-      toast.error('Credenciais inválidas. Confira seu nome de usuário e senha.')
-    }
-  })
-
-  return (
-import { zodResolver } from '@hookform/resolvers/zod'
-import { Eye, EyeOff, Lock, UserIcon } from 'lucide-react'
-import { useState } from 'react'
-import { useForm } from 'react-hook-form'
-import { Navigate } from 'react-router-dom'
 import { Button, useToast } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { type LoginFormValues, loginSchema } from '../lib/authSchemas'
@@ -190,7 +154,5 @@ export function LoginPage() {
         </footer>
       </div>
     </main>
-  )
-}
   )
 }
