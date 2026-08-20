@@ -30,6 +30,7 @@ class ManutencaoKpiGeneratorTest {
     private ManutencaoKpiGenerator generator() {
         return new ManutencaoKpiGenerator(
             repository,
+            new com.biodiagnostico.service.MaintenanceService(repository),
             GeneratorTestSupport.stubNumbering(),
             new JFreeChartRenderer(),
             new LabHeaderRenderer(),
@@ -66,9 +67,7 @@ class ManutencaoKpiGeneratorTest {
         );
         when(repository.findInPeriod(any(LocalDate.class), any(LocalDate.class), isNull(), isNull()))
             .thenReturn(inPeriod);
-        when(repository.findUpcoming(any(LocalDate.class), any(LocalDate.class)))
-            .thenReturn(List.of(rec("Analisador A", "Preventiva", today.minusDays(5), today.plusDays(30))));
-        when(repository.findOverdue(any(LocalDate.class))).thenReturn(List.of());
+        when(repository.findAllByOrderByDateDesc()).thenReturn(inPeriod);
 
         ReportArtifact artifact = generator().generate(
             new ReportFilters(Map.of("periodType", "current-month")),
@@ -88,8 +87,7 @@ class ManutencaoKpiGeneratorTest {
     void generateWithAiCommentary() {
         when(repository.findInPeriod(any(LocalDate.class), any(LocalDate.class), isNull(), isNull()))
             .thenReturn(List.of());
-        when(repository.findUpcoming(any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of());
-        when(repository.findOverdue(any(LocalDate.class))).thenReturn(List.of());
+        when(repository.findAllByOrderByDateDesc()).thenReturn(List.of());
         ReportArtifact artifact = generator().generate(
             new ReportFilters(Map.of("periodType", "current-month", "includeAiCommentary", true)),
             GeneratorTestSupport.ctx()

@@ -16,8 +16,8 @@ const ManutencaoPage = lazy(() =>
 const RelatoriosPage = lazy(() =>
   import('./pages/RelatoriosPage').then((module) => ({ default: module.RelatoriosPage })),
 )
-const ReportBuilder = lazy(() =>
-  import('./components/relatoriosV2/ReportBuilder').then((module) => ({ default: module.ReportBuilder })),
+const ReportStudio = lazy(() =>
+  import('./components/relatoriosV2/ReportStudio').then((module) => ({ default: module.ReportStudio })),
 )
 const VerifyReportPage = lazy(() =>
   import('./pages/VerifyReportPage').then((module) => ({ default: module.VerifyReportPage })),
@@ -127,7 +127,7 @@ export default function App() {
             path="/relatorios/:code"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <ReportBuilder />
+                <ReportStudio />
               </Suspense>
             }
           />

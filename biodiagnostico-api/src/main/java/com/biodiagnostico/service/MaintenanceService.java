@@ -5,7 +5,13 @@ import com.biodiagnostico.entity.MaintenanceRecord;
 import com.biodiagnostico.exception.BusinessException;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.MaintenanceRecordRepository;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,9 +68,47 @@ public class MaintenanceService {
         maintenanceRecordRepository.deleteById(id);
     }
 
+    /**
+     * Retorna o registro mais recente por equipamento (ordenado por date DESC).
+     * Usado como base para status operacional atual e alertas ativos.
+     */
+    @Transactional(readOnly = true)
+    public List<MaintenanceRecord> getLatestRecordsByEquipment() {
+        List<MaintenanceRecord> all = maintenanceRecordRepository.findAllByOrderByDateDesc();
+        Map<String, MaintenanceRecord> latestByEquip = new LinkedHashMap<>();
+        for (MaintenanceRecord r : all) {
+            if (r.getEquipment() != null && !r.getEquipment().isBlank()) {
+                latestByEquip.putIfAbsent(r.getEquipment().trim().toUpperCase(Locale.ROOT), r);
+            }
+        }
+        return new ArrayList<>(latestByEquip.values());
+    }
+
     @Transactional(readOnly = true)
     public List<MaintenanceRecord> getPendingMaintenances() {
-        return maintenanceRecordRepository.findPendingMaintenances();
+        LocalDate today = LocalDate.now();
+        return getOverdueMaintenances(today);
+    }
+
+    @Transactional(readOnly = true)
+    public long countPendingMaintenances() {
+        return getPendingMaintenances().size();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MaintenanceRecord> getOverdueMaintenances(LocalDate today) {
+        return getLatestRecordsByEquipment().stream()
+            .filter(r -> r.getNextDate() != null && !r.getNextDate().isAfter(today))
+            .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MaintenanceRecord> getUpcomingMaintenances(LocalDate today, LocalDate limit) {
+        return getLatestRecordsByEquipment().stream()
+            .filter(r -> r.getNextDate() != null && !r.getNextDate().isBefore(today) && r.getNextDate().isBefore(limit))
+            .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
+            .toList();
     }
 
     private void validateNextDate(MaintenanceRequest request) {

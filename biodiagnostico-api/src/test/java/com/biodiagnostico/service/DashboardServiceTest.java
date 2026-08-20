@@ -21,10 +21,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
@@ -32,7 +32,6 @@ import org.springframework.data.domain.Pageable;
 @ExtendWith(MockitoExtension.class)
 class DashboardServiceTest {
 
-    @InjectMocks
     private DashboardService dashboardService;
 
     @Mock
@@ -47,6 +46,16 @@ class DashboardServiceTest {
     @Mock
     private WestgardViolationRepository westgardViolationRepository;
 
+    @BeforeEach
+    void setUp() {
+        dashboardService = new DashboardService(
+            qcRecordRepository,
+            reagentLotRepository,
+            new MaintenanceService(maintenanceRecordRepository),
+            westgardViolationRepository
+        );
+    }
+
     @Test
     @DisplayName("getKpis com registros retorna contagens corretas")
     void getKpis_comRegistros_retornaContagensCorretas() {
@@ -54,7 +63,7 @@ class DashboardServiceTest {
         when(qcRecordRepository.countByDateBetween(any(LocalDate.class), any(LocalDate.class))).thenReturn(42L);
         when(qcRecordRepository.calculateApprovalRate(any(LocalDate.class), any(LocalDate.class))).thenReturn(85.7);
         when(reagentLotRepository.countExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(1L);
-        when(maintenanceRecordRepository.countPendingMaintenances()).thenReturn(1L);
+        when(maintenanceRecordRepository.findAllByOrderByDateDesc()).thenReturn(List.of(maintenanceRecord()));
         when(westgardViolationRepository.countDistinctRejectedRecords(any(Instant.class))).thenReturn(0L);
 
         DashboardKpiResponse kpis = dashboardService.getKpis(null);
@@ -73,7 +82,7 @@ class DashboardServiceTest {
         when(qcRecordRepository.countByDateBetween(any(LocalDate.class), any(LocalDate.class))).thenReturn(0L);
         when(qcRecordRepository.calculateApprovalRate(any(LocalDate.class), any(LocalDate.class))).thenReturn(null);
         when(reagentLotRepository.countExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(0L);
-        when(maintenanceRecordRepository.countPendingMaintenances()).thenReturn(0L);
+        when(maintenanceRecordRepository.findAllByOrderByDateDesc()).thenReturn(List.of());
         when(westgardViolationRepository.countDistinctRejectedRecords(any(Instant.class))).thenReturn(0L);
 
         DashboardKpiResponse kpis = dashboardService.getKpis(null);
@@ -91,7 +100,7 @@ class DashboardServiceTest {
         ReagentLot lot = reagentLot();
         MaintenanceRecord maintenance = maintenanceRecord();
         when(reagentLotRepository.findExpiringLots(any(LocalDate.class), any(LocalDate.class))).thenReturn(List.of(lot));
-        when(maintenanceRecordRepository.findPendingMaintenances()).thenReturn(List.of(maintenance));
+        when(maintenanceRecordRepository.findAllByOrderByDateDesc()).thenReturn(List.of(maintenance));
         when(westgardViolationRepository.findRecentRejections(any(Instant.class))).thenReturn(List.of());
 
         DashboardAlertsResponse alerts = dashboardService.getAlerts();

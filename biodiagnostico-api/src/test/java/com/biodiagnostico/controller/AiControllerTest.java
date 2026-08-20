@@ -377,8 +377,7 @@ class AiControllerTest {
             .build();
         when(reagentLotRepository.findExpiredWithStock()).thenReturn(List.of(lot));
         when(reagentLotRepository.findExpiringLots(any(), any())).thenReturn(List.of());
-        when(maintenanceRecordRepository.findOverdue(any())).thenReturn(List.of());
-        when(maintenanceRecordRepository.findUpcoming(any(), any())).thenReturn(List.of());
+        when(maintenanceRecordRepository.findAllByOrderByDateDesc()).thenReturn(List.of());
         when(westgardViolationRepository.findByAreaAndPeriod(any(), any(), any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/ai/priorities")
@@ -509,6 +508,13 @@ class AiControllerTest {
         @Bean
         com.biodiagnostico.repository.MaintenanceRecordRepository maintenanceRecordRepository() {
             return Mockito.mock(com.biodiagnostico.repository.MaintenanceRecordRepository.class);
+        }
+
+        @Bean
+        com.biodiagnostico.service.MaintenanceService maintenanceService(
+            com.biodiagnostico.repository.MaintenanceRecordRepository maintenanceRecordRepository
+        ) {
+            return new com.biodiagnostico.service.MaintenanceService(maintenanceRecordRepository);
         }
 
         @Bean

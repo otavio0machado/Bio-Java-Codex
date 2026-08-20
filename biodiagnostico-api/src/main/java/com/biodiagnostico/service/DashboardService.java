@@ -30,18 +30,18 @@ public class DashboardService {
 
     private final QcRecordRepository qcRecordRepository;
     private final ReagentLotRepository reagentLotRepository;
-    private final MaintenanceRecordRepository maintenanceRecordRepository;
+    private final MaintenanceService maintenanceService;
     private final WestgardViolationRepository westgardViolationRepository;
 
     public DashboardService(
         QcRecordRepository qcRecordRepository,
         ReagentLotRepository reagentLotRepository,
-        MaintenanceRecordRepository maintenanceRecordRepository,
+        MaintenanceService maintenanceService,
         WestgardViolationRepository westgardViolationRepository
     ) {
         this.qcRecordRepository = qcRecordRepository;
         this.reagentLotRepository = reagentLotRepository;
-        this.maintenanceRecordRepository = maintenanceRecordRepository;
+        this.maintenanceService = maintenanceService;
         this.westgardViolationRepository = westgardViolationRepository;
     }
 
@@ -84,7 +84,7 @@ public class DashboardService {
             .map(ResponseMapper::toReagentLotResponse)
             .toList();
 
-        List<MaintenanceResponse> pendingMaintenances = maintenanceRecordRepository.findPendingMaintenances()
+        List<MaintenanceResponse> pendingMaintenances = maintenanceService.getPendingMaintenances()
             .stream()
             .map(ResponseMapper::toMaintenanceResponse)
             .toList();
@@ -122,7 +122,7 @@ public class DashboardService {
     private long getAlertsCount() {
         Instant startOfMonth = YearMonth.now().atDay(1).atStartOfDay().toInstant(ZoneOffset.UTC);
         long expiring = reagentLotRepository.countExpiringLots(LocalDate.now(), LocalDate.now().plusDays(30));
-        long pendingMaintenances = maintenanceRecordRepository.countPendingMaintenances();
+        long pendingMaintenances = maintenanceService.countPendingMaintenances();
         long rejected = westgardViolationRepository.countDistinctRejectedRecords(startOfMonth);
         return expiring + pendingMaintenances + rejected;
     }

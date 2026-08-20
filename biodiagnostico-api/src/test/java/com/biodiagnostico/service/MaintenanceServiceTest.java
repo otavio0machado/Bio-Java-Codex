@@ -136,15 +136,41 @@ class MaintenanceServiceTest {
     }
 
     @Test
-    @DisplayName("getPendingMaintenances deve retornar lista do repository")
-    void getPendingMaintenances_retornaListaDoRepository() {
-        var records = List.of(buildRecord("Equip A"));
-        when(maintenanceRecordRepository.findPendingMaintenances()).thenReturn(records);
+    @DisplayName("getPendingMaintenances deve retornar apenas equipamentos cujo ciclo mais recente está atrasado")
+    void getPendingMaintenances_retornaApenasCicloMaisRecenteAtrasado() {
+        // Equip A: registro antigo com nextDate no passado, mas registro recente sem pendência
+        var oldRecA = MaintenanceRecord.builder()
+            .id(UUID.randomUUID())
+            .equipment("Equip A")
+            .type("Preventiva")
+            .date(LocalDate.of(2026, 4, 10))
+            .nextDate(LocalDate.of(2026, 4, 24))
+            .build();
+        var latestRecA = MaintenanceRecord.builder()
+            .id(UUID.randomUUID())
+            .equipment("Equip A")
+            .type("Preventiva")
+            .date(LocalDate.of(2026, 8, 14))
+            .nextDate(null)
+            .build();
+
+        // Equip B: último registro atrasado
+        var latestRecB = MaintenanceRecord.builder()
+            .id(UUID.randomUUID())
+            .equipment("Equip B")
+            .type("Preventiva")
+            .date(LocalDate.of(2026, 5, 1))
+            .nextDate(LocalDate.of(2026, 5, 15))
+            .build();
+
+        when(maintenanceRecordRepository.findAllByOrderByDateDesc())
+            .thenReturn(List.of(latestRecA, latestRecB, oldRecA));
 
         var result = maintenanceService.getPendingMaintenances();
 
         assertThat(result).hasSize(1);
-        verify(maintenanceRecordRepository).findPendingMaintenances();
+        assertThat(result.get(0).getEquipment()).isEqualTo("Equip B");
+        assertThat(maintenanceService.countPendingMaintenances()).isEqualTo(1);
     }
 
     @Test

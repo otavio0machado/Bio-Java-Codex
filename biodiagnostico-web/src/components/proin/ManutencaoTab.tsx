@@ -41,7 +41,14 @@ import {
   todayLocal,
 } from '../../utils/date'
 
-type DerivedStatus = 'ATRASADA' | 'PROXIMA' | 'AGENDADA' | 'EM_DIA'
+type DerivedStatus = 'ATRASADA' | 'PROXIMA' | 'AGENDADA' | 'EM_DIA' | 'REALIZADA'
+
+interface RecordStatusInfo {
+  status: DerivedStatus
+  label: string
+  pillClasses: string
+  diffDays: number | null
+}
 
 const MAINTENANCE_TYPES = ['Preventiva', 'Corretiva', 'Calibração']
 
@@ -55,22 +62,80 @@ const emptyForm: MaintenanceRequest = {
 }
 
 /**
- * Deriva o status operacional de uma manutencao a partir da proxima data.
+ * Deriva o status operacional de uma manutencao.
  *
- * - ATRASADA: nextDate < hoje
- * - PROXIMA: nextDate em ate 7 dias
- * - AGENDADA: nextDate em ate 30 dias
- * - EM_DIA: sem nextDate ou distante
+ * - Se isLatest === false: registro historico concluido -> REALIZADA ("Realizada").
+ * - Se isLatest === true:
+ *   - sem nextDate -> EM_DIA ("Em dia").
+ *   - nextDate < hoje -> ATRASADA ("Atrasada").
+ *   - nextDate em ate 7 dias -> PROXIMA ("Próxima (7d)").
+ *   - nextDate em ate 30 dias -> AGENDADA ("Agendada (30d)").
+ *   - nextDate > 30 dias -> EM_DIA ("Em dia").
  */
-function deriveStatus(record: MaintenanceRecord): DerivedStatus {
+function deriveRecordStatus(record: MaintenanceRecord, isLatest: boolean): RecordStatusInfo {
   const today = todayLocal()
-  if (!record.nextDate) return 'EM_DIA'
+
+  if (!isLatest) {
+    return {
+      status: 'REALIZADA',
+      label: 'Realizada',
+      pillClasses: 'bg-neutral-100 text-neutral-700',
+      diffDays: null,
+    }
+  }
+
+  if (!record.nextDate) {
+    return {
+      status: 'EM_DIA',
+      label: 'Em dia',
+      pillClasses: 'bg-green-100 text-green-800',
+      diffDays: null,
+    }
+  }
+
   const diff = diffInDays(today, record.nextDate)
-  if (diff === null) return 'EM_DIA'
-  if (diff < 0) return 'ATRASADA'
-  if (diff <= 7) return 'PROXIMA'
-  if (diff <= 30) return 'AGENDADA'
-  return 'EM_DIA'
+  if (diff === null) {
+    return {
+      status: 'EM_DIA',
+      label: 'Em dia',
+      pillClasses: 'bg-green-100 text-green-800',
+      diffDays: null,
+    }
+  }
+
+  if (diff < 0) {
+    return {
+      status: 'ATRASADA',
+      label: 'Atrasada',
+      pillClasses: 'bg-red-100 text-red-800',
+      diffDays: Math.abs(diff),
+    }
+  }
+
+  if (diff <= 7) {
+    return {
+      status: 'PROXIMA',
+      label: 'Próxima (7d)',
+      pillClasses: 'bg-amber-100 text-amber-800',
+      diffDays: diff,
+    }
+  }
+
+  if (diff <= 30) {
+    return {
+      status: 'AGENDADA',
+      label: 'Agendada (30d)',
+      pillClasses: 'bg-amber-50 text-amber-700',
+      diffDays: diff,
+    }
+  }
+
+  return {
+    status: 'EM_DIA',
+    label: 'Em dia',
+    pillClasses: 'bg-green-100 text-green-800',
+    diffDays: diff,
+  }
 }
 
 function statusLabel(status: DerivedStatus) {
@@ -81,28 +146,17 @@ function statusLabel(status: DerivedStatus) {
       return 'Próxima (7d)'
     case 'AGENDADA':
       return 'Agendada (30d)'
+    case 'REALIZADA':
+      return 'Realizadas'
     default:
       return 'Em dia'
   }
 }
 
-function statusClasses(status: DerivedStatus) {
-  switch (status) {
-    case 'ATRASADA':
-      return 'bg-red-100 text-red-800'
-    case 'PROXIMA':
-      return 'bg-amber-100 text-amber-800'
-    case 'AGENDADA':
-      return 'bg-amber-50 text-amber-700'
-    default:
-      return 'bg-green-100 text-green-800'
-  }
-}
-
-function StatusPill({ status }: { status: DerivedStatus }) {
+function StatusPill({ statusInfo }: { statusInfo: RecordStatusInfo }) {
   return (
-    <span className={'inline-flex items-center rounded-full px-3 py-1.5 text-sm font-semibold ' + statusClasses(status)}>
-      {statusLabel(status)}
+    <span className={'inline-flex items-center rounded-full px-3 py-1.5 text-sm font-semibold ' + statusInfo.pillClasses}>
+      {statusInfo.label}
     </span>
   )
 }
@@ -130,6 +184,19 @@ export function ManutencaoTab() {
 
   // Historico por equipamento
   const [historyEquipment, setHistoryEquipment] = useState<string | null>(null)
+
+  // Registro mais recente por equipamento (para derivar status ativo vs histórico)
+  const latestRecordByEquipment = useMemo(() => {
+    const map = new Map<string, MaintenanceRecord>()
+    const sorted = [...records].sort((a, b) => compareLocalDate(b.date, a.date))
+    for (const r of sorted) {
+      const key = r.equipment?.trim().toUpperCase()
+      if (key && !map.has(key)) {
+        map.set(key, r)
+      }
+    }
+    return map
+  }, [records])
 
   // Opcoes para o Combobox de equipamento / tecnico — derivadas dos records
   const equipmentOptions = useMemo<ComboboxOption[]>(() => {
@@ -160,20 +227,20 @@ export function ManutencaoTab() {
       .map(([t, c]) => ({ value: t, label: t, description: c > 1 ? `${c} registros` : undefined }))
   }, [records])
 
-  // KPIs — derivados da lista completa, independente dos filtros
+  // KPIs — derivados do ciclo ativo por equipamento
   const kpis = useMemo(() => {
     const total = records.length
     let overdue = 0
     let next7 = 0
     let scheduled = 0
-    for (const r of records) {
-      const s = deriveStatus(r)
-      if (s === 'ATRASADA') overdue++
-      else if (s === 'PROXIMA') next7++
-      else if (s === 'AGENDADA') scheduled++
+    for (const [_, latest] of latestRecordByEquipment.entries()) {
+      const s = deriveRecordStatus(latest, true)
+      if (s.status === 'ATRASADA') overdue++
+      else if (s.status === 'PROXIMA') next7++
+      else if (s.status === 'AGENDADA') scheduled++
     }
     return { total, overdue, next7, scheduled }
-  }, [records])
+  }, [records, latestRecordByEquipment])
 
   // Registros filtrados
   const filteredRecords = useMemo(() => {
@@ -183,7 +250,11 @@ export function ManutencaoTab() {
         if (typeFilter && r.type !== typeFilter) return false
         if (equipmentFilter && r.equipment !== equipmentFilter) return false
         if (technicianFilter && r.technician !== technicianFilter) return false
-        if (statusFilter !== 'todas' && deriveStatus(r) !== statusFilter) return false
+
+        const isLatest = latestRecordByEquipment.get(r.equipment?.trim().toUpperCase())?.id === r.id
+        const statusInfo = deriveRecordStatus(r, isLatest)
+        if (statusFilter !== 'todas' && statusInfo.status !== statusFilter) return false
+
         if (term) {
           const hay = `${r.equipment ?? ''} ${r.type ?? ''} ${r.technician ?? ''} ${r.notes ?? ''}`.toLowerCase()
           if (!hay.includes(term)) return false
@@ -191,7 +262,7 @@ export function ManutencaoTab() {
         return true
       })
       .sort((a, b) => compareLocalDate(b.date, a.date))
-  }, [records, typeFilter, equipmentFilter, technicianFilter, statusFilter, searchTerm])
+  }, [records, typeFilter, equipmentFilter, technicianFilter, statusFilter, searchTerm, latestRecordByEquipment])
 
   const handleOpenCreate = () => {
     setEditingRecord(null)
@@ -308,7 +379,14 @@ export function ManutencaoTab() {
 
   if (!records.length) {
     return (
-      <>
+      <div className="space-y-6">
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-neutral-900">Manutenção</h1>
+            <p className="mt-1 text-base text-neutral-500">Registro e histórico de manutenções de equipamentos.</p>
+          </div>
+          <Button onClick={handleOpenCreate}>Nova Manutenção</Button>
+        </header>
         <EmptyState
           icon={<Wrench className="h-8 w-8" />}
           title="Nenhuma manutenção cadastrada"
@@ -326,15 +404,19 @@ export function ManutencaoTab() {
           equipmentOptions={equipmentOptions}
           technicianOptions={technicianOptions}
         />
-      </>
+      </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-neutral-900">Manutenção</h1>
+          <p className="mt-1 text-base text-neutral-500">Registro e histórico de manutenções de equipamentos.</p>
+        </div>
         <Button onClick={handleOpenCreate}>Nova Manutenção</Button>
-      </div>
+      </header>
 
       {/* KPIs — clicaveis para pre-filtrar status */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

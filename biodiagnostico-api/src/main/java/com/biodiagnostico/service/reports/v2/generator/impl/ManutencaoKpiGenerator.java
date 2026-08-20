@@ -52,6 +52,7 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
     private static final Locale PT_BR = ReportV2PdfTheme.PT_BR;
 
     private final MaintenanceRecordRepository repository;
+    private final com.biodiagnostico.service.MaintenanceService maintenanceService;
     private final ReportNumberingService reportNumberingService;
     private final ChartRenderer chartRenderer;
     private final LabHeaderRenderer headerRenderer;
@@ -60,6 +61,7 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
 
     public ManutencaoKpiGenerator(
         MaintenanceRecordRepository repository,
+        com.biodiagnostico.service.MaintenanceService maintenanceService,
         ReportNumberingService reportNumberingService,
         ChartRenderer chartRenderer,
         LabHeaderRenderer headerRenderer,
@@ -67,6 +69,7 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
         ReportAiCommentator aiCommentator
     ) {
         this.repository = repository;
+        this.maintenanceService = maintenanceService;
         this.reportNumberingService = reportNumberingService;
         this.chartRenderer = chartRenderer;
         this.headerRenderer = headerRenderer;
@@ -166,9 +169,9 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
                 doc.add(t);
             }
 
-            // Proximas manutencoes — T5: query janelada (substitui findAll+filter)
+            // Proximas manutencoes — baseadas no ciclo ativo por equipamento
             LocalDate today = LocalDate.now();
-            List<MaintenanceRecord> upcoming = repository.findUpcoming(today, today.plusDays(90));
+            List<MaintenanceRecord> upcoming = maintenanceService.getUpcomingMaintenances(today, today.plusDays(90));
             if (!upcoming.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("Proximas manutencoes (90 dias)"));
                 PdfPTable t = ReportV2PdfTheme.table(new float[] {3F, 1.6F, 1.5F, 1.5F});
@@ -186,8 +189,8 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
                 doc.add(t);
             }
 
-            // Atrasadas — T5: query janelada
-            List<MaintenanceRecord> overdue = repository.findOverdue(today);
+            // Atrasadas — baseadas no ciclo ativo por equipamento
+            List<MaintenanceRecord> overdue = maintenanceService.getOverdueMaintenances(today);
             if (!overdue.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("ATENCAO: Manutencoes atrasadas"));
                 PdfPTable wrap = new PdfPTable(1);
@@ -286,33 +289,29 @@ public class ManutencaoKpiGenerator implements ReportGenerator {
         cards.addCell(card("MTBF (dias)", mtbf, ReportV2PdfTheme.MUTED));
         doc.add(cards);
 
-        // Proxima e atrasadas
-        java.util.Optional<MaintenanceRecord> nextScheduled = recs.stream()
-            .filter(r -> r.getNextDate() != null && !r.getNextDate().isBefore(today))
-            .min(Comparator.comparing(MaintenanceRecord::getNextDate));
-        java.util.List<MaintenanceRecord> overdue = recs.stream()
-            .filter(r -> r.getNextDate() != null && r.getNextDate().isBefore(today))
-            .sorted(Comparator.comparing(MaintenanceRecord::getNextDate))
-            .collect(Collectors.toList());
+        // Proxima e atrasada — baseado exclusivamente no ciclo mais recente deste equipamento
+        MaintenanceRecord latest = chrono.isEmpty() ? null : chrono.get(chrono.size() - 1);
         Paragraph schedule = new Paragraph();
-        if (nextScheduled.isPresent()) {
-            LocalDate nd = nextScheduled.get().getNextDate();
-            long daysUntil = ChronoUnit.DAYS.between(today, nd);
-            schedule.add(new com.lowagie.text.Chunk("Proxima manutencao: ", ReportV2PdfTheme.BODY_BOLD_FONT));
-            schedule.add(new com.lowagie.text.Chunk(
-                ReportV2PdfTheme.formatDate(nd) + " (em " + daysUntil + " dias)",
-                com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
-                    daysUntil <= 7 ? ReportV2PdfTheme.STATUS_ALERTA : ReportV2PdfTheme.STATUS_APROVADO)));
+        if (latest != null && latest.getNextDate() != null) {
+            LocalDate nd = latest.getNextDate();
+            if (nd.isBefore(today)) {
+                long daysOverdue = ChronoUnit.DAYS.between(nd, today);
+                schedule.add(new com.lowagie.text.Chunk("ATENCAO: ", ReportV2PdfTheme.BODY_BOLD_FONT));
+                schedule.add(new com.lowagie.text.Chunk(
+                    "Manutencao atrasada desde " + ReportV2PdfTheme.formatDate(nd) + " (" + daysOverdue + " dias de atraso)",
+                    com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
+                        ReportV2PdfTheme.STATUS_REPROVADO)));
+            } else {
+                long daysUntil = ChronoUnit.DAYS.between(today, nd);
+                schedule.add(new com.lowagie.text.Chunk("Proxima manutencao: ", ReportV2PdfTheme.BODY_BOLD_FONT));
+                schedule.add(new com.lowagie.text.Chunk(
+                    ReportV2PdfTheme.formatDate(nd) + " (em " + daysUntil + " dias)",
+                    com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
+                        daysUntil <= 7 ? ReportV2PdfTheme.STATUS_ALERTA : ReportV2PdfTheme.STATUS_APROVADO)));
+            }
         } else {
             schedule.add(new com.lowagie.text.Chunk("Sem proxima manutencao agendada.",
                 ReportV2PdfTheme.META_FONT));
-        }
-        if (!overdue.isEmpty()) {
-            schedule.add(com.lowagie.text.Chunk.NEWLINE);
-            schedule.add(new com.lowagie.text.Chunk(
-                "ATENCAO: " + overdue.size() + " manutencao(oes) atrasada(s)",
-                com.lowagie.text.FontFactory.getFont(com.lowagie.text.FontFactory.HELVETICA_BOLD, 9,
-                    ReportV2PdfTheme.STATUS_REPROVADO)));
         }
         schedule.setSpacingAfter(8F);
         doc.add(schedule);

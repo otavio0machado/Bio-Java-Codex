@@ -120,7 +120,7 @@ class RegulatorioPacoteGeneratorTest {
     }
 
     static ManutencaoKpiGenerator manutStub(final java.util.function.Supplier<ReportArtifact> behavior) {
-        return new ManutencaoKpiGenerator(null, null, null, null, null, null) {
+        return new ManutencaoKpiGenerator(null, null, null, null, null, null, null) {
             @Override
             public ReportArtifact generate(ReportFilters filters, GenerationContext ctx) {
                 return behavior.get();

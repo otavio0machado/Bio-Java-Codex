@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext, type AuthContextValue } from '../contexts/auth-context'
@@ -91,27 +91,18 @@ const sampleDefinition: ReportDefinition = {
 }
 
 describe('RelatoriosPage', () => {
-  it('renderiza V1 RelatoriosTab quando catalog retorna []', async () => {
-    mockCatalog.mockResolvedValue([])
-
-    renderPage()
-
-    await waitFor(() => {
-      // V1 tem o titulo "Relatorios" sem tabs V2 - procuramos pelo cabecalho do card V1.
-      expect(screen.getByText(/Selecione o per.odo/)).toBeInTheDocument()
-    })
-    expect(screen.queryByRole('button', { name: /Catalogo V2/i })).not.toBeInTheDocument()
-  })
-
-  it('renderiza tabs V2 quando catalog retorna ao menos uma definition', async () => {
+  it('renderiza Central de Laudos e catálogo quando definitions são carregadas', async () => {
     mockCatalog.mockResolvedValue([sampleDefinition])
 
     renderPage()
 
-    expect(await screen.findByRole('button', { name: /Catalogo V2/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Historico/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Legado/i })).toBeInTheDocument()
-    // Aba ativa por default deve ser Catalogo V2, mostrando o card da definition.
+    expect(await screen.findByRole('button', { name: /Catálogo de Laudos Oficiais/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Histórico & Custódia de Emissões/i })).toBeInTheDocument()
+    expect(screen.getByText(/Central de Inteligência & Laudos Oficiais/i)).toBeInTheDocument()
+    // Presets rápidos devem estar visíveis
+    expect(screen.getByText(/Fechamento Mensal de Qualidade/i)).toBeInTheDocument()
+    expect(screen.getByText(/Dossiê Fiscal ANVISA/i)).toBeInTheDocument()
+    // Card do laudo deve aparecer no catálogo
     expect(await screen.findByText('Relatorio Operacional de CQ')).toBeInTheDocument()
   })
 })

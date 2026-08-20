@@ -127,6 +127,7 @@ public class AiController {
     private final AuditService auditService;
     private final ReagentLotRepository reagentLotRepository;
     private final MaintenanceRecordRepository maintenanceRecordRepository;
+    private final com.biodiagnostico.service.MaintenanceService maintenanceService;
     private final WestgardViolationRepository westgardViolationRepository;
     private final TaskExecutor aiStreamExecutor;
     private final ObjectMapper objectMapper;
@@ -139,6 +140,7 @@ public class AiController {
         AuditService auditService,
         ReagentLotRepository reagentLotRepository,
         MaintenanceRecordRepository maintenanceRecordRepository,
+        com.biodiagnostico.service.MaintenanceService maintenanceService,
         WestgardViolationRepository westgardViolationRepository,
         @Qualifier(AiStreamConfig.AI_STREAM_EXECUTOR) TaskExecutor aiStreamExecutor,
         ObjectMapper objectMapper
@@ -150,6 +152,7 @@ public class AiController {
         this.auditService = auditService;
         this.reagentLotRepository = reagentLotRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
+        this.maintenanceService = maintenanceService;
         this.westgardViolationRepository = westgardViolationRepository;
         this.aiStreamExecutor = aiStreamExecutor;
         this.objectMapper = objectMapper;
@@ -777,8 +780,8 @@ public class AiController {
                 "Vence em " + daysLeft + " dia(s) (" + lot.getExpiryDate() + ")."));
         }
 
-        // Manutenções atrasadas: ALTA.
-        for (MaintenanceRecord maintenance : maintenanceRecordRepository.findOverdue(today)) {
+        // Manutenções atrasadas: ALTA (apenas ciclo ativo por equipamento).
+        for (MaintenanceRecord maintenance : maintenanceService.getOverdueMaintenances(today)) {
             items.add(new PriorityItem(
                 CATEGORY_MAINTENANCE,
                 safe(maintenance.getEquipment()) + " (" + safe(maintenance.getType()) + ")",
@@ -786,7 +789,7 @@ public class AiController {
                 "Manutenção atrasada (prevista para " + maintenance.getNextDate() + ")."));
         }
         // Manutenções próximas (próximos 30 dias): MEDIA.
-        for (MaintenanceRecord maintenance : maintenanceRecordRepository.findUpcoming(
+        for (MaintenanceRecord maintenance : maintenanceService.getUpcomingMaintenances(
                 today, today.plusDays(PRIORITIES_MAINTENANCE_WINDOW_DAYS))) {
             items.add(new PriorityItem(
                 CATEGORY_MAINTENANCE,

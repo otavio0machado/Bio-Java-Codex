@@ -420,11 +420,15 @@ export function ReagentesTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-end gap-2">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-neutral-900">Reagentes</h1>
+          <p className="mt-1 text-base text-neutral-500">Controle de estoque, lotes e validade.</p>
+        </div>
         <Button onClick={handleOpenCreate} icon={<PackagePlus className="h-4 w-4" />}>
           Novo Lote
         </Button>
-      </div>
+      </header>
 
       <ReagentsDashboard
         stats={stats}

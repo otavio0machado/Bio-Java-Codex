@@ -40,7 +40,7 @@ class MultiAreaConsolidadoGeneratorTest {
             qcRecordRepository,
             westgardRepository,
             reagentLotRepository,
-            maintenanceRepository,
+            new com.biodiagnostico.service.MaintenanceService(maintenanceRepository),
             GeneratorTestSupport.stubNumbering(),
             new JFreeChartRenderer(),
             new LabHeaderRenderer(),
@@ -75,7 +75,7 @@ class MultiAreaConsolidadoGeneratorTest {
         lenient().when(qcRecordRepository.findByAreaAndDateRange(anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of(qc("bioquimica", "APROVADO", today), qc("bioquimica", "ALERTA", today)));
         lenient().when(reagentLotRepository.countExpiredWithStock(any(LocalDate.class))).thenReturn(2L);
-        lenient().when(maintenanceRepository.findOverdue(any(LocalDate.class))).thenReturn(List.of());
+        lenient().when(maintenanceRepository.findAllByOrderByDateDesc()).thenReturn(List.of());
         lenient().when(westgardRepository.findByAreaAndPeriod(isNull(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
 
@@ -101,7 +101,7 @@ class MultiAreaConsolidadoGeneratorTest {
         lenient().when(qcRecordRepository.findByAreaAndDateRange(anyString(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
         lenient().when(reagentLotRepository.countExpiredWithStock(any(LocalDate.class))).thenReturn(0L);
-        lenient().when(maintenanceRepository.findOverdue(any(LocalDate.class))).thenReturn(List.of());
+        lenient().when(maintenanceRepository.findAllByOrderByDateDesc()).thenReturn(List.of());
         lenient().when(westgardRepository.findByAreaAndPeriod(isNull(), any(LocalDate.class), any(LocalDate.class)))
             .thenReturn(List.of());
         ReportArtifact artifact = generator().generate(

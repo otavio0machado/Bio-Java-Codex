@@ -88,21 +88,21 @@ export function Navbar() {
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200 bg-white/70 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-neutral-200 bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center justify-between px-4 sm:px-6 lg:px-8 xl:px-10">
           <button
             type="button"
-            className="text-left"
+            className="flex shrink-0 items-center rounded-lg text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 mr-2 xl:mr-6"
             onClick={() => {
               closeMenus()
               navigate('/dashboard')
             }}
             aria-label="Ir para dashboard"
           >
-            <img src={logoBio} alt="Biodiagnóstico" className="h-10 w-auto" />
+            <img src={logoBio} alt="Biodiagnóstico" className="h-9 xl:h-10 w-auto" />
           </button>
 
-          <nav className="hidden items-center gap-4 md:flex">
+          <nav className="hidden items-center gap-0.5 min-[1150px]:gap-1.5 xl:gap-2.5 2xl:gap-3.5 lg:flex">
             {navItems.map((item, index) => {
               const isOnQc = location.pathname.startsWith('/qc')
               const isActive = item.area
@@ -112,18 +112,18 @@ export function Navbar() {
               const isFirstArea = item.area && !prev?.area
               const isFirstAfterAreas = !item.area && prev?.area
               return (
-                <div key={item.href} className="flex items-center gap-4">
+                <div key={item.href} className="flex items-center">
                   {isFirstArea || isFirstAfterAreas ? (
-                    <span aria-hidden="true" className="h-5 w-px bg-neutral-300" />
+                    <span aria-hidden="true" className="mx-1 min-[1150px]:mx-1.5 xl:mx-2.5 h-4 w-px bg-neutral-300 shrink-0" />
                   ) : null}
                   <NavLink
                     to={item.href}
                     onClick={closeMenus}
                     className={cn(
-                      'border-b-2 py-5 text-sm font-medium transition',
+                      'border-b-2 py-5 px-1.5 min-[1150px]:px-2 xl:px-2.5 text-xs xl:text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors duration-150',
                       isActive
-                        ? 'border-green-800 text-green-800'
-                        : 'border-transparent text-neutral-500 hover:text-neutral-700',
+                        ? 'border-green-800 text-green-900 font-semibold'
+                        : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900',
                     )}
                   >
                     {item.label}
@@ -133,21 +133,24 @@ export function Navbar() {
             })}
           </nav>
 
-          <div className="hidden items-center gap-3 md:flex" ref={dropdownRef}>
+          <div className="relative hidden shrink-0 items-center gap-3 lg:flex ml-2 xl:ml-6" ref={dropdownRef}>
             <button
               type="button"
-              className="flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-3 py-2 transition hover:border-neutral-300"
+              className="flex items-center gap-2.5 rounded-full border border-neutral-200 bg-white p-1 pr-2.5 transition hover:border-neutral-300 hover:bg-neutral-50 shadow-sm"
               onClick={() =>
                 setDropdownPath((value) => (value === location.pathname ? null : location.pathname))
               }
               aria-label="Abrir menu do usuário"
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-800 text-sm font-semibold text-white">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-green-800 text-xs font-semibold text-white">
                 {initials ?? <User className="h-4 w-4" />}
+              </span>
+              <span className="hidden text-xs font-medium text-neutral-700 xl:inline-block max-w-[100px] truncate">
+                {user?.name?.split(' ')[0]}
               </span>
             </button>
             {isDropdownOpen ? (
-              <div className="absolute right-8 top-14 w-64 rounded-2xl border border-neutral-200 bg-white p-3 shadow-elevated">
+              <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-neutral-200 bg-white p-3 shadow-elevated z-50">
                 <div className="px-3 py-2">
                   <div className="font-semibold text-neutral-900">{user?.name}</div>
                   <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
@@ -187,7 +190,7 @@ export function Navbar() {
           <Button
             variant="ghost"
             size="sm"
-            className="md:hidden"
+            className="lg:hidden"
             onClick={() => setMobilePath(location.pathname)}
             aria-label="Abrir menu"
           >
@@ -197,9 +200,9 @@ export function Navbar() {
       </header>
 
       {isMobileOpen ? (
-        <div className="fixed inset-0 z-[55] bg-black/40 md:hidden" onClick={closeMenus}>
+        <div className="fixed inset-0 z-[55] bg-black/40 lg:hidden" onClick={closeMenus}>
           <aside
-            className="ml-auto flex h-full w-72 flex-col bg-white p-5 shadow-2xl"
+            className="ml-auto flex h-full w-72 flex-col bg-white p-5 shadow-2xl overflow-y-auto"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between">
@@ -212,7 +215,7 @@ export function Navbar() {
               </Button>
             </div>
 
-            <nav className="mt-8 space-y-2">
+            <nav className="mt-6 space-y-1.5 overflow-y-auto max-h-[calc(100vh-220px)] pr-1">
               {navItems.map((item) => {
                 const Icon = item.icon
                 const isOnQc = location.pathname.startsWith('/qc')
@@ -225,7 +228,7 @@ export function Navbar() {
                     to={item.href}
                     onClick={closeMenus}
                     className={cn(
-                      'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition',
+                      'flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm font-medium transition',
                       active ? 'bg-green-800 text-white' : 'text-neutral-700 hover:bg-neutral-100',
                     )}
                   >
@@ -237,7 +240,7 @@ export function Navbar() {
             </nav>
 
             {adminMenuItems.length > 0 ? (
-              <nav className="mt-4 space-y-2 border-t border-neutral-100 pt-4">
+              <nav className="mt-4 space-y-1.5 border-t border-neutral-100 pt-4">
                 {adminMenuItems.map((item) => {
                   const Icon = item.icon
                   const active = location.pathname.startsWith(item.href)
@@ -247,7 +250,7 @@ export function Navbar() {
                       to={item.href}
                       onClick={closeMenus}
                       className={cn(
-                        'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition',
+                        'flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm font-medium transition',
                         active ? 'bg-green-800 text-white' : 'text-neutral-700 hover:bg-neutral-100',
                       )}
                     >
@@ -259,7 +262,7 @@ export function Navbar() {
               </nav>
             ) : null}
 
-            <div className="mt-auto rounded-2xl bg-neutral-50 p-4">
+            <div className="mt-auto pt-4 rounded-2xl bg-neutral-50 p-4">
               <div className="font-semibold text-neutral-900">{user?.name}</div>
               <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
               <Button variant="danger" className="mt-4 w-full" onClick={handleLogout}>

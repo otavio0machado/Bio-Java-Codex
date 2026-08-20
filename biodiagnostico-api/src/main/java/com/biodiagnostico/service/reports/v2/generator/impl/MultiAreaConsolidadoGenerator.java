@@ -58,7 +58,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
     private final QcRecordRepository qcRecordRepository;
     private final WestgardViolationRepository violationRepository;
     private final ReagentLotRepository reagentLotRepository;
-    private final MaintenanceRecordRepository maintenanceRepository;
+    private final com.biodiagnostico.service.MaintenanceService maintenanceService;
     private final ReportNumberingService reportNumberingService;
     private final ChartRenderer chartRenderer;
     private final LabHeaderRenderer headerRenderer;
@@ -69,7 +69,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
         QcRecordRepository qcRecordRepository,
         WestgardViolationRepository violationRepository,
         ReagentLotRepository reagentLotRepository,
-        MaintenanceRecordRepository maintenanceRepository,
+        com.biodiagnostico.service.MaintenanceService maintenanceService,
         ReportNumberingService reportNumberingService,
         ChartRenderer chartRenderer,
         LabHeaderRenderer headerRenderer,
@@ -79,7 +79,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
         this.qcRecordRepository = qcRecordRepository;
         this.violationRepository = violationRepository;
         this.reagentLotRepository = reagentLotRepository;
-        this.maintenanceRepository = maintenanceRepository;
+        this.maintenanceService = maintenanceService;
         this.reportNumberingService = reportNumberingService;
         this.chartRenderer = chartRenderer;
         this.headerRenderer = headerRenderer;
@@ -144,7 +144,7 @@ public class MultiAreaConsolidadoGenerator implements ReportGenerator {
             // coerencia entre a tabela e o card de alertas abaixo.
             LocalDate today = LocalDate.now();
             long reagCrit = reagentLotRepository.countExpiredWithStock(today);
-            long manutPend = maintenanceRepository.findOverdue(today).size();
+            long manutPend = maintenanceService.getOverdueMaintenances(today).size();
 
             for (String area : areas) {
                 List<QcRecord> recs = qcRecordRepository.findByAreaAndDateRange(area, rf.start, rf.end);
