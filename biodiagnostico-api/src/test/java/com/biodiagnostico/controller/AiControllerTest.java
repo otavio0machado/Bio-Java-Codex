@@ -526,6 +526,26 @@ class AiControllerTest {
             return new com.biodiagnostico.service.DriftDetector();
         }
 
+        // Onda 4 / Fase A — o AiController passou a depender do AiContextAssembler
+        // (monta o contexto factual dentro de transacao readOnly antes da IA). Aqui
+        // usamos o assembler REAL, alimentado pelos mesmos repositorios mockados; o
+        // @Transactional e no-op no @WebMvcTest (sem TransactionManager), o que e
+        // adequado para os mocks. Sem este bean o ApplicationContext nao sobe.
+        @Bean
+        com.biodiagnostico.service.ai.AiContextAssembler aiContextAssembler(
+            QcRecordRepository qcRecordRepository,
+            com.biodiagnostico.repository.QcExamRepository qcExamRepository,
+            com.biodiagnostico.service.DriftDetector driftDetector
+        ) {
+            return new com.biodiagnostico.service.ai.AiContextAssembler(
+                qcRecordRepository, qcExamRepository, driftDetector);
+        }
+
+        @Bean(name = "aiStreamExecutor")
+        org.springframework.core.task.TaskExecutor aiStreamExecutor() {
+            return new org.springframework.core.task.SyncTaskExecutor();
+        }
+
         @Bean
         AiService aiService() {
             return new StubAiService();
@@ -564,13 +584,13 @@ class AiControllerTest {
         }
 
         @Override
-        public String explainViolation(QcRecord record, List<QcRecord> history) {
+        public String explainViolation(String qcContext) {
             return "Explicacao do registro.";
         }
 
         @Override
-        public String interpretTrend(String examName, String level, String area, List<QcRecord> series) {
-            if (series == null || series.isEmpty()) {
+        public String interpretTrend(String examName, String level, String area, String qcContext) {
+            if (qcContext == null || qcContext.isBlank()) {
                 return "Sem dados suficientes no período para interpretar tendência.";
             }
             return "Tendencia interpretada.";
@@ -606,7 +626,7 @@ class AiControllerTest {
 
         @Override
         public String analyzeRootCause(
-            QcRecord record, List<QcRecord> history, String reagentContext, String maintenanceContext
+            String qcContext, String reagentContext, String maintenanceContext
         ) {
             return "Analise de causa-raiz gerada.";
         }

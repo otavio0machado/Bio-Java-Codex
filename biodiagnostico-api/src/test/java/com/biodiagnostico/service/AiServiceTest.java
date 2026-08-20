@@ -9,6 +9,7 @@ import com.biodiagnostico.entity.QcExam;
 import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.BusinessException;
+import com.biodiagnostico.exception.RateLimitException;
 import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.service.AiService.BatchSuggestionResult;
 import com.biodiagnostico.service.AiService.BatchValidationResult;
@@ -145,6 +146,32 @@ class AiServiceTest {
         return record;
     }
 
+    /**
+     * Onda 4 / Fase A: produz um contexto de CQ textual representativo (como o
+     * {@link com.biodiagnostico.service.ai.AiContextAssembler} montaria, com as
+     * violacoes ja materializadas), para alimentar os metodos do AiService que
+     * passaram a receber o contexto JA MONTADO (String). O conteudo exato nao e
+     * relevante para as assercoes (que checam constantes de prompt); espelha o
+     * formato real por fidelidade.
+     */
+    private String qcContextFor(QcRecord... records) {
+        StringBuilder context = new StringBuilder(
+            "Dados de Controle de Qualidade do Laboratório Biodiagnóstico:\n\n");
+        for (QcRecord record : records) {
+            context.append(String.format(
+                "Data: %s | Exame: %s | Nível: %s | Valor: %.2f | Alvo: %.2f | SD: %.2f | CV: %.2f%% | Status: %s%n",
+                record.getDate(), record.getExamName(), record.getLevel(),
+                record.getValue(), record.getTargetValue(), record.getTargetSd(),
+                record.getCv(), record.getStatus()));
+            if (record.getViolations() != null) {
+                record.getViolations().forEach(violation -> context
+                    .append("  -> Violação: ").append(violation.getRule())
+                    .append(" - ").append(violation.getDescription()).append('\n'));
+            }
+        }
+        return context.toString();
+    }
+
     private String promptText(StubProvider provider) {
         StringBuilder sb = new StringBuilder();
         for (AiMessage message : provider.lastMessages.get()) {
@@ -154,30 +181,33 @@ class AiServiceTest {
     }
 
     // ---------- A1 explainViolation ----------
+    //
+    // Onda 4 / Fase A: explainViolation passou a receber o contexto JA MONTADO
+    // (String) pelo AiContextAssembler — a materializacao das violacoes (lazy)
+    // acontece no assembler, dentro de transacao. Aqui o contexto e um texto
+    // representativo; o conteudo so importa nos testes de blindagem de prompt.
 
     @Test
     @DisplayName("A1 — explainViolation retorna o texto da IA no caminho feliz")
     void explainViolationHappyPath() {
         AiService service = buildService(StubProvider.returningText("Explicacao clara da violacao 1-3s."));
-        String result = service.explainViolation(
-            record("REPROVADO", "1-3s"),
-            List.of(record("APROVADO", null)));
+        String result = service.explainViolation(qcContextFor(record("REPROVADO", "1-3s")));
         assertThat(result).isEqualTo("Explicacao clara da violacao 1-3s.");
     }
 
     @Test
-    @DisplayName("A1 — explainViolation aceita histórico vazio")
+    @DisplayName("A1 — explainViolation aceita contexto sem histórico")
     void explainViolationEmptyHistory() {
         AiService service = buildService(StubProvider.returningText("Explicacao sem historico."));
-        String result = service.explainViolation(record("REPROVADO", "1-3s"), List.of());
+        String result = service.explainViolation(qcContextFor(record("REPROVADO", "1-3s")));
         assertThat(result).isEqualTo("Explicacao sem historico.");
     }
 
     @Test
-    @DisplayName("A1 — explainViolation aceita histórico nulo")
+    @DisplayName("A1 — explainViolation aceita contexto nulo (degrada para texto da IA)")
     void explainViolationNullHistory() {
         AiService service = buildService(StubProvider.returningText("Explicacao sem historico nulo."));
-        String result = service.explainViolation(record("REPROVADO", "1-3s"), null);
+        String result = service.explainViolation(null);
         assertThat(result).isEqualTo("Explicacao sem historico nulo.");
     }
 
@@ -185,7 +215,7 @@ class AiServiceTest {
     @DisplayName("A1 — explainViolation retorna mensagem amigável quando a IA falha (IO/Runtime)")
     void explainViolationFriendlyErrorOnFailure() {
         AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
-        String result = service.explainViolation(record("REPROVADO", "1-3s"), List.of());
+        String result = service.explainViolation(qcContextFor(record("REPROVADO", "1-3s")));
         assertThat(result).isEqualTo("Não foi possível analisar no momento. Tente novamente.");
     }
 
@@ -194,38 +224,38 @@ class AiServiceTest {
     void explainViolationRoutesToMedium() {
         StubProvider provider = StubProvider.returningText("ok");
         AiService service = buildService(provider);
-        service.explainViolation(record("REPROVADO", "1-3s"), List.of());
+        service.explainViolation(qcContextFor(record("REPROVADO", "1-3s")));
         assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
     }
 
     // ---------- A2 interpretTrend ----------
 
     @Test
-    @DisplayName("A2 — interpretTrend retorna o texto da IA para série não vazia")
+    @DisplayName("A2 — interpretTrend retorna o texto da IA para contexto não vazio")
     void interpretTrendHappyPath() {
         AiService service = buildService(StubProvider.returningText("Tendencia estavel, sem deriva relevante."));
         String result = service.interpretTrend(
             "GLICOSE", "N1", "bioquimica",
-            List.of(record("APROVADO", null), record("APROVADO", null)));
+            qcContextFor(record("APROVADO", null), record("APROVADO", null)));
         assertThat(result).isEqualTo("Tendencia estavel, sem deriva relevante.");
     }
 
     @Test
-    @DisplayName("A2 — interpretTrend devolve texto de 'sem dados' e NÃO chama a IA quando a série é vazia")
+    @DisplayName("A2 — interpretTrend devolve texto de 'sem dados' e NÃO chama a IA quando o contexto é vazio")
     void interpretTrendEmptySeriesShortCircuits() {
         StubProvider provider = StubProvider.returningText("não deveria ser chamado");
         AiService service = buildService(provider);
-        String result = service.interpretTrend("GLICOSE", "N1", "bioquimica", List.of());
+        String result = service.interpretTrend("GLICOSE", "N1", "bioquimica", "");
         assertThat(result).isEqualTo("Sem dados suficientes no período para interpretar tendência.");
         assertThat(provider.textCalls.get()).isZero();
     }
 
     @Test
-    @DisplayName("A2 — interpretTrend trata série nula como sem dados, sem chamar a IA")
+    @DisplayName("A2 — interpretTrend trata contexto nulo como sem dados, sem chamar a IA")
     void interpretTrendNullSeriesShortCircuits() {
         StubProvider provider = StubProvider.returningText("não deveria ser chamado");
         AiService service = buildService(provider);
-        String result = service.interpretTrend("GLICOSE", "N1", "bioquimica", null);
+        String result = service.interpretTrend("GLICOSE", "N1", "bioquimica", (String) null);
         assertThat(result).isEqualTo("Sem dados suficientes no período para interpretar tendência.");
         assertThat(provider.textCalls.get()).isZero();
     }
@@ -354,7 +384,7 @@ class AiServiceTest {
         AiService service = buildService(provider);
 
         String result = service.interpretTrend(
-            "GLICOSE", "N1", "bioquimica", List.of(record("APROVADO", null)));
+            "GLICOSE", "N1", "bioquimica", qcContextFor(record("APROVADO", null)));
 
         assertThat(result).isEqualTo("Tendencia interpretada.");
         String prompt = promptText(provider);
@@ -474,8 +504,7 @@ class AiServiceTest {
     void analyzeRootCauseHappyPath() {
         AiService service = buildService(StubProvider.returningText("Hipótese: erro sistemático."));
         String result = service.analyzeRootCause(
-            record("REPROVADO", "1-3s"),
-            List.of(record("APROVADO", null)),
+            qcContextFor(record("REPROVADO", "1-3s"), record("APROVADO", null)),
             "  - HDL (lote L1)\n",
             "  - Equipamento AU680: Calibração em 2026-06-10\n");
         assertThat(result).isEqualTo("Hipótese: erro sistemático.");
@@ -485,7 +514,7 @@ class AiServiceTest {
     @DisplayName("A3 — analyzeRootCause aceita contextos de correlação vazios")
     void analyzeRootCauseEmptyCorrelations() {
         AiService service = buildService(StubProvider.returningText("Sem correlação clara."));
-        String result = service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        String result = service.analyzeRootCause(qcContextFor(record("REPROVADO", "1-3s")), "", "");
         assertThat(result).isEqualTo("Sem correlação clara.");
     }
 
@@ -493,7 +522,7 @@ class AiServiceTest {
     @DisplayName("A3 — analyzeRootCause retorna mensagem amigável quando a IA falha")
     void analyzeRootCauseFriendlyErrorOnFailure() {
         AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
-        String result = service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        String result = service.analyzeRootCause(qcContextFor(record("REPROVADO", "1-3s")), "", "");
         assertThat(result).isEqualTo("Não foi possível analisar no momento. Tente novamente.");
     }
 
@@ -502,7 +531,7 @@ class AiServiceTest {
     void analyzeRootCauseRoutesToAdvanced() {
         StubProvider provider = StubProvider.returningText("ok");
         AiService service = buildService(provider);
-        service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "", "");
+        service.analyzeRootCause(qcContextFor(record("REPROVADO", "1-3s")), "", "");
         assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.5");
     }
 
@@ -511,7 +540,7 @@ class AiServiceTest {
     void analyzeRootCausePromptCarriesGuards() {
         StubProvider provider = StubProvider.returningText("ok");
         AiService service = buildService(provider);
-        service.analyzeRootCause(record("REPROVADO", "1-3s"), List.of(), "ctx-reagente", "ctx-manut");
+        service.analyzeRootCause(qcContextFor(record("REPROVADO", "1-3s")), "ctx-reagente", "ctx-manut");
         String prompt = promptText(provider);
         assertThat(prompt)
             .containsIgnoringCase("não invente")
@@ -899,5 +928,406 @@ class AiServiceTest {
             .as("o prompt deve conter a lista de exames válidos da área")
             .contains("GLICOSE")
             .contains("UREIA");
+    }
+
+    // ---------- Onda 4 / Fase A — rate-limit como RateLimitException (429) ----------
+
+    /**
+     * Esgota a janela de rate-limit chamando {@code analyze} 10 vezes (o limiar).
+     * Como nao ha SecurityContext no teste, todas as chamadas compartilham a chave
+     * "anonymous", entao a 11a chamada de qualquer metodo assistivo estoura.
+     */
+    private void exhaustRateLimit(AiService service) {
+        for (int i = 0; i < 10; i++) {
+            service.analyze("pergunta " + i, "contexto");
+        }
+    }
+
+    @Test
+    @DisplayName("Rate-limit — a 11ª chamada lança RateLimitException com retryAfterSeconds em [1,60]")
+    void rateLimitThrowsRateLimitExceptionWithinBounds() {
+        AiService service = buildService(StubProvider.returningText("ok"));
+        exhaustRateLimit(service);
+
+        assertThatThrownBy(() -> service.analyze("estouro", "contexto"))
+            .isInstanceOf(RateLimitException.class)
+            .satisfies(thrown -> {
+                long retry = ((RateLimitException) thrown).getRetryAfterSeconds();
+                assertThat(retry)
+                    .as("retryAfterSeconds deve respeitar piso 1 e teto 60")
+                    .isBetween(1L, 60L);
+            });
+    }
+
+    @Test
+    @DisplayName("Rate-limit — NÃO estende BusinessException (garante propagação, não degradação)")
+    void rateLimitIsNotBusinessException() {
+        AiService service = buildService(StubProvider.returningText("ok"));
+        exhaustRateLimit(service);
+
+        assertThatThrownBy(() -> service.analyze("estouro", "contexto"))
+            .isInstanceOf(RateLimitException.class)
+            .isNotInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("Regressão D12 — prioritize NÃO degrada sob rate-limit: propaga RateLimitException")
+    void prioritizeDoesNotSwallowRateLimit() {
+        AiService service = buildService(StubProvider.returningText("Recomendacao."));
+        exhaustRateLimit(service);
+
+        // Lista NÃO vazia para passar do short-circuit e alcançar ensureRateLimit().
+        assertThatThrownBy(() -> service.prioritize("bioquimica", List.of("- item urgente")))
+            .as("D12 captura BusinessException/RuntimeException para degradar; "
+                + "RateLimitException deve escapar e NÃO virar recomendação vazia")
+            .isInstanceOf(RateLimitException.class);
+    }
+
+    @Test
+    @DisplayName("Regressão D11 — describeDrift NÃO degrada sob rate-limit: propaga RateLimitException")
+    void describeDriftDoesNotSwallowRateLimit() {
+        AiService service = buildService(StubProvider.returningText("[]"));
+        exhaustRateLimit(service);
+
+        // Lista NÃO vazia para alcançar ensureRateLimit() (vazia faz short-circuit).
+        assertThatThrownBy(() -> service.describeDrift(List.of("id=0 | GLICOSE/N1 DRIFT_UP")))
+            .as("D11 degrada para detalhes vazios em falha; RateLimitException deve escapar")
+            .isInstanceOf(RateLimitException.class);
+    }
+
+    @Test
+    @DisplayName("Regressão B5 — validateBatch NÃO degrada sob rate-limit: propaga RateLimitException")
+    void validateBatchDoesNotSwallowRateLimit() {
+        // examName 'zzz' não casa com a lista -> aciona resolveExamMismatches -> ensureRateLimit().
+        AiService service = buildService(
+            StubProvider.returningText("{\"items\":[]}"),
+            examRepositoryWith("bioquimica", "GLICOSE"));
+        exhaustRateLimit(service);
+
+        assertThatThrownBy(() -> service.validateBatch("bioquimica", List.of(
+            new BatchRowDto("zzz", "N1", 10.0, 10.0, 1.0, 5.0))))
+            .as("B5 degrada para UNKNOWN_EXAM em falha da IA; RateLimitException deve escapar")
+            .isInstanceOf(RateLimitException.class);
+    }
+
+    // ==================================================================
+    // Onda 4 / Fase A — STREAMING (variantes *Stream do AiService)
+    //
+    // O StubProvider NAO sobrescreve completeTextStream: usa o DEFAULT da
+    // interface, que emite a resposta inteira de completeText como 1 delta. Como
+    // completeText do stub captura lastMessages/lastTextModel e incrementa
+    // textCalls, ganhamos roteamento de modelo e captura de prompt de graca; aqui
+    // acumulamos os deltas via o Consumer e validamos a igualdade do texto.
+    // ==================================================================
+
+    /** Coletor simples de deltas: junta os pedacos recebidos e conta as chamadas. */
+    private static final class DeltaCollector {
+
+        private final StringBuilder text = new StringBuilder();
+        final List<String> chunks = new ArrayList<>();
+
+        void accept(String delta) {
+            chunks.add(delta);
+            text.append(delta);
+        }
+
+        String text() {
+            return text.toString();
+        }
+    }
+
+    // ---------- analyzeStream ----------
+
+    @Test
+    @DisplayName("Stream — analyzeStream acumula os deltas formando o texto da IA")
+    void analyzeStreamAccumulatesDeltas() {
+        StubProvider provider = StubProvider.returningText("Resposta de chat em streaming.");
+        AiService service = buildService(provider);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.analyzeStream(
+            List.of(AiMessage.user("Como interpreto a regra 1-3s?")), null, collector::accept);
+
+        assertThat(collector.text()).isEqualTo("Resposta de chat em streaming.");
+        assertThat(collector.chunks).as("default emite a resposta inteira como 1 delta").hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream roteia para o modelo medium (CHAT)")
+    void analyzeStreamRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.analyzeStream(List.of(AiMessage.user("oi")), null, ignored -> { });
+
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream põe system(SYSTEM_PROMPT) como 1ª mensagem e mantém a ordem do histórico")
+    void analyzeStreamBuildsSystemFirstAndKeepsHistoryOrder() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        List<AiMessage> conversation = List.of(
+            AiMessage.user("primeira pergunta"),
+            AiMessage.assistant("primeira resposta"),
+            AiMessage.user("segunda pergunta"));
+        service.analyzeStream(conversation, null, ignored -> { });
+
+        List<AiMessage> sent = provider.lastMessages.get();
+        assertThat(sent).hasSize(4);
+        assertThat(sent.get(0).role()).isEqualTo("system");
+        assertThat(sent.get(0).content()).contains("especialista em controle de qualidade laboratorial");
+        // Histórico repassado na ordem, logo após o system (sem areaContext).
+        assertThat(sent.get(1)).isEqualTo(AiMessage.user("primeira pergunta"));
+        assertThat(sent.get(2)).isEqualTo(AiMessage.assistant("primeira resposta"));
+        assertThat(sent.get(3)).isEqualTo(AiMessage.user("segunda pergunta"));
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream insere areaContext como user-message logo após o system quando presente")
+    void analyzeStreamInsertsAreaContextAfterSystem() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.analyzeStream(
+            List.of(AiMessage.user("pergunta")), "Contexto da área: bioquímica", ignored -> { });
+
+        List<AiMessage> sent = provider.lastMessages.get();
+        assertThat(sent).hasSize(3);
+        assertThat(sent.get(0).role()).isEqualTo("system");
+        assertThat(sent.get(1)).isEqualTo(AiMessage.user("Contexto da área: bioquímica"));
+        assertThat(sent.get(2)).isEqualTo(AiMessage.user("pergunta"));
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream ignora areaContext vazio/em branco (não vira mensagem)")
+    void analyzeStreamIgnoresBlankAreaContext() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.analyzeStream(List.of(AiMessage.user("pergunta")), "   ", ignored -> { });
+
+        List<AiMessage> sent = provider.lastMessages.get();
+        assertThat(sent).hasSize(2);
+        assertThat(sent.get(0).role()).isEqualTo("system");
+        assertThat(sent.get(1)).isEqualTo(AiMessage.user("pergunta"));
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream NÃO checa rate-limit interno (responsabilidade do controlador via checkRateLimit)")
+    void analyzeStreamDoesNotSelfCheckRateLimit() {
+        // Onda 4 / Fase A (parte 2): o rate-limit do streaming e checado pelo
+        // controlador (checkRateLimit) ANTES do SseEmitter. Os *Stream NAO chamam
+        // ensureRateLimit internamente — evita consumir 2 slots/requisicao. Logo,
+        // mesmo com a janela esgotada, analyzeStream prossegue e emite normalmente.
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        exhaustRateLimit(service);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.analyzeStream(List.of(AiMessage.user("apos esgotar a janela")), null, collector::accept);
+
+        assertThat(collector.text()).isEqualTo("ok");
+        assertThat(provider.textCalls.get()).as("o stream prossegue sem barrar por rate-limit").isPositive();
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeStream encerra graciosamente em falha de transporte (não relança, sem deltas)")
+    void analyzeStreamSwallowsTransportFailure() {
+        AiService service = buildService(StubProvider.throwing(new RuntimeException("provider down")));
+        DeltaCollector collector = new DeltaCollector();
+
+        service.analyzeStream(List.of(AiMessage.user("oi")), null, collector::accept);
+
+        assertThat(collector.chunks).isEmpty();
+    }
+
+    // ---------- executiveSummaryStream ----------
+
+    @Test
+    @DisplayName("Stream — executiveSummaryStream acumula os deltas formando o texto da IA")
+    void executiveSummaryStreamAccumulatesDeltas() {
+        StubProvider provider = StubProvider.returningText("Resumo executivo em streaming.");
+        AiService service = buildService(provider);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.executiveSummaryStream("bioquimica", 7, "Taxa de aprovação: 95%", collector::accept);
+
+        assertThat(collector.text()).isEqualTo("Resumo executivo em streaming.");
+    }
+
+    @Test
+    @DisplayName("Stream — executiveSummaryStream roteia para o modelo medium")
+    void executiveSummaryStreamRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.executiveSummaryStream("bioquimica", 7, "contexto", ignored -> { });
+
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("Stream — executiveSummaryStream carrega as mesmas travas do bloqueante no prompt")
+    void executiveSummaryStreamPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.executiveSummaryStream("bioquimica", 7, "Taxa de aprovação: 95%", ignored -> { });
+
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente")
+            .contains("determinístico de Westgard");
+    }
+
+    @Test
+    @DisplayName("Stream — executiveSummaryStream NÃO checa rate-limit interno (responsabilidade do controlador)")
+    void executiveSummaryStreamDoesNotSelfCheckRateLimit() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        exhaustRateLimit(service);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.executiveSummaryStream("bioquimica", 7, "contexto", collector::accept);
+
+        assertThat(collector.text()).isEqualTo("ok");
+    }
+
+    // ---------- summarizeAuditLogsStream ----------
+
+    @Test
+    @DisplayName("Stream — summarizeAuditLogsStream acumula os deltas formando o texto da IA")
+    void summarizeAuditLogsStreamAccumulatesDeltas() {
+        StubProvider provider = StubProvider.returningText("Resumo dos logs em streaming.");
+        AiService service = buildService(provider);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.summarizeAuditLogsStream("- 2026-06-17 | usuário=ana | ação=DELETE", collector::accept);
+
+        assertThat(collector.text()).isEqualTo("Resumo dos logs em streaming.");
+    }
+
+    @Test
+    @DisplayName("Stream — summarizeAuditLogsStream roteia para o modelo medium")
+    void summarizeAuditLogsStreamRoutesToMedium() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.summarizeAuditLogsStream("contexto", ignored -> { });
+
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.4");
+    }
+
+    @Test
+    @DisplayName("Stream — summarizeAuditLogsStream carrega as mesmas travas do bloqueante no prompt")
+    void summarizeAuditLogsStreamPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.summarizeAuditLogsStream("contexto", ignored -> { });
+
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente eventos")
+            .containsIgnoringCase("não uma acusação");
+    }
+
+    @Test
+    @DisplayName("Stream — summarizeAuditLogsStream NÃO checa rate-limit interno (responsabilidade do controlador)")
+    void summarizeAuditLogsStreamDoesNotSelfCheckRateLimit() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        exhaustRateLimit(service);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.summarizeAuditLogsStream("contexto", collector::accept);
+
+        assertThat(collector.text()).isEqualTo("ok");
+    }
+
+    // ---------- analyzeRootCauseStream ----------
+
+    @Test
+    @DisplayName("Stream — analyzeRootCauseStream acumula os deltas formando o texto da IA")
+    void analyzeRootCauseStreamAccumulatesDeltas() {
+        StubProvider provider = StubProvider.returningText("Hipótese em streaming: erro sistemático.");
+        AiService service = buildService(provider);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.analyzeRootCauseStream(
+            qcContextFor(record("REPROVADO", "1-3s")),
+            "  - HDL (lote L1)\n",
+            "  - Equipamento AU680: Calibração em 2026-06-10\n",
+            collector::accept);
+
+        assertThat(collector.text()).isEqualTo("Hipótese em streaming: erro sistemático.");
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeRootCauseStream roteia para o modelo advanced (tier ADVANCED)")
+    void analyzeRootCauseStreamRoutesToAdvanced() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.analyzeRootCauseStream(qcContextFor(record("REPROVADO", "1-3s")), "", "", ignored -> { });
+
+        assertThat(provider.lastTextModel.get()).isEqualTo("gpt-5.5");
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeRootCauseStream carrega as mesmas travas e os contextos no prompt")
+    void analyzeRootCauseStreamPromptCarriesGuards() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+
+        service.analyzeRootCauseStream(
+            qcContextFor(record("REPROVADO", "1-3s")), "ctx-reagente", "ctx-manut", ignored -> { });
+
+        String prompt = promptText(provider);
+        assertThat(prompt)
+            .containsIgnoringCase("não invente")
+            .contains("Z-score")
+            .containsIgnoringCase("correlação não é causalidade")
+            .containsIgnoringCase("não decida liberar")
+            .contains("motor determinístico de Westgard")
+            .contains("ctx-reagente")
+            .contains("ctx-manut");
+    }
+
+    @Test
+    @DisplayName("Stream — analyzeRootCauseStream NÃO checa rate-limit interno (responsabilidade do controlador)")
+    void analyzeRootCauseStreamDoesNotSelfCheckRateLimit() {
+        StubProvider provider = StubProvider.returningText("ok");
+        AiService service = buildService(provider);
+        exhaustRateLimit(service);
+        DeltaCollector collector = new DeltaCollector();
+
+        service.analyzeRootCauseStream(qcContextFor(record("REPROVADO", "1-3s")), "", "", collector::accept);
+
+        assertThat(collector.text()).isEqualTo("ok");
+    }
+
+    // ---------- checkRateLimit ----------
+
+    @Test
+    @DisplayName("Stream — checkRateLimit lança RateLimitException quando a janela está esgotada")
+    void checkRateLimitThrowsWhenExhausted() {
+        AiService service = buildService(StubProvider.returningText("ok"));
+        exhaustRateLimit(service);
+
+        assertThatThrownBy(service::checkRateLimit)
+            .isInstanceOf(RateLimitException.class)
+            .isNotInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("Stream — checkRateLimit não lança quando há janela disponível")
+    void checkRateLimitPassesWhenWithinWindow() {
+        AiService service = buildService(StubProvider.returningText("ok"));
+        // Nenhuma chamada anterior: a janela está livre.
+        service.checkRateLimit();
     }
 }

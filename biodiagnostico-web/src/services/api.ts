@@ -200,6 +200,20 @@ api.interceptors.response.use(
       }
     }
 
+    // Rate-limit da IA (10 analises/min por usuario). O backend responde 429 com
+    // header Retry-After (segundos). NAO re-tentamos automaticamente (429 nao e
+    // >= 500); apenas avisamos o usuario quanto tempo aguardar.
+    if (status === 429) {
+      const retryAfterRaw = axiosError.response?.headers?.['retry-after']
+      const retryAfter = Number(retryAfterRaw)
+      const quando =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? `Aguarde ${retryAfter} segundo${retryAfter === 1 ? '' : 's'} e tente novamente.`
+          : 'Aguarde alguns instantes e tente novamente.'
+      emitApiError(`Muitas analises em sequencia. ${quando}`)
+      return Promise.reject(error)
+    }
+
     if (isNetworkError || (status !== undefined && status >= 500)) {
       emitApiError(extractErrorMessage(axiosError))
     }

@@ -7,7 +7,11 @@ import com.biodiagnostico.config.AiProperties;
 import com.biodiagnostico.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -15,7 +19,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.web.client.RequestCallback;
+import org.springframework.web.client.ResponseExtractor;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -252,5 +262,234 @@ class OpenAiProviderTest {
         assertThatThrownBy(() -> provider.completeAudio("gpt-audio-1.5", "p", "ZGF0YQ==", "wav"))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("OPENAI_API_KEY");
+    }
+
+    // ---------- completeTextStream ----------
+
+    /**
+     * {@link RestTemplate} falso para o caminho de streaming: sobrescreve
+     * {@code execute(URI, HttpMethod, RequestCallback, ResponseExtractor)},
+     * deixando o {@code RequestCallback} popular os headers/body (capturados) e
+     * alimentando o {@code ResponseExtractor} com um corpo SSE canned via um
+     * {@link ClientHttpResponse} de leitura. Nao se usa Mockito (nao instrumenta
+     * RestTemplate no JDK atual), no mesmo espirito do fake de postForEntity.
+     */
+    private OpenAiProvider streamingProvider(
+        AiProperties props,
+        String sseBody,
+        AtomicReference<String> capturedUrl,
+        AtomicReference<HttpHeaders> capturedHeaders,
+        AtomicReference<JsonNode> capturedBody
+    ) {
+        RestTemplate fake = new RestTemplate() {
+            @Override
+            public <T> T execute(
+                URI url, HttpMethod method, RequestCallback requestCallback,
+                ResponseExtractor<T> responseExtractor
+            ) throws RestClientException {
+                if (capturedUrl != null) {
+                    capturedUrl.set(url.toString());
+                }
+                try {
+                    RecordingRequest request = new RecordingRequest();
+                    if (requestCallback != null) {
+                        requestCallback.doWithRequest(request);
+                    }
+                    if (capturedHeaders != null) {
+                        capturedHeaders.set(request.getHeaders());
+                    }
+                    if (capturedBody != null) {
+                        String written = request.bodyAsString();
+                        capturedBody.set(written.isEmpty() ? null : objectMapper.readTree(written));
+                    }
+                    return responseExtractor.extractData(new StringClientHttpResponse(sseBody));
+                } catch (java.io.IOException ioException) {
+                    throw new RestClientException("falha simulada de stream", ioException);
+                }
+            }
+        };
+        return new OpenAiProvider(fake, objectMapper, props);
+    }
+
+    private List<String> collectStream(OpenAiProvider provider, String model) throws Exception {
+        List<String> deltas = new ArrayList<>();
+        provider.completeTextStream(model, List.of(AiMessage.user("oi")), deltas::add);
+        return deltas;
+    }
+
+    @Test
+    @DisplayName("completeTextStream parseia linhas data: extraindo choices[0].delta.content em ordem")
+    void completeTextStreamParsesDeltas() throws Exception {
+        String sse = ""
+            + "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"Olá\"}}]}\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\", \"}}]}\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"mundo\"}}]}\n"
+            + "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n"
+            + "data: [DONE]\n";
+        OpenAiProvider provider = streamingProvider(
+            properties("sk-test", null), sse, null, null, null);
+
+        List<String> deltas = collectStream(provider, "gpt-5.4");
+
+        assertThat(deltas).containsExactly("Olá", ", ", "mundo");
+        assertThat(String.join("", deltas)).isEqualTo("Olá, mundo");
+    }
+
+    @Test
+    @DisplayName("completeTextStream ignora data: [DONE] e linhas em branco/keep-alive")
+    void completeTextStreamIgnoresDoneAndBlankLines() throws Exception {
+        String sse = ""
+            + "\n"
+            + ": keep-alive\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"A\"}}]}\n"
+            + "\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"B\"}}]}\n"
+            + "data: [DONE]\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"NUNCA\"}}]}\n";
+        OpenAiProvider provider = streamingProvider(
+            properties("sk-test", null), sse, null, null, null);
+
+        List<String> deltas = collectStream(provider, "gpt-5.4");
+
+        assertThat(deltas).as("para no [DONE]; nada apos ele e emitido").containsExactly("A", "B");
+    }
+
+    @Test
+    @DisplayName("completeTextStream tolera um evento JSON malformado isolado sem abortar o fluxo")
+    void completeTextStreamToleratesMalformedEvent() throws Exception {
+        String sse = ""
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"X\"}}]}\n"
+            + "data: {isto nao e json valido}\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"Y\"}}]}\n"
+            + "data: [DONE]\n";
+        OpenAiProvider provider = streamingProvider(
+            properties("sk-test", null), sse, null, null, null);
+
+        List<String> deltas = collectStream(provider, "gpt-5.4");
+
+        assertThat(deltas).containsExactly("X", "Y");
+    }
+
+    @Test
+    @DisplayName("completeTextStream monta URL, header Bearer e body com model+messages+stream=true")
+    void completeTextStreamBuildsRequest() throws Exception {
+        AtomicReference<String> url = new AtomicReference<>();
+        AtomicReference<HttpHeaders> headers = new AtomicReference<>();
+        AtomicReference<JsonNode> body = new AtomicReference<>();
+        OpenAiProvider provider = streamingProvider(
+            properties("sk-test", "https://api.openai.com/v1"),
+            "data: [DONE]\n", url, headers, body);
+
+        provider.completeTextStream(
+            "gpt-5.4",
+            List.of(AiMessage.system("voce e um assistente"), AiMessage.user("ola")),
+            delta -> { });
+
+        assertThat(url.get()).isEqualTo("https://api.openai.com/v1/chat/completions");
+        assertThat(headers.get().getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer sk-test");
+        assertThat(body.get().path("model").asText()).isEqualTo("gpt-5.4");
+        assertThat(body.get().path("stream").asBoolean()).isTrue();
+        JsonNode messages = body.get().path("messages");
+        assertThat(messages).hasSize(2);
+        assertThat(messages.path(0).path("role").asText()).isEqualTo("system");
+        assertThat(messages.path(1).path("role").asText()).isEqualTo("user");
+    }
+
+    @Test
+    @DisplayName("completeTextStream lança BusinessException quando a API key está ausente, sem chamar HTTP nem emitir")
+    void completeTextStreamMissingApiKey() {
+        AtomicReference<String> url = new AtomicReference<>();
+        List<String> deltas = new ArrayList<>();
+        OpenAiProvider provider = streamingProvider(
+            properties("", null), "data: [DONE]\n", url, null, null);
+
+        assertThatThrownBy(() -> provider.completeTextStream(
+            "gpt-5.4", List.of(AiMessage.user("oi")), deltas::add))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("OPENAI_API_KEY");
+        assertThat(url.get()).as("nenhuma chamada HTTP quando a key está ausente").isNull();
+        assertThat(deltas).as("nenhum delta emitido antes da exceção").isEmpty();
+    }
+
+    /** {@link ClientHttpResponse} de leitura sobre um corpo de texto fixo (SSE). */
+    private static final class StringClientHttpResponse implements ClientHttpResponse {
+
+        private final InputStream body;
+
+        StringClientHttpResponse(String text) {
+            this.body = new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+        }
+
+        @Override
+        public InputStream getBody() {
+            return body;
+        }
+
+        @Override
+        public HttpHeaders getHeaders() {
+            return new HttpHeaders();
+        }
+
+        @Override
+        public HttpStatusCode getStatusCode() {
+            return HttpStatus.OK;
+        }
+
+        @Override
+        public String getStatusText() {
+            return "OK";
+        }
+
+        @Override
+        public void close() {
+            // nada a fechar além do stream, que o leitor já fecha
+        }
+    }
+
+    /**
+     * {@link org.springframework.http.client.ClientHttpRequest} minimo para
+     * capturar headers e corpo escritos pelo {@code RequestCallback} do caminho de
+     * streaming. So precisa de {@code getHeaders()} e {@code getBody()}.
+     */
+    private static final class RecordingRequest
+        implements org.springframework.http.client.ClientHttpRequest {
+
+        private final HttpHeaders headers = new HttpHeaders();
+        private final java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+
+        String bodyAsString() {
+            return body.toString(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public HttpHeaders getHeaders() {
+            return headers;
+        }
+
+        @Override
+        public java.io.OutputStream getBody() {
+            return body;
+        }
+
+        @Override
+        public ClientHttpResponse execute() {
+            throw new UnsupportedOperationException("não usado no teste");
+        }
+
+        @Override
+        public HttpMethod getMethod() {
+            return HttpMethod.POST;
+        }
+
+        @Override
+        public URI getURI() {
+            return URI.create("https://api.openai.com/v1/chat/completions");
+        }
+
+        @Override
+        public java.util.Map<String, Object> getAttributes() {
+            return new java.util.HashMap<>();
+        }
     }
 }

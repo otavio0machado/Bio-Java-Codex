@@ -1407,3 +1407,66 @@ Validacoes executadas:
 - **Fase 3.1 Reagentes** — resolver P0-1 em definitivo (adicionar `manufacturer` em `qc_records`).
 - **Sprint F** — cobertura de testes frontend expandida (ManutencaoTab, ReagentesTab F3, ImportarTab) + fix P1-4 com ADR.
 - **Release** — tag de versao + deploy em homologacao.
+
+## Onda 4 — Versionamento v2 da IA (em andamento, design auditado 2026-06-18)
+
+Status oficial da fase: **EM_ANDAMENTO** — design auditado pelo `domain-auditor` em 2026-06-18.
+
+Esta onda **não introduz features novas de IA**: ela versiona (v2) as 11 features de IA já entregues nas Ondas 1-3. Os invariantes da IA permanecem inalterados:
+
+- a IA continua **assistiva, nunca decisória**;
+- o `WestgardEngine` determinístico continua sendo a fonte de verdade;
+- disclaimer e revisão humana são sempre obrigatórios.
+
+### 4 eixos da Onda 4
+
+#### Eixo 4.1 — Streaming
+
+- respostas de IA via SSE (`SseEmitter`) em resumo executivo (C9), auditoria (C10), causa-raiz (A3) e chat (E13);
+- chat multi-turn;
+- frontend via `fetch` + `ReadableStream` + `AbortController`;
+- inclui chat persistido no backend (entidades isoladas, migração).
+
+#### Eixo 4.2 — Confiança e contexto
+
+- saída estruturada (tipo de erro, confiança, pontos citados) em A1/A2/A3/C9;
+- novo serviço determinístico `QcSeriesStatistics`;
+- janela de histórico ampliada de 15 para 30.
+
+#### Eixo 4.3 — Feedback e telemetria
+
+- tabelas `ai_interaction` e `ai_feedback`;
+- endpoints `POST /ai/feedback` e `GET /ai/feedback/stats` (ADMIN);
+- métricas por modelo/tier.
+
+#### Eixo 4.4 — Robustez
+
+- `AiContextAssembler` blinda a IA do OSIV materializando `QcRecord.violations` antes da chamada HTTP;
+- rate-limit passa de HTTP 400 para 429 + `Retry-After`;
+- enum `AiStatus` (`OK`/`DEGRADED`/`UNAVAILABLE`) nos DTOs;
+- detecção de drift agendada (determinística) + endpoint `GET /ai/drift/status` para badge no dashboard;
+- prompt caching.
+
+### Decisões do usuário (2026-06-18)
+
+1. **Telemetria:** persistir metadados + hash do prompt; amostra de resposta desligada por padrão em produção (sem prompt cru).
+2. **OSIV:** blindar **somente a IA**, mantendo `JPA_OPEN_IN_VIEW=true` (não desligar OSIV global; mappers de CQ seguem dependendo dele, fora deste escopo).
+3. **Chat:** histórico persistido no backend (cross-device, auditável), não em `localStorage`.
+
+### Vereditos de domínio (domain-auditor, 2026-06-18)
+
+| Eixo | Veredito | Condições |
+|---|---|---|
+| 4.2 | **BLOQUEADO até redesenho** | agregados de série (média/DP/tendência observados) sobre janela que cruza troca de lote são inválidos (cada lote tem alvo/SD próprios) |
+| 4.4 | **APROVADO com ressalvas** | refatoração OSIV é puramente mecânica (materializar ≠ recalcular) |
+
+Detalhamento dos vereditos:
+
+- **4.2 — BLOQUEADO até redesenho.** Agregados de série (média/DP/tendência observados) sobre janela que cruza troca de lote são inválidos, pois cada lote tem alvo e SD próprios. Correção exigida: segmentar agregados pelo lote do ponto em foco (chave `reference.id`, fallback `lotNumber`); `observedSd` amostral (n-1), nunca denominador de Z nem persistido; `Z = (value - targetValue) / targetSd` do lote, com `targetSd <= 0` → nulo.
+- **4.4 — APROVADO com ressalvas.** A refatoração OSIV é puramente mecânica (materializar ≠ recalcular); `AiStatus` deve ser campo separado (`DEGRADED` nunca lido como estado positivo); o snapshot de drift inicia `UNAVAILABLE` (nunca `{total:0}`); a coleta de drift é compartilhada entre o job agendado e o endpoint sob demanda.
+
+### Fases de entrega
+
+- **Fase A (em implementação):** 429 + `Retry-After`; blindagem OSIV; streaming SSE efêmero; testes.
+- **Fase B:** DTO unificado; 4.2 com segmentação por lote; `AiStatus` + drift agendado; auditorias leves de chat e feedback.
+- **Fase C:** persistência de chat (migração) e feedback/telemetria (migração) — gate de release para as migrações.

@@ -27,6 +27,33 @@ public interface AiProvider {
     String completeText(String model, List<AiMessage> messages, boolean jsonOutput) throws java.io.IOException;
 
     /**
+     * Completa um chat de texto em modo <strong>streaming</strong>, repassando
+     * cada pedaco (delta) de texto ao {@code onDelta} a medida que chega.
+     *
+     * <p>Implementacao default (aditiva): nao streama de verdade — chama
+     * {@link #completeText(String, List, boolean)} e emite a resposta inteira
+     * como um unico delta. Provedores que suportam streaming (ex.:
+     * {@link OpenAiProvider}) sobrescrevem este metodo para emitir os deltas
+     * incrementalmente. Esse default permite que mocks/stubs de teste e provedores
+     * sem streaming continuem funcionando sem reimplementar nada.
+     *
+     * <p><strong>Semantica de {@code onDelta}:</strong> a concatenacao, na ordem,
+     * de todos os pedacos recebidos forma o texto completo da resposta. Erros
+     * deterministicos (ex.: API key ausente) devem ser lancados ANTES de qualquer
+     * emissao; falhas de transporte propagam como {@link java.io.IOException}/
+     * {@link RuntimeException}.
+     *
+     * @param model    id do modelo a usar (resolvido pelo {@link AiModelRouter})
+     * @param messages mensagens da conversa (system/user/assistant)
+     * @param onDelta  consumidor chamado para cada pedaco de texto recebido
+     * @throws java.io.IOException em falha de parsing/transporte
+     */
+    default void completeTextStream(String model, List<AiMessage> messages,
+        java.util.function.Consumer<String> onDelta) throws java.io.IOException {
+        onDelta.accept(completeText(model, messages, false));
+    }
+
+    /**
      * Completa uma requisicao multimodal de audio (audio + instrucao textual),
      * tipicamente retornando JSON com os campos extraidos.
      *

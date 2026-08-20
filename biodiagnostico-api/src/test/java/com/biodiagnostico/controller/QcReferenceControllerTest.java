@@ -172,6 +172,11 @@ class QcReferenceControllerTest {
         }
 
         @Override
+        public List<QcReferenceValue> getReferences(UUID examId, String area, Boolean activeOnly) {
+            return references;
+        }
+
+        @Override
         public QcReferenceValue createReference(QcReferenceRequest request) {
             return createResponse;
         }
