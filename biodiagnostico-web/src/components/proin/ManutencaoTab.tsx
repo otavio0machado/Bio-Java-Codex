@@ -316,6 +316,11 @@ export function ManutencaoTab() {
     }
   }
 
+  const handleSubmit = (event?: React.FormEvent) => {
+    if (event) event.preventDefault()
+    handleSave()
+  }
+
   const handleDelete = async (record: MaintenanceRecord) => {
     try {
       await deleteRecord.mutateAsync(record.id)
@@ -491,7 +496,7 @@ export function ManutencaoTab() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-neutral-500">Status:</span>
-          {(['todas', 'ATRASADA', 'PROXIMA', 'AGENDADA', 'EM_DIA'] as const).map((s) => {
+          {(['todas', 'ATRASADA', 'PROXIMA', 'AGENDADA', 'EM_DIA', 'REALIZADA'] as const).map((s) => {
             const active = statusFilter === s
             return (
               <button
@@ -529,8 +534,8 @@ export function ManutencaoTab() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {filteredRecords.map((record) => {
-            const status = deriveStatus(record)
-            const nextDiff = record.nextDate ? diffInDays(todayLocal(), record.nextDate) : null
+            const isLatest = latestRecordByEquipment.get(record.equipment?.trim().toUpperCase())?.id === record.id
+            const statusInfo = deriveRecordStatus(record, isLatest)
             return (
               <Card key={record.id} className="space-y-4">
                 <div className="flex items-start justify-between gap-4">
@@ -546,7 +551,7 @@ export function ManutencaoTab() {
                     <div className="text-sm text-neutral-500">{record.type}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusPill status={status} />
+                    <StatusPill statusInfo={statusInfo} />
                     <button
                       type="button"
                       onClick={() => handleOpenEdit(record)}
@@ -574,9 +579,9 @@ export function ManutencaoTab() {
                     <div className="text-xs uppercase tracking-wide text-neutral-400">Próxima</div>
                     <div className="mt-1 text-sm font-medium text-neutral-900">
                       {record.nextDate ? formatLongBR(record.nextDate) : 'Sem previsão'}
-                      {nextDiff !== null ? (
-                        <span className={'ml-2 text-xs ' + (nextDiff < 0 ? 'text-red-600' : nextDiff <= 7 ? 'text-amber-600' : 'text-neutral-400')}>
-                          {nextDiff < 0 ? `${Math.abs(nextDiff)}d atraso` : nextDiff === 0 ? 'hoje' : `em ${nextDiff}d`}
+                      {isLatest && record.nextDate && statusInfo.diffDays !== null ? (
+                        <span className={'ml-2 text-xs font-semibold ' + (statusInfo.status === 'ATRASADA' ? 'text-red-600' : statusInfo.status === 'PROXIMA' ? 'text-amber-600' : 'text-neutral-500')}>
+                          {statusInfo.status === 'ATRASADA' ? `${statusInfo.diffDays}d atraso` : statusInfo.diffDays === 0 ? 'hoje' : `em ${statusInfo.diffDays}d`}
                         </span>
                       ) : null}
                     </div>
@@ -600,13 +605,13 @@ export function ManutencaoTab() {
         isEditing={Boolean(editingRecord)}
         isSaving={editingRecord ? updateRecord.isPending : createRecord.isPending}
         onClose={handleCloseModal}
-        onSave={handleSave}
-        setForm={setForm}
+        onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
+        onSubmit={handleSubmit}
         equipmentOptions={equipmentOptions}
         technicianOptions={technicianOptions}
       />
 
-      {/* Modal historico por equipamento */}
+      {/* Modal historico do equipamento */}
       <EquipmentHistoryModal
         equipment={historyEquipment}
         records={records}
@@ -636,8 +641,8 @@ interface MaintenanceModalProps {
   isEditing: boolean
   isSaving: boolean
   onClose: () => void
-  onSave: () => void
-  setForm: Dispatch<SetStateAction<MaintenanceRequest>>
+  onChange: (patch: Partial<MaintenanceRequest>) => void
+  onSubmit: (event: React.FormEvent) => void
   equipmentOptions: ComboboxOption[]
   technicianOptions: ComboboxOption[]
 }
@@ -648,100 +653,106 @@ function MaintenanceModal({
   isEditing,
   isSaving,
   onClose,
-  onSave,
-  setForm,
+  onChange,
+  onSubmit,
   equipmentOptions,
   technicianOptions,
 }: MaintenanceModalProps) {
-  const { toast } = useToast()
   const suggestObservation = useSuggestObservation()
 
-  // C8 — Sugere uma nota de manutencao a partir dos dados ja preenchidos.
-  // Apenas preenche o campo; o tecnico revisa e decide salvar.
-  const handleSuggestNotes = async () => {
-    if (suggestObservation.isPending) return
-    if (!form.equipment || !form.type) {
-      toast.warning('Informe equipamento e tipo antes de sugerir a nota.')
-      return
-    }
-    const contextParts = [
-      `Equipamento: ${form.equipment}`,
-      `Tipo de manutenção: ${form.type}`,
-      `Data: ${form.date}`,
-    ]
-    if (form.nextDate) contextParts.push(`Próxima manutenção: ${form.nextDate}`)
-    if (form.technician) contextParts.push(`Técnico: ${form.technician}`)
-    try {
-      const suggestion = await suggestObservation.mutateAsync({
+  const handleSuggest = () => {
+    suggestObservation.mutate(
+      {
         kind: 'maintenance',
-        context: contextParts.join(' | '),
-      })
-      setForm((current) => ({ ...current, notes: suggestion }))
-    } catch {
-      toast.error('Não foi possível gerar a sugestão agora.')
-    }
+        context: `Equipamento: ${form.equipment || 'não informado'}, Tipo: ${form.type}, Data: ${form.date || 'hoje'}, Próxima: ${form.nextDate || 'não informada'}, Técnico: ${form.technician || 'não informado'}`,
+      },
+      {
+        onSuccess: (data) => {
+          if (data.suggestion) {
+            onChange({ notes: data.suggestion })
+          }
+        },
+      }
+    )
   }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEditing ? 'Editar manutenção' : 'Nova manutenção'}
+      title={isEditing ? 'Editar Manutenção' : 'Nova Manutenção'}
+      size="md"
       footer={
-        <div className="flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={onSave} loading={isSaving}>{isEditing ? 'Atualizar' : 'Salvar'}</Button>
-        </div>
+        <>
+          <Button variant="secondary" onClick={onClose} type="button">
+            Cancelar
+          </Button>
+          <Button onClick={onSubmit} disabled={isSaving} type="button">
+            {isSaving ? 'Salvando...' : isEditing ? 'Atualizar' : 'Cadastrar'}
+          </Button>
+        </>
       }
     >
-      <div className="grid gap-4 md:grid-cols-2">
+      <form onSubmit={onSubmit} className="space-y-4">
         <Combobox
           label="Equipamento"
-          placeholder="Busque ou digite um novo equipamento"
+          placeholder="Digite ou selecione o equipamento"
           value={form.equipment}
-          onChange={(next) => setForm((current) => ({ ...current, equipment: next }))}
+          onChange={(value) => onChange({ equipment: value })}
           options={equipmentOptions}
           allowCustom
-          createLabel="Cadastrar novo"
-          emptyText="Nenhum equipamento cadastrado — digite para criar"
+          required
         />
-        <Select label="Tipo" value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}>
-          {MAINTENANCE_TYPES.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
+        <Select
+          label="Tipo de Manutenção"
+          value={form.type}
+          onChange={(event) => onChange({ type: event.target.value })}
+          required
+        >
+          {MAINTENANCE_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
           ))}
         </Select>
-        <Input label="Data" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} />
-        <Input label="Próxima data" type="date" value={form.nextDate ?? ''} onChange={(event) => setForm((current) => ({ ...current, nextDate: event.target.value }))} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Input
+            label="Data Realizada"
+            type="date"
+            value={form.date}
+            onChange={(event) => onChange({ date: event.target.value })}
+            required
+          />
+          <Input
+            label="Próxima Manutenção"
+            type="date"
+            value={form.nextDate || ''}
+            onChange={(event) => onChange({ nextDate: event.target.value })}
+          />
+        </div>
         <Combobox
-          label="Técnico"
-          placeholder="Busque ou digite o técnico"
-          value={form.technician ?? ''}
-          onChange={(next) => setForm((current) => ({ ...current, technician: next }))}
+          label="Técnico Responsável"
+          placeholder="Digite ou selecione o técnico"
+          value={form.technician || ''}
+          onChange={(value) => onChange({ technician: value })}
           options={technicianOptions}
           allowCustom
-          createLabel="Cadastrar novo"
-          emptyText="Nenhum técnico cadastrado — digite para criar"
         />
-      </div>
-      <div className="mt-4">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-neutral-700">Notas</span>
-          <button
-            type="button"
-            onClick={handleSuggestNotes}
-            disabled={suggestObservation.isPending}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
-            title="Sugestão assistiva gerada por IA"
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            {suggestObservation.isPending ? 'Gerando...' : 'Sugerir nota'}
-          </button>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-neutral-700">Observações</label>
+            <button
+              type="button"
+              onClick={handleSuggest}
+              disabled={suggestObservation.isPending}
+              className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 hover:text-purple-700 disabled:opacity-50"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {suggestObservation.isPending ? 'Sugerindo...' : 'Sugerir com IA'}
+            </button>
+          </div>
+          <TextArea value={form.notes} onChange={(event) => onChange({ notes: event.target.value })} />
+          {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
         </div>
-        <TextArea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
-        {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
-      </div>
+      </form>
     </Modal>
   )
 }
@@ -755,21 +766,19 @@ interface EquipmentHistoryModalProps {
 /**
  * Historico completo de um equipamento, aberto ao clicar no nome do
  * equipamento na lista. Exibe todas as manutencoes em ordem cronologica
- * e destaca a proxima prevista.
+ * e destaca o status ativo (atrasada, proxima ou em dia).
  */
 function EquipmentHistoryModal({ equipment, records, onClose }: EquipmentHistoryModalProps) {
   const isOpen = equipment !== null
 
-  const { list, upcoming } = useMemo(() => {
+  const { list, latest, statusInfo } = useMemo(() => {
+    if (!equipment) return { list: [], latest: null, statusInfo: null }
     const list = records
-      .filter((r) => r.equipment === equipment)
+      .filter((r) => r.equipment?.trim().toLowerCase() === equipment.trim().toLowerCase())
       .sort((a, b) => compareLocalDate(b.date, a.date))
-    // Proxima prevista = a `nextDate` mais cedo que ainda nao passou
-    const today = todayLocal()
-    const upcoming = list
-      .filter((r) => r.nextDate && compareLocalDate(r.nextDate, today) >= 0)
-      .sort((a, b) => compareLocalDate(a.nextDate, b.nextDate))[0]
-    return { list, upcoming }
+    const latest = list[0] ?? null
+    const statusInfo = latest ? deriveRecordStatus(latest, true) : null
+    return { list, latest, statusInfo }
   }, [records, equipment])
 
   return (
@@ -781,22 +790,33 @@ function EquipmentHistoryModal({ equipment, records, onClose }: EquipmentHistory
     >
       {!isOpen ? null : (
         <div className="space-y-4">
-          {upcoming ? (
+          {statusInfo?.status === 'ATRASADA' ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-red-900">
+                <AlertTriangle className="h-4 w-4 text-red-600" /> Manutenção atrasada
+              </div>
+              <div className="mt-1 text-base font-medium text-red-950">
+                Prevista para {formatLongBR(latest?.nextDate ?? '')} ({statusInfo.diffDays} dias de atraso) · {latest?.type}
+              </div>
+            </div>
+          ) : latest?.nextDate ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
                 <Clock className="h-4 w-4" /> Próxima manutenção prevista
               </div>
               <div className="mt-1 text-base font-medium text-amber-950">
-                {formatLongBR(upcoming.nextDate ?? '')} · {upcoming.type}
+                {formatLongBR(latest.nextDate)} · {latest.type} {statusInfo?.diffDays !== null ? `(${statusInfo?.diffDays === 0 ? 'hoje' : `em ${statusInfo?.diffDays} dias`})` : ''}
               </div>
             </div>
           ) : (
             <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900">
               <div className="flex items-center gap-2 font-semibold">
-                <CheckCircle2 className="h-4 w-4" /> Sem manutenção futura agendada
+                <CheckCircle2 className="h-4 w-4 text-green-700" /> Manutenções em dia
               </div>
               <div className="mt-1 text-green-900/80">
-                Todos os registros deste equipamento estão concluídos ou sem previsão.
+                {latest
+                  ? `Última manutenção realizada em ${formatLongBR(latest.date)} (${latest.type}). Sem nova data agendada.`
+                  : 'Nenhuma manutenção registrada para este equipamento.'}
               </div>
             </div>
           )}
