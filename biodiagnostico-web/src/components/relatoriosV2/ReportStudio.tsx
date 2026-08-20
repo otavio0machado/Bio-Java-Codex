@@ -13,9 +13,7 @@ import {
   PlayCircle,
   Printer,
   RotateCcw,
-  ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Tag,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -65,7 +63,6 @@ export function ReportStudio() {
 
   const defaultsInitializedRef = useRef<ReportCode | null>(null)
 
-  // Cleanup blob URL on unmount or new PDF
   useEffect(() => {
     return () => {
       if (pdfBlobUrl) {
@@ -74,7 +71,6 @@ export function ReportStudio() {
     }
   }, [pdfBlobUrl])
 
-  // Pre-selection of format
   useEffect(() => {
     const def = definitionQuery.data
     if (def && !def.supportedFormats.includes(format)) {
@@ -132,7 +128,7 @@ export function ReportStudio() {
 
       setLastExecution(finalExecution)
 
-      // Automatically download blob and load into live PDF viewer
+      // Download blob to show in PDF viewer
       try {
         const downloadResult = await reportsV2Service.downloadBlob(finalExecution.id)
         if (pdfBlobUrl) {
@@ -142,7 +138,7 @@ export function ReportStudio() {
         setPdfBlobUrl(newUrl)
         setPdfFilename(downloadResult.filename ?? `${finalExecution.reportNumber ?? finalExecution.id}.pdf`)
       } catch (blobErr) {
-        toast.warning('Laudo gerado com sucesso, mas não foi possível carregar o preview embutido.')
+        toast.warning('Laudo gerado com sucesso.')
       }
     } catch (error) {
       setGenerateError(extractErrorMessage(error))
@@ -162,7 +158,7 @@ export function ReportStudio() {
         result.filename ?? `${lastExecution.reportNumber ?? lastExecution.id}.pdf`
       anchor.click()
       URL.revokeObjectURL(url)
-      toast.success('Download do laudo iniciado.')
+      toast.success('Download iniciado.')
     } catch (error) {
       toast.error(`Falha ao baixar: ${extractErrorMessage(error)}`)
     }
@@ -186,26 +182,17 @@ export function ReportStudio() {
     }
     try {
       await navigator.clipboard.writeText(lastExecution.verifyUrl)
-      toast.success('Link de verificação pública copiado para a área de transferência.')
+      toast.success('Link de verificação pública copiado.')
     } catch {
       toast.warning('Não foi possível copiar o link automaticamente.')
     }
   }
 
-  const handleApplyPreset = (periodType: string, customPayload?: Record<string, unknown>) => {
-    setFilters((prev) => ({
-      ...prev,
-      periodType,
-      ...customPayload,
-    }))
-    toast.success(`Preset '${periodType}' aplicado aos filtros.`)
-  }
-
   if (!reportCode) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <Card>
-          <p className="text-sm text-neutral-600">Código de relatório ausente.</p>
+          <p className="text-base text-neutral-600">Código de relatório ausente.</p>
         </Card>
       </div>
     )
@@ -213,16 +200,15 @@ export function ReportStudio() {
 
   if (definitionQuery.isLoading) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 flex min-h-[40vh] items-center justify-center">
         <LoadingSpinner size="lg" className="text-green-800" />
-        <p className="text-sm text-neutral-500">Carregando estúdio de laudos...</p>
       </div>
     )
   }
 
   if (definitionQuery.isError || !definitionQuery.data) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
         <Card className="space-y-4">
           <div className="flex items-center gap-3 text-red-700">
             <AlertTriangle className="h-6 w-6" />
@@ -231,10 +217,10 @@ export function ReportStudio() {
           <p className="text-sm text-neutral-600">
             {definitionQuery.error
               ? extractErrorMessage(definitionQuery.error)
-              : 'Não foi possível carregar a definição e os esquemas deste relatório.'}
+              : 'Não foi possível carregar a definição deste relatório.'}
           </p>
           <Button variant="secondary" onClick={() => navigate('/relatorios')} icon={<ArrowLeft className="h-4 w-4" />}>
-            Voltar à Central de Relatórios
+            Voltar aos Relatórios
           </Button>
         </Card>
       </div>
@@ -243,48 +229,38 @@ export function ReportStudio() {
 
   const definition = definitionQuery.data
   const canGenerate = hasRequiredFilters(definition, filters)
-  const lastExecutionHasWarnings = (lastExecution?.warnings ?? []).length > 0
   const isSigned = lastExecution?.status === 'SIGNED'
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      {/* Studio Header */}
-      <header className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-neutral-200/80 bg-white p-6 shadow-sm">
+    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+      {/* Header Padronizado */}
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             onClick={() => navigate('/relatorios')}
             icon={<ArrowLeft className="h-4 w-4" />}
           >
-            Central
+            Voltar
           </Button>
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-md bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-900">
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-bold tracking-tight text-neutral-900">{definition.name}</h1>
+              <span className="rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-semibold text-neutral-600">
                 {definition.code}
               </span>
-              {definition.signatureRequired ? (
-                <span className="inline-flex items-center gap-1 rounded-md bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-900">
-                  <ShieldCheck className="h-3 w-3" /> Assinatura RT Obrigatória
-                </span>
-              ) : null}
-              <span className="rounded-md bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">
-                Retenção: {formatRetention(definition.retentionDays)}
-              </span>
             </div>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-neutral-900">{definition.name}</h1>
-            <p className="text-sm text-neutral-500">{definition.description}</p>
+            <p className="mt-1 text-base text-neutral-500">{definition.description}</p>
           </div>
         </div>
 
-        {/* Global actions */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
           {definition.supportedFormats.length > 1 ? (
             <Select value={format} onChange={(event) => setFormat(event.target.value as ReportFormat)}>
               {definition.supportedFormats.map((item) => (
                 <option key={item} value={item}>
-                  Formato: {item}
+                  {item}
                 </option>
               ))}
             </Select>
@@ -296,73 +272,20 @@ export function ReportStudio() {
             disabled={!canGenerate}
             icon={<PlayCircle className="h-4 w-4" />}
           >
-            {lastExecution ? 'Regerar Laudo' : `Gerar Laudo Oficial (${format})`}
+            {lastExecution ? 'Regerar Laudo' : `Gerar Laudo (${format})`}
           </Button>
         </div>
       </header>
 
-      {/* Main Studio Grid */}
-      <div className="grid gap-6 lg:grid-cols-[24rem_1fr]">
-        {/* Left Column: Filter Sidebar */}
+      {/* Grid Principal */}
+      <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+        {/* Painel de Filtros à Esquerda */}
         <aside className="space-y-4">
-          {/* Quick Presets */}
-          <Card className="space-y-3 bg-gradient-to-br from-neutral-50 to-white">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-green-800" />
-              <h3 className="text-sm font-semibold text-neutral-900">Atalhos de Período</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleApplyPreset('current-month')}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left text-xs font-medium text-neutral-700 shadow-2xs transition hover:border-green-800 hover:text-green-900"
-              >
-                📅 Mês Atual
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const lastMonth = new Date()
-                  lastMonth.setMonth(lastMonth.getMonth() - 1)
-                  handleApplyPreset('specific-month', {
-                    month: lastMonth.getMonth() + 1,
-                    year: lastMonth.getFullYear(),
-                  })
-                }}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left text-xs font-medium text-neutral-700 shadow-2xs transition hover:border-green-800 hover:text-green-900"
-              >
-                ⏪ Mês Anterior
-              </button>
-              <button
-                type="button"
-                onClick={() => handleApplyPreset('year', { year: new Date().getFullYear() })}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left text-xs font-medium text-neutral-700 shadow-2xs transition hover:border-green-800 hover:text-green-900"
-              >
-                📊 Ano Fiscal ({new Date().getFullYear()})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const now = new Date()
-                  const past30 = new Date(Date.now() - 30 * 86400000)
-                  handleApplyPreset('date-range', {
-                    dateFrom: past30.toISOString().slice(0, 10),
-                    dateTo: now.toISOString().slice(0, 10),
-                  })
-                }}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-left text-xs font-medium text-neutral-700 shadow-2xs transition hover:border-green-800 hover:text-green-900"
-              >
-                ⏱️ Últimos 30 Dias
-              </button>
-            </div>
-          </Card>
-
-          {/* Filter Form Card */}
           <Card className="space-y-4">
             <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
               <div>
-                <h2 className="text-base font-semibold text-neutral-900">Parâmetros do Laudo</h2>
-                <p className="text-xs text-neutral-500">Defina os critérios de amostragem e filtros analíticos.</p>
+                <h2 className="text-lg font-semibold text-neutral-900">Parâmetros</h2>
+                <p className="text-xs text-neutral-500">Defina o período e filtros do laudo.</p>
               </div>
               <button
                 type="button"
@@ -370,7 +293,7 @@ export function ReportStudio() {
                 className="text-xs font-medium text-neutral-500 hover:text-neutral-900 inline-flex items-center gap-1"
                 title="Restaurar valores padrão"
               >
-                <RotateCcw className="h-3 w-3" /> Reset
+                <RotateCcw className="h-3.5 w-3.5" /> Limpar
               </button>
             </div>
 
@@ -380,18 +303,9 @@ export function ReportStudio() {
               onChange={setFilters}
             />
 
-            {/* Governance & Signature Options */}
-            <div className="space-y-3 rounded-2xl border border-neutral-200/80 bg-neutral-50/70 p-4">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-neutral-600">Governança & Assinatura</h4>
-
-              <label
-                className={
-                  'flex items-center gap-2 rounded-xl border bg-white p-2.5 text-xs font-medium transition ' +
-                  (definition.signatureRequired
-                    ? 'border-purple-200 text-purple-900 shadow-2xs'
-                    : 'border-neutral-200 text-neutral-700')
-                }
-              >
+            {/* Opção de Assinatura */}
+            <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+              <label className="flex items-center gap-2 text-sm font-medium text-neutral-700">
                 <input
                   type="checkbox"
                   checked={definition.signatureRequired ? true : signImmediately}
@@ -400,79 +314,58 @@ export function ReportStudio() {
                   className="h-4 w-4 rounded border-neutral-300 text-green-800 focus:ring-green-800 disabled:opacity-60"
                 />
                 <span>
-                  {definition.signatureRequired ? 'Assinatura digital obrigatória do RT' : 'Assinar digitalmente após gerar'}
+                  {definition.signatureRequired ? 'Assinatura obrigatória do RT' : 'Assinar digitalmente após gerar'}
                 </span>
               </label>
 
-              <div className="space-y-1 text-xs text-neutral-500">
-                <p className="font-semibold text-neutral-700">Base Normativa / Acreditação:</p>
-                <p className="leading-relaxed">{definition.legalBasis}</p>
+              <div className="border-t border-neutral-200/60 pt-2 text-xs text-neutral-500">
+                <p className="font-medium text-neutral-700">Base Normativa:</p>
+                <p className="mt-0.5">{definition.legalBasis}</p>
               </div>
             </div>
           </Card>
         </aside>
 
-        {/* Right Column: Live PDF Document Viewer */}
+        {/* Visualizador de Laudo à Direita */}
         <section className="space-y-4">
-          {/* Error notification */}
           {generateError ? (
-            <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 shadow-sm">
-              <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <div>
-                <p className="font-semibold">Erro na Emissão do Laudo</p>
-                <p className="mt-1 leading-relaxed">{generateError}</p>
+                <p className="font-semibold">Erro ao gerar laudo</p>
+                <p className="mt-1">{generateError}</p>
               </div>
             </div>
           ) : null}
 
-          {/* Last execution metadata bar */}
+          {/* Barra de Status do Laudo Gerado */}
           {lastExecution ? (
             <div
               className={
-                'flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 shadow-sm transition ' +
-                (lastExecutionHasWarnings
-                  ? 'border-amber-200 bg-amber-50/70 text-amber-950'
-                  : 'border-emerald-200 bg-emerald-50/70 text-emerald-950')
+                'flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4 text-sm ' +
+                (lastExecution.status === 'WITH_WARNINGS'
+                  ? 'border-amber-200 bg-amber-50 text-amber-950'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-950')
               }
             >
               <div className="flex items-center gap-3">
                 {isSigned ? (
-                  <div className="rounded-xl bg-emerald-600 p-2 text-white">
-                    <ShieldCheck className="h-5 w-5" />
-                  </div>
-                ) : lastExecutionHasWarnings ? (
-                  <div className="rounded-xl bg-amber-600 p-2 text-white">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
+                  <ShieldCheck className="h-5 w-5 text-emerald-700 shrink-0" />
                 ) : (
-                  <div className="rounded-xl bg-emerald-600 p-2 text-white">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
+                  <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
                 )}
                 <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-bold text-base">
-                      {lastExecution.reportNumber ?? 'Laudo Oficial'}
-                    </p>
-                    {isSigned ? (
-                      <span className="rounded-full bg-emerald-200/70 px-2 py-0.5 text-xs font-semibold text-emerald-900">
-                        Assinado Digitalmente
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-neutral-200 px-2 py-0.5 text-xs font-semibold text-neutral-800">
-                        Pendente de Assinatura
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs opacity-85">
-                    Período: <strong>{lastExecution.periodLabel ?? '-'}</strong> · Emitido por{' '}
-                    <strong>{lastExecution.username ?? 'Sistema'}</strong>
-                    {lastExecution.signedAt ? ` · Assinado em ${new Date(lastExecution.signedAt).toLocaleString('pt-BR')}` : ''}
+                  <p className="font-semibold">
+                    {lastExecution.reportNumber ?? 'Laudo Oficial'}{' '}
+                    {isSigned ? '(Assinado)' : '(Não assinado)'}
+                  </p>
+                  <p className="text-xs opacity-80">
+                    Período: {lastExecution.periodLabel ?? '-'} · Emitido em{' '}
+                    {new Date(lastExecution.createdAt).toLocaleString('pt-BR')}
                   </p>
                 </div>
               </div>
 
-              {/* Action buttons on generated bar */}
               <div className="flex flex-wrap items-center gap-2">
                 {!isSigned ? (
                   <Button
@@ -481,7 +374,7 @@ export function ReportStudio() {
                     onClick={() => setIsSignModalOpen(true)}
                     icon={<FileSignature className="h-3.5 w-3.5" />}
                   >
-                    Assinar como RT
+                    Assinar
                   </Button>
                 ) : null}
 
@@ -516,20 +409,14 @@ export function ReportStudio() {
             </div>
           ) : null}
 
-          {/* Live Document Viewer Card */}
-          <Card className="min-h-[38rem] overflow-hidden p-0">
-            {/* Viewer Toolbar */}
-            <div className="flex flex-wrap items-center justify-between border-b border-neutral-200 bg-neutral-50/90 px-4 py-3">
+          {/* Card do Visualizador */}
+          <Card className="min-h-[36rem] overflow-hidden p-0">
+            <div className="flex items-center justify-between border-b border-neutral-100 bg-neutral-50 px-4 py-3">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-green-800" />
-                <span className="text-sm font-semibold text-neutral-900">
-                  {pdfFilename ?? 'Visualizador Oficial de Laudo (Alta Fidelidade)'}
+                <span className="text-sm font-semibold text-neutral-800">
+                  {pdfFilename ?? 'Visualizador de Laudo'}
                 </span>
-                {pdfBlobUrl ? (
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800">
-                    PDF 300 DPI
-                  </span>
-                ) : null}
               </div>
 
               {pdfBlobUrl ? (
@@ -539,11 +426,9 @@ export function ReportStudio() {
                     variant="ghost"
                     onClick={handlePrint}
                     icon={<Printer className="h-3.5 w-3.5" />}
-                    title="Imprimir laudo"
                   >
                     Imprimir
                   </Button>
-
                   <a
                     href={pdfBlobUrl}
                     target="_blank"
@@ -552,13 +437,11 @@ export function ReportStudio() {
                   >
                     <ExternalLink className="h-3.5 w-3.5" /> Nova Aba
                   </a>
-
                   <Button
                     size="sm"
                     variant="ghost"
                     onClick={() => setIsFullscreen(!isFullscreen)}
                     icon={<Maximize2 className="h-3.5 w-3.5" />}
-                    title="Tela cheia"
                   >
                     {isFullscreen ? 'Normal' : 'Expandir'}
                   </Button>
@@ -566,8 +449,7 @@ export function ReportStudio() {
               ) : null}
             </div>
 
-            {/* Viewer Body */}
-            <div className={`relative bg-neutral-100 ${isFullscreen ? 'fixed inset-4 z-50 rounded-2xl shadow-2xl flex flex-col bg-white' : 'min-h-[36rem]'}`}>
+            <div className={`relative bg-neutral-100 ${isFullscreen ? 'fixed inset-4 z-50 rounded-2xl shadow-2xl flex flex-col bg-white' : 'min-h-[34rem]'}`}>
               {isFullscreen ? (
                 <div className="flex items-center justify-between border-b p-3 bg-neutral-50">
                   <span className="font-semibold text-sm">{pdfFilename}</span>
@@ -576,37 +458,23 @@ export function ReportStudio() {
               ) : null}
 
               {isPdfLoading ? (
-                <div className="flex h-[36rem] flex-col items-center justify-center gap-3">
+                <div className="flex h-[34rem] flex-col items-center justify-center gap-3">
                   <LoadingSpinner size="lg" className="text-green-800" />
-                  <p className="text-sm font-medium text-neutral-600">Compilando laudo em alta resolução (300 DPI)...</p>
-                  <p className="text-xs text-neutral-400">Processando tabelas analíticas, gráficos de dispersão e assinaturas.</p>
+                  <p className="text-sm text-neutral-600">Compilando laudo oficial...</p>
                 </div>
               ) : pdfBlobUrl ? (
                 <iframe
                   src={`${pdfBlobUrl}#toolbar=1&navpanes=0&scrollbar=1`}
                   title="Laudo PDF"
-                  className="h-[42rem] w-full border-0 bg-white shadow-inner"
+                  className="h-[38rem] w-full border-0 bg-white"
                 />
               ) : (
-                <div className="flex h-[36rem] flex-col items-center justify-center gap-4 p-8 text-center">
-                  <div className="rounded-3xl bg-white p-6 shadow-sm border border-neutral-200/80">
-                    <FileCheck2 className="mx-auto h-12 w-12 text-green-800" />
-                    <h3 className="mt-3 text-lg font-bold text-neutral-900">Laudo Pronto para Emissão</h3>
-                    <p className="mt-1 max-w-md text-sm text-neutral-500">
-                      Configure os filtros no painel à esquerda e clique em <strong>"Gerar Laudo Oficial"</strong> para visualizar o documento completo em alta resolução com assinatura digital.
-                    </p>
-                    <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-700" /> Gráficos JFreeChart 300 DPI
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-700" /> QR Code de Validação Pública
-                      </span>
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-700" /> Rastreabilidade SHA-256
-                      </span>
-                    </div>
-                  </div>
+                <div className="flex h-[34rem] flex-col items-center justify-center gap-3 p-8 text-center text-neutral-500">
+                  <FileCheck2 className="h-10 w-10 text-neutral-400" />
+                  <p className="text-base font-semibold text-neutral-800">Pronto para Geração</p>
+                  <p className="max-w-md text-sm text-neutral-500">
+                    Ajuste os parâmetros no painel ao lado e clique em <strong>"Gerar Laudo"</strong> para visualizar o laudo em alta resolução.
+                  </p>
                 </div>
               )}
             </div>
@@ -614,7 +482,7 @@ export function ReportStudio() {
         </section>
       </div>
 
-      {/* Signature Modal */}
+      {/* Modal de Assinatura */}
       {isSignModalOpen && lastExecution ? (
         <SignReportModal
           execution={lastExecution}
@@ -622,7 +490,6 @@ export function ReportStudio() {
           onSigned={(signed) => {
             setLastExecution(signed)
             setIsSignModalOpen(false)
-            // Reload updated signed PDF
             void (async () => {
               try {
                 const res = await reportsV2Service.downloadBlob(signed.id)
@@ -636,7 +503,7 @@ export function ReportStudio() {
         />
       ) : null}
 
-      {/* Labels Modal */}
+      {/* Modal de Etiquetas */}
       {isLabelsModalOpen && lastExecution ? (
         <LabelsManagerModal
           execution={lastExecution}
@@ -697,22 +564,10 @@ function notifyGenerated(
 ) {
   const reportNumber = execution.reportNumber ?? ''
   if ((execution.warnings ?? []).length > 0 || execution.status === 'WITH_WARNINGS') {
-    toast.warning(`Laudo ${reportNumber} gerado com observações de conformidade.`)
+    toast.warning(`Laudo ${reportNumber} gerado com observações.`)
     return
   }
-  toast.success(`Laudo ${reportNumber} emitido com sucesso${signed ? ' e assinado digitalmente' : ''}.`)
-}
-
-function formatRetention(days: number): string {
-  if (!days || days <= 0) return 'Permanente'
-  if (days < 30) return `${days} dias`
-  if (days < 365) {
-    const months = Math.round(days / 30)
-    return `${months} ${months === 1 ? 'mês' : 'meses'}`
-  }
-  const years = Math.round((days / 365) * 10) / 10
-  const rounded = Number.isInteger(years) ? years.toFixed(0) : years.toFixed(1)
-  return `${rounded} ${years === 1 ? 'ano' : 'anos'}`
+  toast.success(`Laudo ${reportNumber} gerado com sucesso${signed ? ' e assinado digitalmente' : ''}.`)
 }
 
 function extractErrorMessage(error: unknown): string {

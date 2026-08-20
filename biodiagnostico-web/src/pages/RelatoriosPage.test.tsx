@@ -18,6 +18,7 @@ vi.mock('../services/reportsV2Service', async () => {
     reportsV2Service: {
       ...actual.reportsV2Service,
       catalog: () => mockCatalog(),
+      listExecutions: () => Promise.resolve({ content: [], totalElements: 0, totalPages: 0, number: 0, size: 1 }),
     },
   }
 })
@@ -91,17 +92,17 @@ const sampleDefinition: ReportDefinition = {
 }
 
 describe('RelatoriosPage', () => {
-  it('renderiza Central de Laudos e catálogo quando definitions são carregadas', async () => {
+  it('renderiza Relatórios e catálogo harmonizados com o design system', async () => {
     mockCatalog.mockResolvedValue([sampleDefinition])
 
     renderPage()
 
-    expect(await screen.findByRole('button', { name: /Catálogo de Laudos Oficiais/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Histórico & Custódia de Emissões/i })).toBeInTheDocument()
-    expect(screen.getByText(/Central de Inteligência & Laudos Oficiais/i)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Catálogo de Relatórios/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Histórico de Emissões/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: /Relatórios/i })).toBeInTheDocument()
     // Presets rápidos devem estar visíveis
-    expect(screen.getByText(/Fechamento Mensal de Qualidade/i)).toBeInTheDocument()
-    expect(screen.getByText(/Dossiê Fiscal ANVISA/i)).toBeInTheDocument()
+    expect(screen.getByText(/Fechamento de CQ/i)).toBeInTheDocument()
+    expect(screen.getByText(/Dossiê ANVISA/i)).toBeInTheDocument()
     // Card do laudo deve aparecer no catálogo
     expect(await screen.findByText('Relatorio Operacional de CQ')).toBeInTheDocument()
   })
