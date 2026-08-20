@@ -486,10 +486,5 @@ class OpenAiProviderTest {
         public URI getURI() {
             return URI.create("https://api.openai.com/v1/chat/completions");
         }
-
-        @Override
-        public java.util.Map<String, Object> getAttributes() {
-            return new java.util.HashMap<>();
-        }
     }
 }
