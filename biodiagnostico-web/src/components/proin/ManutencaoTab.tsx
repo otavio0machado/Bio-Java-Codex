@@ -316,11 +316,6 @@ export function ManutencaoTab() {
     }
   }
 
-  const handleSubmit = (event?: React.FormEvent) => {
-    if (event) event.preventDefault()
-    handleSave()
-  }
-
   const handleDelete = async (record: MaintenanceRecord) => {
     try {
       await deleteRecord.mutateAsync(record.id)
@@ -605,8 +600,8 @@ export function ManutencaoTab() {
         isEditing={Boolean(editingRecord)}
         isSaving={editingRecord ? updateRecord.isPending : createRecord.isPending}
         onClose={handleCloseModal}
-        onChange={(patch) => setForm((current) => ({ ...current, ...patch }))}
-        onSubmit={handleSubmit}
+        onSave={handleSave}
+        setForm={setForm}
         equipmentOptions={equipmentOptions}
         technicianOptions={technicianOptions}
       />
@@ -641,8 +636,8 @@ interface MaintenanceModalProps {
   isEditing: boolean
   isSaving: boolean
   onClose: () => void
-  onChange: (patch: Partial<MaintenanceRequest>) => void
-  onSubmit: (event: React.FormEvent) => void
+  onSave: () => void
+  setForm: Dispatch<SetStateAction<MaintenanceRequest>>
   equipmentOptions: ComboboxOption[]
   technicianOptions: ComboboxOption[]
 }
@@ -653,106 +648,100 @@ function MaintenanceModal({
   isEditing,
   isSaving,
   onClose,
-  onChange,
-  onSubmit,
+  onSave,
+  setForm,
   equipmentOptions,
   technicianOptions,
 }: MaintenanceModalProps) {
+  const { toast } = useToast()
   const suggestObservation = useSuggestObservation()
 
-  const handleSuggest = () => {
-    suggestObservation.mutate(
-      {
+  // C8 — Sugere uma nota de manutencao a partir dos dados ja preenchidos.
+  // Apenas preenche o campo; o tecnico revisa e decide salvar.
+  const handleSuggestNotes = async () => {
+    if (suggestObservation.isPending) return
+    if (!form.equipment || !form.type) {
+      toast.warning('Informe equipamento e tipo antes de sugerir a nota.')
+      return
+    }
+    const contextParts = [
+      `Equipamento: ${form.equipment}`,
+      `Tipo de manutenção: ${form.type}`,
+      `Data: ${form.date}`,
+    ]
+    if (form.nextDate) contextParts.push(`Próxima manutenção: ${form.nextDate}`)
+    if (form.technician) contextParts.push(`Técnico: ${form.technician}`)
+    try {
+      const suggestion = await suggestObservation.mutateAsync({
         kind: 'maintenance',
-        context: `Equipamento: ${form.equipment || 'não informado'}, Tipo: ${form.type}, Data: ${form.date || 'hoje'}, Próxima: ${form.nextDate || 'não informada'}, Técnico: ${form.technician || 'não informado'}`,
-      },
-      {
-        onSuccess: (data) => {
-          if (data.suggestion) {
-            onChange({ notes: data.suggestion })
-          }
-        },
-      }
-    )
+        context: contextParts.join(' | '),
+      })
+      setForm((current) => ({ ...current, notes: suggestion }))
+    } catch {
+      toast.error('Não foi possível gerar a sugestão agora.')
+    }
   }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={isEditing ? 'Editar Manutenção' : 'Nova Manutenção'}
-      size="md"
+      title={isEditing ? 'Editar manutenção' : 'Nova manutenção'}
       footer={
-        <>
-          <Button variant="secondary" onClick={onClose} type="button">
-            Cancelar
-          </Button>
-          <Button onClick={onSubmit} disabled={isSaving} type="button">
-            {isSaving ? 'Salvando...' : isEditing ? 'Atualizar' : 'Cadastrar'}
-          </Button>
-        </>
+        <div className="flex justify-end gap-3">
+          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
+          <Button onClick={onSave} loading={isSaving}>{isEditing ? 'Atualizar' : 'Salvar'}</Button>
+        </div>
       }
     >
-      <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
         <Combobox
           label="Equipamento"
-          placeholder="Digite ou selecione o equipamento"
+          placeholder="Busque ou digite um novo equipamento"
           value={form.equipment}
-          onChange={(value) => onChange({ equipment: value })}
+          onChange={(next) => setForm((current) => ({ ...current, equipment: next }))}
           options={equipmentOptions}
           allowCustom
-          required
+          createLabel="Cadastrar novo"
+          emptyText="Nenhum equipamento cadastrado — digite para criar"
         />
-        <Select
-          label="Tipo de Manutenção"
-          value={form.type}
-          onChange={(event) => onChange({ type: event.target.value })}
-          required
-        >
-          {MAINTENANCE_TYPES.map((t) => (
-            <option key={t} value={t}>{t}</option>
+        <Select label="Tipo" value={form.type} onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}>
+          {MAINTENANCE_TYPES.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
           ))}
         </Select>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input
-            label="Data Realizada"
-            type="date"
-            value={form.date}
-            onChange={(event) => onChange({ date: event.target.value })}
-            required
-          />
-          <Input
-            label="Próxima Manutenção"
-            type="date"
-            value={form.nextDate || ''}
-            onChange={(event) => onChange({ nextDate: event.target.value })}
-          />
-        </div>
+        <Input label="Data" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} />
+        <Input label="Próxima data" type="date" value={form.nextDate ?? ''} onChange={(event) => setForm((current) => ({ ...current, nextDate: event.target.value }))} />
         <Combobox
-          label="Técnico Responsável"
-          placeholder="Digite ou selecione o técnico"
-          value={form.technician || ''}
-          onChange={(value) => onChange({ technician: value })}
+          label="Técnico"
+          placeholder="Busque ou digite o técnico"
+          value={form.technician ?? ''}
+          onChange={(event) => setForm((current) => ({ ...current, technician: event }))}
           options={technicianOptions}
           allowCustom
+          createLabel="Cadastrar novo"
+          emptyText="Nenhum técnico cadastrado — digite para criar"
         />
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-neutral-700">Observações</label>
-            <button
-              type="button"
-              onClick={handleSuggest}
-              disabled={suggestObservation.isPending}
-              className="inline-flex items-center gap-1 text-xs font-medium text-purple-600 hover:text-purple-700 disabled:opacity-50"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {suggestObservation.isPending ? 'Sugerindo...' : 'Sugerir com IA'}
-            </button>
-          </div>
-          <TextArea value={form.notes} onChange={(event) => onChange({ notes: event.target.value })} />
-          {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
+      </div>
+      <div className="mt-4">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-neutral-700">Notas</span>
+          <button
+            type="button"
+            onClick={handleSuggestNotes}
+            disabled={suggestObservation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60"
+            title="Sugestão assistiva gerada por IA"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            {suggestObservation.isPending ? 'Gerando...' : 'Sugerir nota'}
+          </button>
         </div>
-      </form>
+        <TextArea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} />
+        {suggestObservation.data ? <AiAssistDisclaimer className="mt-2" /> : null}
+      </div>
     </Modal>
   )
 }
