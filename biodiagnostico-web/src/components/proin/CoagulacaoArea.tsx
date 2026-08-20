@@ -3,12 +3,15 @@ import {
   AlertTriangle,
   Beaker,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   XCircle,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import {
   useCreateQcBatch,
@@ -16,14 +19,27 @@ import {
   useQcReferences,
 } from '../../hooks/useQcRecords'
 import { qcService } from '../../services/qcService'
-import type { QcRecord, QcRecordRequest, QcReferenceValue, QcStatus } from '../../types'
-import { Button, Card, EmptyState, Input, Select, Skeleton, StatusBadge, useToast } from '../ui'
+import type { QcRecord, QcRecordRequest, QcReferenceValue } from '../../types'
+import { Button, Card, EmptyState, Input, Modal, Select, Skeleton, StatusBadge, useToast } from '../ui'
 import { formatLongBR } from '../../utils/date'
 import { CoagulacaoPncqModal } from './CoagulacaoPncqModal'
+import { ExamHistoryModal } from './ExamHistoryModal'
+import { PostCalibrationModal } from './PostCalibrationModal'
+
+const LeveyJenningsChart = lazy(() =>
+  import('../charts/LeveyJenningsChart').then((module) => ({
+    default: module.LeveyJenningsChart,
+  })),
+)
 
 export function CoagulacaoArea() {
   const { user } = useAuth()
   const { toast } = useToast()
+
+  // Filtros da seção de Histórico
+  const [historyDate, setHistoryDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [searchTerm, setSearchTerm] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('Todos')
 
   const {
     data: references = [],
@@ -34,27 +50,31 @@ export function CoagulacaoArea() {
     data: records = [],
     isLoading: isRecordsLoading,
     refetch: refetchRecords,
-  } = useQcRecords({ area: 'coagulacao' })
+  } = useQcRecords({
+    area: 'coagulacao',
+    startDate: historyDate,
+    endDate: historyDate,
+  })
 
   const createBatchMutation = useCreateQcBatch()
 
-  // Modal PNCQ
+  // Modais
   const [isPncqModalOpen, setIsPncqModalOpen] = useState(false)
+  const [postCalRecord, setPostCalRecord] = useState<QcRecord | null>(null)
+  const [chartRecord, setChartRecord] = useState<{ examName: string; level: string } | null>(null)
+  const [historyExam, setHistoryExam] = useState<{ examName: string; level: string } | null>(null)
 
-  // Quick Daily Entry State
+  // Entrada Rápida Diária
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10))
   const [selectedLot, setSelectedLot] = useState<string>('')
   const operatorName = user?.name || 'Bioquímico'
   const equipmentName = 'Coagulômetro'
 
-  // Form values
+  // Campos do formulário
   const [tpAtividade, setTpAtividade] = useState('')
   const [tpInr, setTpInr] = useState('')
   const [ttpa, setTtpa] = useState('')
   const [fibrinogenio, setFibrinogenio] = useState('')
-
-  // Chart Tab State
-  const [activeChartAnalyte, setActiveChartAnalyte] = useState<string>('TP - Atividade (%)')
 
   // Agrupar referências por lote
   const availableLots = useMemo(() => {
@@ -65,7 +85,6 @@ export function CoagulacaoArea() {
     return Array.from(lotSet)
   }, [references])
 
-  // Selecionar o primeiro lote disponível por padrão se nenhum estiver selecionado
   const currentLot = selectedLot || availableLots[0] || ''
 
   // Referências do lote selecionado
@@ -80,7 +99,6 @@ export function CoagulacaoArea() {
     return map
   }, [references, currentLot])
 
-  // Helper para buscar referência pelo nome canônico do exame
   const getRefFor = (name: string): QcReferenceValue | undefined => {
     const lower = name.toLowerCase()
     for (const [key, ref] of currentLotRefs.entries()) {
@@ -91,9 +109,7 @@ export function CoagulacaoArea() {
     return undefined
   }
 
-
-
-  // Cálculos em tempo real para o formulário rápido
+  // Cálculos em tempo real para a barra de entrada rápida
   const liveTpAtiv = useMemo(() => {
     const val = parseFloat(tpAtividade.replace(',', '.'))
     if (isNaN(val)) return null
@@ -187,7 +203,6 @@ export function CoagulacaoArea() {
     try {
       await createBatchMutation.mutateAsync(requests)
       toast.success('Corrida de Coagulação gravada com sucesso!')
-      // Limpar campos
       setTpAtividade('')
       setTpInr('')
       setTtpa('')
@@ -198,104 +213,63 @@ export function CoagulacaoArea() {
     }
   }
 
-  // Agrupamento de registros por data + lote para a Matriz de Planilha
-  interface CoagulationRunGroup {
-    key: string
-    date: string
-    lotNumber: string
-    level: string
-    operator: string
-    tpAtivRecord?: QcRecord
-    tpInrRecord?: QcRecord
-    ttpaRecord?: QcRecord
-    fibRecord?: QcRecord
-    overallStatus: QcStatus
-  }
-
-  const matrixRuns = useMemo(() => {
-    const map = new Map<string, CoagulationRunGroup>()
-
-    records.forEach((rec) => {
-      const key = `${rec.date}_${rec.lotNumber || 'SEM_LOTE'}`
-      let group = map.get(key)
-      if (!group) {
-        group = {
-          key,
-          date: rec.date,
-          lotNumber: rec.lotNumber || '—',
-          level: rec.level || 'Normal',
-          operator: rec.analyst || '—',
-          overallStatus: 'APROVADO',
-        }
-        map.set(key, group)
-      }
-
-      const examLower = rec.examName.toLowerCase()
-      if (examLower.includes('atividade') || examLower.includes('tp - ativ')) {
-        group.tpAtivRecord = rec
-      } else if (examLower.includes('inr')) {
-        group.tpInrRecord = rec
-      } else if (examLower.includes('ttpa')) {
-        group.ttpaRecord = rec
-      } else if (examLower.includes('fibrinog')) {
-        group.fibRecord = rec
-      }
-
-      if (rec.status === 'REPROVADO') {
-        group.overallStatus = 'REPROVADO'
-      } else if (rec.status === 'ALERTA' && group.overallStatus !== 'REPROVADO') {
-        group.overallStatus = 'ALERTA'
-      }
-    })
-
-    // Ordenar decrescente por data
-    return Array.from(map.values()).sort((a, b) => b.date.localeCompare(a.date))
-  }, [records])
-
-  // Registros para o Gráfico Levey-Jennings selecionado
-  const chartRecords = useMemo(() => {
-    const lower = activeChartAnalyte.toLowerCase()
-    return records
-      .filter((r) => r.examName.toLowerCase().includes(lower) || lower.includes(r.examName.toLowerCase()))
-      .sort((a, b) => a.date.localeCompare(b.date))
-  }, [records, activeChartAnalyte])
-
-  const chartReference = getRefFor(activeChartAnalyte)
-
-  const handleDeleteRun = async (group: CoagulationRunGroup) => {
-    if (!confirm(`Deseja excluir os lançamentos de coagulação do dia ${formatLongBR(group.date)}?`))
+  const handleDeleteRecord = async (record: QcRecord) => {
+    if (!confirm(`Deseja excluir o lançamento de ${record.examName} (${formatLongBR(record.date)})?`)) {
       return
+    }
     try {
-      const toDelete = [
-        group.tpAtivRecord?.id,
-        group.tpInrRecord?.id,
-        group.ttpaRecord?.id,
-        group.fibRecord?.id,
-      ].filter(Boolean) as string[]
-
-      for (const id of toDelete) {
-        await qcService.deleteRecord(id)
-      }
-
-      toast.success('Lançamentos excluídos.')
+      await qcService.deleteRecord(record.id)
+      toast.success('Registro de coagulação excluído com sucesso.')
       await refetchRecords()
     } catch {
-      toast.error('Erro ao excluir lançamentos.')
+      toast.error('Erro ao excluir registro de coagulação.')
     }
+  }
+
+  // Filtragem dos registros para a tabela de Histórico
+  const filteredRecords = useMemo(() => {
+    return records.filter((r) => {
+      if (searchTerm.trim()) {
+        const query = searchTerm.toLowerCase()
+        const matchExam = r.examName.toLowerCase().includes(query)
+        const matchLot = r.lotNumber?.toLowerCase().includes(query)
+        const matchDate = r.date.toLowerCase().includes(query)
+        if (!matchExam && !matchLot && !matchDate) return false
+      }
+
+      if (statusFilter !== 'Todos') {
+        if (statusFilter === 'OK' && r.status !== 'APROVADO') return false
+        if (statusFilter === 'ALERTA' && r.status !== 'ALERTA') return false
+        if (statusFilter === 'REPROVADO' && r.status !== 'REPROVADO') return false
+      }
+
+      if (historyDate && r.date !== historyDate) {
+        return false
+      }
+
+      return true
+    })
+  }, [records, searchTerm, statusFilter, historyDate])
+
+  const shiftDay = (delta: number) => {
+    const base = historyDate ? new Date(`${historyDate}T00:00:00`) : new Date()
+    base.setDate(base.getDate() + delta)
+    const yyyy = base.getFullYear()
+    const mm = String(base.getMonth() + 1).padStart(2, '0')
+    const dd = String(base.getDate()).padStart(2, '0')
+    setHistoryDate(`${yyyy}-${mm}-${dd}`)
   }
 
   const isLoading = isRefLoading || isRecordsLoading
 
   return (
     <div className="space-y-6">
-      {/* Header com Ações Rápidas */}
+      {/* Cabeçalho */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-neutral-900">
-            Controle de Qualidade — Coagulação
-          </h2>
+          <h2 className="text-xl font-bold text-neutral-900">Controle de Qualidade — Coagulação</h2>
           <p className="text-sm text-neutral-500">
-            Lançamento unificado de hemostasia (TP %, INR, TTPa) e matriz de controle mensal.
+            Lançamento unificado de hemostasia (TP %, INR, TTPa, Fibrinogênio), calibração e histórico.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -561,216 +535,266 @@ export function CoagulacaoArea() {
         </div>
       </Card>
 
-      {/* Grid Principal: Planilha Mensal (Esquerda) + Gráfico Levey-Jennings (Direita) */}
-      <div className="grid gap-6 lg:grid-cols-12">
-        {/* Planilha Matriz Mensal */}
-        <div className="lg:col-span-7">
-          <Card className="overflow-hidden p-0">
-            <div className="flex items-center justify-between border-b border-neutral-200 bg-neutral-50/80 px-5 py-4">
-              <div>
-                <h3 className="font-bold text-neutral-900">Planilha Mensal de Coagulação</h3>
-                <p className="text-xs text-neutral-500">
-                  Visão consolidada de todas as corridas registradas no mês.
-                </p>
-              </div>
-              <span className="rounded-full bg-green-100 px-3 py-1 font-mono text-xs font-semibold text-green-900">
-                {matrixRuns.length} {matrixRuns.length === 1 ? 'corrida' : 'corridas'}
-              </span>
-            </div>
+      {/* Seção Única: Histórico de Coagulação (Paridade com Bioquímica) */}
+      <Card>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xl font-semibold text-neutral-900">Histórico</h3>
+            <p className="text-xs text-neutral-500">
+              Registros individuais por parâmetro, status de calibração e gráficos Levey-Jennings.
+            </p>
+          </div>
+        </div>
 
-            {isLoading ? (
-              <div className="p-6">
-                <Skeleton height="16rem" />
-              </div>
-            ) : matrixRuns.length === 0 ? (
-              <EmptyState
-                icon={<Beaker className="h-8 w-8 text-neutral-400" />}
-                title="Sem corridas de coagulação registradas"
-                description="Use a barra de entrada rápida acima para lançar o controle diário de TP e TTPa."
-              />
-            ) : (
-              <div className="max-h-[500px] overflow-x-auto overflow-y-auto">
-                <table className="min-w-full divide-y divide-neutral-200 text-xs">
-                  <thead className="sticky top-0 bg-neutral-100/90 backdrop-blur-sm">
-                    <tr>
-                      <th className="px-3 py-3 text-left font-bold text-neutral-700">Data</th>
-                      <th className="px-3 py-3 text-left font-bold text-neutral-700">Lote</th>
-                      <th className="px-3 py-3 text-center font-bold text-neutral-700">TP Ativ (%)</th>
-                      <th className="px-3 py-3 text-center font-bold text-neutral-700">TP INR</th>
-                      <th className="px-3 py-3 text-center font-bold text-neutral-700">TTPa (s)</th>
-                      <th className="px-3 py-3 text-center font-bold text-neutral-700">Fibrinogênio</th>
-                      <th className="px-3 py-3 text-center font-bold text-neutral-700">Status</th>
-                      <th className="px-3 py-3 text-right font-bold text-neutral-700">Ações</th>
+        {/* Busca e Filtros */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="relative max-w-[280px] flex-1">
+            <Input
+              placeholder="Buscar exame ou lote..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="text-xs"
+            />
+            <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+          </div>
+
+          <Select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="w-[140px] text-xs"
+          >
+            <option value="Todos">Todos os status</option>
+            <option value="OK">OK / Aprovado</option>
+            <option value="ALERTA">Alerta</option>
+            <option value="REPROVADO">Reprovado</option>
+          </Select>
+
+          <span className="ml-auto text-xs text-neutral-500">
+            {filteredRecords.length} {filteredRecords.length === 1 ? 'registro carregado no dia' : 'registros carregados no dia'}
+          </span>
+        </div>
+
+        {/* Tabela de Histórico */}
+        {isLoading ? (
+          <div className="mt-4 space-y-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-12 animate-pulse rounded-xl bg-neutral-100" />
+            ))}
+          </div>
+        ) : filteredRecords.length === 0 ? (
+          <EmptyState
+            icon={<Beaker className="h-8 w-8 text-neutral-400" />}
+            title="Nenhum registro encontrado"
+            description="Nenhuma medição de coagulação corresponde aos filtros aplicados."
+          />
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-neutral-100 text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  <th className="px-3 py-2.5">Data</th>
+                  <th className="px-3 py-2.5">Exame</th>
+                  <th className="px-3 py-2.5">Lote / Nível</th>
+                  <th className="px-3 py-2.5">Valor</th>
+                  <th className="px-3 py-2.5">Alvo ± DP</th>
+                  <th className="px-3 py-2.5">CV%</th>
+                  <th className="px-3 py-2.5">CV Lim%</th>
+                  <th className="px-3 py-2.5">Status</th>
+                  <th className="px-3 py-2.5 text-center">Calibrar?</th>
+                  <th className="px-3 py-2.5">Pós-Calib</th>
+                  <th className="px-3 py-2.5 text-center">LJ</th>
+                  <th className="px-3 py-2.5 text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {filteredRecords.map((r) => {
+                  const rCv = r.cv ?? 0
+                  const rCvLimit = r.cvLimit ?? 15
+                  const needsCal = rCv > rCvLimit
+
+                  return (
+                    <tr key={r.id} className="hover:bg-neutral-50/50">
+                      <td className="whitespace-nowrap px-3 py-2.5 font-medium text-neutral-900">
+                        {formatLongBR(r.date)}
+                      </td>
+                      <td className="px-3 py-2.5 font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryExam({ examName: r.examName, level: r.level })}
+                          className="text-left text-green-900 underline-offset-2 hover:underline focus:outline-none focus:underline"
+                          title={`Ver histórico completo de ${r.examName}`}
+                        >
+                          {r.examName}
+                        </button>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-600">
+                        {r.lotNumber || '—'} ({r.level})
+                      </td>
+                      <td className="px-3 py-2.5 font-mono font-bold text-neutral-900">
+                        {r.value.toFixed(2)}{' '}
+                        {r.examName.includes('%')
+                          ? '%'
+                          : r.examName.includes('INR')
+                          ? ''
+                          : r.examName.includes('Tempo')
+                          ? 's'
+                          : ''}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-600">
+                        {r.targetValue?.toFixed(2)} ± {r.targetSd?.toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`font-mono font-semibold ${
+                            rCv <= rCvLimit ? 'text-green-700' : 'text-red-700'
+                          }`}
+                        >
+                          {r.cv !== undefined && r.cv !== null ? `${rCv.toFixed(2)}%` : '—'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-neutral-600">
+                        {rCvLimit.toFixed(2)}%
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <StatusBadge status={r.status} />
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        {needsCal ? (
+                          r.needsCalibration ? (
+                            <button
+                              type="button"
+                              onClick={() => setPostCalRecord(r)}
+                              className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-800 transition hover:bg-red-200"
+                              title="Clique para registrar pós-calibração"
+                            >
+                              SIM
+                            </button>
+                          ) : (
+                            <span
+                              className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800"
+                              title="Pós-calibração já registrada"
+                            >
+                              FEITO
+                            </span>
+                          )
+                        ) : (
+                          <span className="rounded-full border border-green-300 px-3 py-1 text-xs font-semibold text-green-700">
+                            NÃO
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {r.postCalibrationStatus ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className={`inline-flex w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                r.postCalibrationStatus === 'APROVADO'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {r.postCalibrationStatus}
+                            </span>
+                            <span className="font-mono text-[11px] text-neutral-500">
+                              {r.postCalibrationValue?.toFixed(2)} ({r.postCalibrationCv?.toFixed(2)}%)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-neutral-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setChartRecord({ examName: r.examName, level: r.level })}
+                          className="rounded-lg p-1.5 text-green-700 transition hover:bg-green-50"
+                          title={`Ver gráfico Levey-Jennings de ${r.examName}`}
+                        >
+                          <Activity className="h-5 w-5" />
+                        </button>
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRecord(r)}
+                          className="text-neutral-400 transition hover:text-red-600"
+                          title="Excluir medição"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-200 bg-white">
-                    {matrixRuns.map((group) => (
-                      <tr key={group.key} className="hover:bg-neutral-50/80">
-                        <td className="whitespace-nowrap px-3 py-2.5 font-medium text-neutral-900">
-                          {formatLongBR(group.date)}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 font-mono text-neutral-600">
-                          {group.lotNumber}
-                        </td>
-                        <td
-                          className={`px-3 py-2.5 text-center font-mono font-bold ${
-                            group.tpAtivRecord?.status === 'REPROVADO'
-                              ? 'bg-red-50 text-red-700'
-                              : group.tpAtivRecord?.status === 'ALERTA'
-                              ? 'bg-amber-50 text-amber-700'
-                              : 'text-neutral-900'
-                          }`}
-                        >
-                          {group.tpAtivRecord?.value !== undefined
-                            ? `${group.tpAtivRecord.value}%`
-                            : '—'}
-                        </td>
-                        <td
-                          className={`px-3 py-2.5 text-center font-mono font-bold ${
-                            group.tpInrRecord?.status === 'REPROVADO'
-                              ? 'bg-red-50 text-red-700'
-                              : group.tpInrRecord?.status === 'ALERTA'
-                              ? 'bg-amber-50 text-amber-700'
-                              : 'text-neutral-900'
-                          }`}
-                        >
-                          {group.tpInrRecord?.value !== undefined
-                            ? group.tpInrRecord.value.toFixed(2)
-                            : '—'}
-                        </td>
-                        <td
-                          className={`px-3 py-2.5 text-center font-mono font-bold ${
-                            group.ttpaRecord?.status === 'REPROVADO'
-                              ? 'bg-red-50 text-red-700'
-                              : group.ttpaRecord?.status === 'ALERTA'
-                              ? 'bg-amber-50 text-amber-700'
-                              : 'text-neutral-900'
-                          }`}
-                        >
-                          {group.ttpaRecord?.value !== undefined
-                            ? `${group.ttpaRecord.value}s`
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-center font-mono text-neutral-600">
-                          {group.fibRecord?.value !== undefined
-                            ? `${group.fibRecord.value} g/L`
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <StatusBadge status={group.overallStatus} />
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                          <button
-                            type="button"
-                            className="text-neutral-400 transition hover:text-red-600"
-                            onClick={() => handleDeleteRun(group)}
-                            title="Excluir corrida"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Navegação de Datas */}
+        <div className="mt-6 flex items-center justify-center gap-3 border-t border-neutral-100 pt-4">
+          <button
+            type="button"
+            onClick={() => shiftDay(-1)}
+            className="rounded-lg border border-neutral-200 p-2 text-neutral-600 transition hover:bg-neutral-50"
+            title="Dia anterior"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <input
+            type="date"
+            value={historyDate}
+            onChange={(e) => setHistoryDate(e.target.value)}
+            className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs text-neutral-700"
+          />
+          <button
+            type="button"
+            onClick={() => shiftDay(1)}
+            className="rounded-lg border border-neutral-200 p-2 text-neutral-600 transition hover:bg-neutral-50"
+            title="Próximo dia"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
+      </Card>
 
-        {/* Painel do Gráfico Levey-Jennings */}
-        <div className="lg:col-span-5">
-          <Card className="space-y-4 p-5">
-            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-              <div>
-                <h3 className="font-bold text-neutral-900">Gráfico Levey-Jennings</h3>
-                <p className="text-xs text-neutral-500">Curva de controle estatístico por parâmetro.</p>
-              </div>
-            </div>
+      {/* Modal Levey-Jennings */}
+      <Modal
+        isOpen={chartRecord !== null}
+        onClose={() => setChartRecord(null)}
+        title={chartRecord ? `Levey-Jennings — ${chartRecord.examName}` : ''}
+        size="lg"
+      >
+        {chartRecord ? (
+          <Suspense fallback={<Skeleton height="24rem" />}>
+            <LeveyJenningsChart
+              examName={chartRecord.examName}
+              level={chartRecord.level}
+              area="coagulacao"
+            />
+          </Suspense>
+        ) : null}
+      </Modal>
 
-            {/* Abas dos Analitos para o Gráfico */}
-            <div className="flex flex-wrap gap-1 rounded-xl bg-neutral-100 p-1">
-              {[
-                { name: 'TP - Atividade (%)', label: 'TP (%)' },
-                { name: 'TP - INR', label: 'INR' },
-                { name: 'TTPa - Tempo (s)', label: 'TTPa (s)' },
-                { name: 'Fibrinogênio (g/L)', label: 'Fibrinogênio' },
-              ].map((tab) => (
-                <button
-                  key={tab.name}
-                  type="button"
-                  className={`flex-1 rounded-lg px-2.5 py-1.5 text-center text-xs font-bold transition ${
-                    activeChartAnalyte === tab.name
-                      ? 'bg-white text-green-900 shadow-sm'
-                      : 'text-neutral-600 hover:text-neutral-900'
-                  }`}
-                  onClick={() => setActiveChartAnalyte(tab.name)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+      {/* Modal Histórico do Exame (clique no nome do exame) */}
+      <ExamHistoryModal
+        area="coagulacao"
+        examName={historyExam?.examName ?? null}
+        level={historyExam?.level ?? null}
+        onClose={() => setHistoryExam(null)}
+      />
 
-            {/* Renderização do Gráfico ou Valores de Referência */}
-            {chartRecords.length === 0 ? (
-              <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-200 p-6 text-center text-xs text-neutral-500">
-                <Activity className="mb-2 h-8 w-8 text-neutral-300" />
-                Sem pontos registrados para {activeChartAnalyte}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs text-neutral-600">
-                  <span>
-                    Total de pontos: <strong>{chartRecords.length}</strong>
-                  </span>
-                  {chartReference && (
-                    <span className="font-mono text-[11px]">
-                      Alvo: <strong>{chartReference.targetValue}</strong> · DP:{' '}
-                      <strong>{chartReference.targetSd}</strong>
-                    </span>
-                  )}
-                </div>
-
-                {/* Lista visual dos últimos pontos com limites */}
-                <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-                  {chartRecords.slice(-8).map((rec) => {
-                    const z = rec.zScore ?? 0
-                    return (
-                      <div
-                        key={rec.id}
-                        className="flex items-center justify-between rounded-xl border border-neutral-100 bg-neutral-50/80 px-3 py-2 text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-neutral-800">
-                            {formatLongBR(rec.date)}
-                          </span>
-                          <span className="font-mono font-bold text-neutral-900">
-                            {rec.value} {activeChartAnalyte.includes('%') ? '%' : ''}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`font-mono text-[11px] font-semibold ${
-                              Math.abs(z) >= 3
-                                ? 'text-red-600'
-                                : Math.abs(z) >= 2
-                                ? 'text-amber-600'
-                                : 'text-emerald-700'
-                            }`}
-                          >
-                            Z: {z.toFixed(2)}
-                          </span>
-                          <StatusBadge status={rec.status} />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
+      {/* Modal Pós-Calibração */}
+      <PostCalibrationModal
+        record={postCalRecord}
+        isOpen={postCalRecord !== null}
+        onClose={() => setPostCalRecord(null)}
+        onSaved={() => {
+          setPostCalRecord(null)
+          void refetchRecords()
+          toast.success('Pós-calibração registrada.')
+        }}
+      />
 
       {/* Modal de Gestão de Lotes PNCQ */}
       <CoagulacaoPncqModal
