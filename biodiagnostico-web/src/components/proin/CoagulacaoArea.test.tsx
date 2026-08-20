@@ -173,8 +173,9 @@ describe('CoagulacaoArea', () => {
       </ToastProvider>,
     )
 
-    expect(screen.getByText('Controle de Qualidade — Coagulação')).toBeInTheDocument()
-    expect(screen.getByText('Entrada Rápida da Corrida Diária')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Atualizar/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Gerenciar Lotes PNCQ/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 3, name: 'Registro de CQ' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 3, name: 'Histórico' })).toBeInTheDocument()
     expect(screen.getByPlaceholderText('Buscar exame ou lote...')).toBeInTheDocument()
   })

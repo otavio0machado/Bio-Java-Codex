@@ -53,7 +53,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...props}
     >
       {loading ? <LoadingSpinner size="sm" /> : icon}
-      <span>{loading ? 'Carregando...' : children}</span>
+      <span className="inline-flex items-center justify-center gap-2 whitespace-nowrap">
+        {loading ? 'Carregando...' : children}
+      </span>
     </button>
   )
 })

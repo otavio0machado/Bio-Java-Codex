@@ -264,47 +264,34 @@ export function CoagulacaoArea() {
 
   return (
     <div className="space-y-6">
-      {/* Cabeçalho */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-neutral-900">Controle de Qualidade — Coagulação</h2>
-          <p className="text-sm text-neutral-500">
-            Lançamento unificado de hemostasia (TP %, INR, TTPa, Fibrinogênio), calibração e histórico.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="secondary"
-            onClick={() => void Promise.all([refetchReferences(), refetchRecords()])}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Atualizar
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => setIsPncqModalOpen(true)}
-            className="flex items-center gap-2"
-          >
-            <Plus className="h-4 w-4" />
-            Gerenciar Lotes PNCQ
-          </Button>
-        </div>
+      {/* Ações da Área */}
+      <div className="flex items-center justify-end gap-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<RefreshCw className="h-4 w-4" />}
+          onClick={() => void Promise.all([refetchReferences(), refetchRecords()])}
+        >
+          Atualizar
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Plus className="h-4 w-4" />}
+          onClick={() => setIsPncqModalOpen(true)}
+        >
+          Gerenciar Lotes PNCQ
+        </Button>
       </div>
 
-      {/* Banner / Barra de Entrada Rápida de Corrida Diária */}
-      <Card className="border-2 border-green-700/20 bg-white p-5 shadow-elevated">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 pb-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-800 text-white shadow-sm">
-              <Activity className="h-4 w-4" />
-            </span>
-            <div>
-              <h3 className="font-bold text-neutral-900">Entrada Rápida da Corrida Diária</h3>
-              <p className="text-xs text-neutral-500">
-                Preencha os dados do controle do dia e valide a hemostasia simultaneamente.
-              </p>
-            </div>
+      {/* Registro de CQ */}
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4 border-b border-neutral-100 pb-4">
+          <div>
+            <h3 className="text-xl font-semibold text-neutral-900">Registro de CQ</h3>
+            <p className="text-sm text-neutral-500">
+              Lançamento diário de hemostasia para cálculo e validação automática
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -525,11 +512,11 @@ export function CoagulacaoArea() {
           </div>
           <Button
             variant="primary"
+            icon={<CheckCircle2 className="h-4 w-4" />}
             onClick={handleConfirmRun}
             disabled={createBatchMutation.isPending}
-            className="flex items-center gap-2 px-6"
+            className="px-6"
           >
-            <CheckCircle2 className="h-4 w-4" />
             {createBatchMutation.isPending ? 'Gravando...' : 'Confirmar Corrida de Coagulação'}
           </Button>
         </div>
