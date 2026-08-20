@@ -3,6 +3,7 @@ export type QcStatus = 'APROVADO' | 'REPROVADO' | 'ALERTA'
 export type ViolationSeverity = 'WARNING' | 'REJECTION'
 export type LabArea =
   | 'bioquimica'
+  | 'coagulacao'
   | 'hematologia'
   | 'imunologia'
   | 'parasitologia'

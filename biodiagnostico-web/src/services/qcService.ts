@@ -52,10 +52,19 @@ export const qcService = {
     const response = await api.post<QcExam>('/qc/exams', request)
     return response.data
   },
-  async getReferences(examId?: string, activeOnly = false) {
-    const response = await api.get<QcReferenceValue[]>('/qc/references', {
-      params: { examId, activeOnly },
-    })
+  async getReferences(
+    examIdOrFilters?: string | { examId?: string; area?: string; activeOnly?: boolean },
+    activeOnly = false,
+  ) {
+    let params: Record<string, unknown> = {}
+    if (typeof examIdOrFilters === 'string') {
+      params = { examId: examIdOrFilters, activeOnly }
+    } else if (examIdOrFilters) {
+      params = examIdOrFilters
+    } else {
+      params = { activeOnly }
+    }
+    const response = await api.get<QcReferenceValue[]>('/qc/references', { params })
     return response.data
   },
   async createReference(request: QcReferenceRequest) {

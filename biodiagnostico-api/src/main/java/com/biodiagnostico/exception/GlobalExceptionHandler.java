@@ -3,6 +3,7 @@ package com.biodiagnostico.exception;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -25,6 +26,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleBusiness(BusinessException exception) {
         return ResponseEntity.badRequest()
             .body(ApiError.of(HttpStatus.BAD_REQUEST, exception.getMessage()));
+    }
+
+    // Rate-limit da IA: 429 com Retry-After (segundos) para o cliente recuar.
+    // RateLimitException NAO estende BusinessException de proposito, para nao ser
+    // engolida pelos catch de degradacao da IA e chegar ate aqui como 429.
+    @ExceptionHandler(RateLimitException.class)
+    public ResponseEntity<ApiError> handleRateLimit(RateLimitException exception) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .header(HttpHeaders.RETRY_AFTER, String.valueOf(exception.getRetryAfterSeconds()))
+            .body(ApiError.of(HttpStatus.TOO_MANY_REQUESTS, exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

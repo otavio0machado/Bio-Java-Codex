@@ -4,11 +4,16 @@ import com.biodiagnostico.config.AiProperties;
 import com.biodiagnostico.exception.BusinessException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -62,6 +67,101 @@ public class OpenAiProvider implements AiProvider {
         return extractContent(callChatCompletions(body));
     }
 
+    /**
+     * Streaming real via Chat Completions com {@code "stream": true}. Reusa o
+     * MESMO corpo de {@link #completeText} (mais a flag de stream) e le a resposta
+     * como um fluxo de linhas SSE {@code data: {json}}, extraindo
+     * {@code choices[0].delta.content} de cada evento e repassando cada pedaco a
+     * {@code onDelta}. Linhas {@code data: [DONE]} (sentinela de fim) e linhas em
+     * branco/keep-alive sao ignoradas.
+     *
+     * <p>A checagem de API key acontece ANTES de abrir qualquer conexao, de modo
+     * que {@link BusinessException} (key ausente) e lancada sem emitir nenhum
+     * delta. A leitura usa {@link RestTemplate#execute} com um
+     * {@code ResponseExtractor} sobre o {@code InputStream} cru (o
+     * {@code SimpleClientHttpRequestFactory} default nao bufferiza a resposta),
+     * permitindo emissao incremental.
+     */
+    @Override
+    public void completeTextStream(String model, List<AiMessage> messages, Consumer<String> onDelta)
+        throws java.io.IOException {
+        String apiKey = requireApiKey();
+        List<Map<String, Object>> payloadMessages = new ArrayList<>();
+        for (AiMessage message : messages) {
+            payloadMessages.add(Map.of(
+                "role", message.role(),
+                "content", message.content()
+            ));
+        }
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", payloadMessages);
+        body.put("stream", true);
+
+        String url = baseUrl() + "/chat/completions";
+        String payload = objectMapper.writeValueAsString(body);
+
+        restTemplate.execute(
+            java.net.URI.create(url),
+            HttpMethod.POST,
+            request -> {
+                request.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+                request.getHeaders().setBearerAuth(apiKey);
+                request.getHeaders().setAccept(List.of(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON));
+                request.getBody().write(payload.getBytes(StandardCharsets.UTF_8));
+            },
+            response -> {
+                consumeStream(response.getBody(), onDelta);
+                return null;
+            });
+    }
+
+    /**
+     * Le o {@code InputStream} da resposta de streaming linha a linha, extraindo o
+     * texto de cada evento {@code data:} e repassando-o a {@code onDelta}. Para no
+     * sentinela {@code [DONE]}.
+     */
+    private void consumeStream(java.io.InputStream stream, Consumer<String> onDelta)
+        throws java.io.IOException {
+        try (BufferedReader reader = new BufferedReader(
+            new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty() || !trimmed.startsWith("data:")) {
+                    continue;
+                }
+                String data = trimmed.substring("data:".length()).trim();
+                if (data.isEmpty()) {
+                    continue;
+                }
+                if ("[DONE]".equals(data)) {
+                    break;
+                }
+                String delta = extractDelta(data);
+                if (delta != null && !delta.isEmpty()) {
+                    onDelta.accept(delta);
+                }
+            }
+        }
+    }
+
+    /**
+     * Extrai {@code choices[0].delta.content} de um evento JSON de streaming.
+     * Eventos sem conteudo textual (ex.: chunk de role inicial ou
+     * {@code finish_reason}) devolvem {@code null}. JSON malformado de um evento
+     * isolado e ignorado (devolve {@code null}) para nao abortar o fluxo inteiro.
+     */
+    private String extractDelta(String json) {
+        try {
+            JsonNode root = objectMapper.readTree(json);
+            JsonNode contentNode = root.path("choices").path(0).path("delta").path("content");
+            return contentNode.isTextual() ? contentNode.asText() : null;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException invalidEvent) {
+            return null;
+        }
+    }
+
     @Override
     public String completeAudio(String model, String prompt, String audioBase64, String audioFormat)
         throws java.io.IOException {
@@ -82,10 +182,7 @@ public class OpenAiProvider implements AiProvider {
     }
 
     private JsonNode callChatCompletions(Map<String, Object> body) throws java.io.IOException {
-        String apiKey = properties.getOpenai().getApiKey();
-        if (apiKey == null || apiKey.isBlank()) {
-            throw new BusinessException("OPENAI_API_KEY nao configurada");
-        }
+        String apiKey = requireApiKey();
         String url = baseUrl() + "/chat/completions";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
@@ -108,6 +205,19 @@ public class OpenAiProvider implements AiProvider {
             throw new BusinessException("Resposta vazia da IA.");
         }
         return contentNode.asText();
+    }
+
+    /**
+     * Devolve a API key configurada ou lanca {@link BusinessException} clara
+     * quando ausente — comportamento identico ao antigo check inline de
+     * {@code callChatCompletions}, agora compartilhado com o caminho de streaming.
+     */
+    private String requireApiKey() {
+        String apiKey = properties.getOpenai().getApiKey();
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new BusinessException("OPENAI_API_KEY nao configurada");
+        }
+        return apiKey;
     }
 
     private String baseUrl() {

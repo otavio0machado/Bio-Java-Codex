@@ -1,6 +1,8 @@
 package com.biodiagnostico.controller;
 
 import com.biodiagnostico.dto.request.AiAnalysisRequest;
+import com.biodiagnostico.dto.request.AiChatStreamRequest;
+import com.biodiagnostico.dto.request.AiChatStreamRequest.ChatMessageDto;
 import com.biodiagnostico.dto.request.BatchValidationRequest;
 import com.biodiagnostico.dto.request.ExplainQcRequest;
 import com.biodiagnostico.dto.request.InterpretTrendRequest;
@@ -32,7 +34,6 @@ import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.exception.ResourceNotFoundException;
 import com.biodiagnostico.repository.MaintenanceRecordRepository;
-import com.biodiagnostico.repository.QcExamRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
 import com.biodiagnostico.repository.WestgardViolationRepository;
@@ -41,7 +42,13 @@ import com.biodiagnostico.service.AuditService;
 import com.biodiagnostico.service.DashboardService;
 import com.biodiagnostico.service.DriftDetector;
 import com.biodiagnostico.service.DriftDetector.DriftCandidate;
+import com.biodiagnostico.config.AiStreamConfig;
+import com.biodiagnostico.service.ai.AiContextAssembler;
+import com.biodiagnostico.service.ai.AiMessage;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -50,8 +57,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
+import java.util.function.Consumer;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -60,7 +70,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/ai")
 public class AiController {
@@ -68,6 +80,21 @@ public class AiController {
     private static final int DEFAULT_TREND_DAYS = 30;
     private static final int EXPLAIN_HISTORY_SIZE = 15;
     private static final int TREND_MAX_POINTS = 500;
+
+    // Onda 4 / Fase A (parte 2) — STREAMING (SSE).
+    /** Timeout generoso do SseEmitter (ms): respostas de IA podem demorar. */
+    private static final long SSE_TIMEOUT_MS = 120_000L;
+    /** Janela do contexto factual da area no /analyze/stream quando days e omitido. */
+    private static final int CHAT_STREAM_DEFAULT_DAYS = 30;
+    /**
+     * Disclaimer emitido SEMPRE como primeiro evento ({@code meta}) de todo
+     * stream — reforca que a IA e assistiva, nunca decisoria (invariante).
+     */
+    private static final String DISCLAIMER =
+        "Conteúdo gerado por IA — apoio à decisão, não substitui avaliação técnica.";
+    /** Mensagem amigavel emitida no evento {@code error} quando o stream falha. */
+    private static final String FRIENDLY_ERROR =
+        "Não foi possível analisar no momento. Tente novamente.";
 
     // Onda 3 — limites e janelas determinísticos dos novos endpoints assistivos.
     private static final int SUMMARY_DEFAULT_DAYS = 7;
@@ -94,35 +121,38 @@ public class AiController {
     private static final String URGENCY_LOW = "BAIXA";
 
     private final AiService aiService;
+    private final AiContextAssembler aiContextAssembler;
     private final QcRecordRepository qcRecordRepository;
     private final DashboardService dashboardService;
     private final AuditService auditService;
     private final ReagentLotRepository reagentLotRepository;
     private final MaintenanceRecordRepository maintenanceRecordRepository;
     private final WestgardViolationRepository westgardViolationRepository;
-    private final QcExamRepository qcExamRepository;
-    private final DriftDetector driftDetector;
+    private final TaskExecutor aiStreamExecutor;
+    private final ObjectMapper objectMapper;
 
     public AiController(
         AiService aiService,
+        AiContextAssembler aiContextAssembler,
         QcRecordRepository qcRecordRepository,
         DashboardService dashboardService,
         AuditService auditService,
         ReagentLotRepository reagentLotRepository,
         MaintenanceRecordRepository maintenanceRecordRepository,
         WestgardViolationRepository westgardViolationRepository,
-        QcExamRepository qcExamRepository,
-        DriftDetector driftDetector
+        @Qualifier(AiStreamConfig.AI_STREAM_EXECUTOR) TaskExecutor aiStreamExecutor,
+        ObjectMapper objectMapper
     ) {
         this.aiService = aiService;
+        this.aiContextAssembler = aiContextAssembler;
         this.qcRecordRepository = qcRecordRepository;
         this.dashboardService = dashboardService;
         this.auditService = auditService;
         this.reagentLotRepository = reagentLotRepository;
         this.maintenanceRecordRepository = maintenanceRecordRepository;
         this.westgardViolationRepository = westgardViolationRepository;
-        this.qcExamRepository = qcExamRepository;
-        this.driftDetector = driftDetector;
+        this.aiStreamExecutor = aiStreamExecutor;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping("/analyze")
@@ -130,14 +160,11 @@ public class AiController {
         String response;
         if (request.area() != null && !request.area().isBlank()) {
             int days = request.days() == null ? 30 : request.days();
-            LocalDate startDate = LocalDate.now().minusDays(days);
-            List<QcRecord> records = qcRecordRepository.findAllByOrderByDateDesc().stream()
-                .filter(record -> request.area().equalsIgnoreCase(record.getArea()))
-                .filter(record -> request.examName() == null || request.examName().isBlank()
-                    || request.examName().equalsIgnoreCase(record.getExamName()))
-                .filter(record -> !record.getDate().isBefore(startDate))
-                .toList();
-            response = aiService.analyze(request.prompt(), aiService.buildQcContext(records));
+            // O assembler carrega+filtra+materializa as violacoes DENTRO de uma
+            // transacao readOnly; a chamada HTTP (analyze) acontece fora dela.
+            String context = aiContextAssembler.assembleAnalysisContext(
+                request.area(), request.examName(), days);
+            response = aiService.analyze(request.prompt(), context);
         } else {
             response = aiService.analyze(request.prompt(), request.context());
         }
@@ -165,17 +192,14 @@ public class AiController {
             .orElseThrow(() -> new ResourceNotFoundException(
                 "Registro de CQ não encontrado: " + request.recordId()));
 
-        List<QcRecord> history = qcRecordRepository
-            .findByExamNameAndLevelAndAreaOrderByDateDesc(
-                record.getExamName(),
-                record.getLevel(),
-                record.getArea(),
-                PageRequest.of(0, EXPLAIN_HISTORY_SIZE))
-            .stream()
-            .filter(item -> item.getId() == null || !item.getId().equals(record.getId()))
-            .toList();
+        // O assembler re-carrega registro+historico DENTRO de uma transacao
+        // readOnly e materializa as violacoes; so depois o AiService chama o
+        // provedor (HTTP), ja fora da transacao.
+        String context = aiContextAssembler.assembleRecordWithHistoryContext(
+            record.getId(), record.getExamName(), record.getLevel(), record.getArea(),
+            EXPLAIN_HISTORY_SIZE);
 
-        String explanation = aiService.explainViolation(record, history);
+        String explanation = aiService.explainViolation(context);
         return ResponseEntity.ok(new ExplainQcResponse(explanation));
     }
 
@@ -187,17 +211,15 @@ public class AiController {
         @Valid @RequestBody InterpretTrendRequest request
     ) {
         int days = request.days() == null ? DEFAULT_TREND_DAYS : request.days();
-        LocalDate startDate = LocalDate.now().minusDays(days);
 
-        Pageable pageable = PageRequest.of(0, TREND_MAX_POINTS);
-        List<QcRecord> series = qcRecordRepository
-            .findLeveyJenningsData(request.examName(), request.level(), request.area(), pageable)
-            .stream()
-            .filter(record -> record.getDate() != null && !record.getDate().isBefore(startDate))
-            .toList();
+        // O assembler carrega a serie e materializa as violacoes DENTRO de uma
+        // transacao readOnly; devolve null quando nao ha dados no periodo (o
+        // AiService entao faz o curto-circuito "sem dados" sem chamar a IA).
+        String context = aiContextAssembler.assembleTrendContext(
+            request.examName(), request.level(), request.area(), days, TREND_MAX_POINTS);
 
         String interpretation = aiService.interpretTrend(
-            request.examName(), request.level(), request.area(), series);
+            request.examName(), request.level(), request.area(), context);
         return ResponseEntity.ok(new InterpretTrendResponse(interpretation));
     }
 
@@ -286,20 +308,17 @@ public class AiController {
             .orElseThrow(() -> new ResourceNotFoundException(
                 "Registro de CQ não encontrado: " + request.recordId()));
 
-        List<QcRecord> history = qcRecordRepository
-            .findByExamNameAndLevelAndAreaOrderByDateDesc(
-                record.getExamName(),
-                record.getLevel(),
-                record.getArea(),
-                PageRequest.of(0, ROOT_CAUSE_HISTORY_SIZE))
-            .stream()
-            .filter(item -> item.getId() == null || !item.getId().equals(record.getId()))
-            .toList();
+        // O assembler re-carrega registro+historico DENTRO de uma transacao
+        // readOnly e materializa as violacoes. Os contextos de reagente e
+        // manutencao sao Strings simples (sem acesso lazy) montados aqui.
+        String qcContext = aiContextAssembler.assembleRecordWithHistoryContext(
+            record.getId(), record.getExamName(), record.getLevel(), record.getArea(),
+            ROOT_CAUSE_HISTORY_SIZE);
 
         String reagentContext = buildReagentCorrelationContext(record);
         String maintenanceContext = buildMaintenanceCorrelationContext(record);
 
-        String analysis = aiService.analyzeRootCause(record, history, reagentContext, maintenanceContext);
+        String analysis = aiService.analyzeRootCause(qcContext, reagentContext, maintenanceContext);
         return ResponseEntity.ok(new RootCauseResponse(analysis));
     }
 
@@ -345,7 +364,11 @@ public class AiController {
         @RequestParam(required = false) Integer days
     ) {
         int window = days == null ? DRIFT_DEFAULT_DAYS : days;
-        List<DriftCandidate> candidates = collectDriftCandidates(area, window);
+        // A coleta (selecao de exames, janela, agrupamento por nivel, materializacao
+        // das violacoes e deteccao deterministica) roda DENTRO de uma transacao
+        // readOnly no assembler; a IA (describeDrift) e chamada depois, fora dela.
+        List<DriftCandidate> candidates = aiContextAssembler.collectDriftCandidates(
+            area, window, DRIFT_MAX_POINTS, DRIFT_MAX_ALERTS);
         if (candidates.isEmpty()) {
             return ResponseEntity.ok(new DriftResponse(List.of()));
         }
@@ -365,6 +388,224 @@ public class AiController {
                 candidate.pattern(), candidate.severity(), detail));
         }
         return ResponseEntity.ok(new DriftResponse(alerts));
+    }
+
+    // ======================================================================
+    // Onda 4 / Fase A (parte 2) — STREAMING via Server-Sent Events (SseEmitter)
+    //
+    // CONTRATO de eventos (todos com nome + data JSON), na ordem:
+    //   event: meta   data: {"disclaimer": "<DISCLAIMER>"}      (SEMPRE 1o)
+    //   event: delta  data: {"text": "<pedaco>"}                (0..N)
+    //   event: done   data: {"finishReason": "stop"}            (sucesso)
+    //   event: error  data: {"message": "<amigavel>", "partial": <bool>}  (falha)
+    //
+    // ORDEM CRITICA por endpoint (tudo SINCRONO, ANTES de abrir o SseEmitter,
+    // para que erros virem status HTTP normal antes do 1o byte):
+    //   a. aiService.checkRateLimit()  -> RateLimitException => 429 (handler);
+    //   b. validacao do request (Bean Validation => 400) e, p/ root-cause,
+    //      carga do registro (404 via ResourceNotFoundException);
+    //   c. montagem SINCRONA do contexto factual (assembler @Transactional
+    //      readOnly materializa as violacoes ANTES do emitter — nada lazy depois).
+    // So entao cria-se o SseEmitter e submete-se o trabalho ao executor dedicado
+    // (NUNCA na thread do servlet). No executor: meta -> deltas -> done; qualquer
+    // excecao apos meta vira evento "error" + complete() (nunca vaza crua).
+    // ======================================================================
+
+    /**
+     * Streaming do chat assistivo MULTI-TURNO (espelha {@code POST /analyze}).
+     *
+     * <p>Quando {@code area} esta presente, o contexto factual e montado
+     * SINCRONAMENTE pelo {@link AiContextAssembler} (transacao readOnly, violacoes
+     * materializadas); caso contrario nao ha contexto de area (a conversa ja
+     * carrega o necessario). A mensagem {@code system} e injetada pelo
+     * {@code AiService}; o cliente nunca a fornece (DTO proibe {@code role=system}).
+     */
+    @PostMapping(value = "/analyze/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter analyzeStream(@Valid @RequestBody AiChatStreamRequest request) {
+        // (a) rate-limit ANTES do emitter (429 pre-stream, contagem unica).
+        aiService.checkRateLimit();
+
+        // (b) validacao ja aplicada por @Valid (400 antes daqui). Converte o DTO.
+        List<AiMessage> conversation = request.messages().stream()
+            .map(this::toAiMessage)
+            .toList();
+
+        // (c) contexto factual da area, montado SINCRONAMENTE (somente quando ha area).
+        String areaContext = null;
+        if (request.area() != null && !request.area().isBlank()) {
+            int days = request.days() == null ? CHAT_STREAM_DEFAULT_DAYS : request.days();
+            areaContext = aiContextAssembler.assembleAnalysisContext(
+                request.area(), request.examName(), days);
+        }
+
+        String finalAreaContext = areaContext;
+        return startStream(onDelta -> aiService.analyzeStream(conversation, finalAreaContext, onDelta));
+    }
+
+    /**
+     * C9 — Streaming do resumo executivo do dashboard (espelha
+     * {@code GET /dashboard/summary}). Contexto factual montado SINCRONAMENTE.
+     */
+    @GetMapping(value = "/dashboard/summary/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter dashboardSummaryStream(
+        @RequestParam(required = false) String area,
+        @RequestParam(required = false) Integer days
+    ) {
+        aiService.checkRateLimit();
+        int window = days == null ? SUMMARY_DEFAULT_DAYS : days;
+        String context = buildDashboardContext(area, window);
+        return startStream(onDelta -> aiService.executiveSummaryStream(area, window, context, onDelta));
+    }
+
+    /**
+     * C10 — Streaming da sumarizacao de audit logs (espelha
+     * {@code GET /audit/summary}). AUTORIZACAO: restrita a ADMIN.
+     */
+    @GetMapping(value = "/audit/summary/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    public SseEmitter auditSummaryStream(
+        @RequestParam(required = false) Integer days,
+        @RequestParam(required = false) java.util.UUID userId
+    ) {
+        aiService.checkRateLimit();
+        int window = days == null ? AUDIT_DEFAULT_DAYS : days;
+        String context = buildAuditContext(window, userId);
+        return startStream(onDelta -> aiService.summarizeAuditLogsStream(context, onDelta));
+    }
+
+    /**
+     * A3 — Streaming da analise de causa-raiz correlacionada (espelha
+     * {@code POST /qc/root-cause}). Carrega o registro (404 se inexistente) e monta
+     * os contextos factuais SINCRONAMENTE antes de abrir o emitter.
+     */
+    @PostMapping(value = "/qc/root-cause/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter rootCauseStream(@Valid @RequestBody RootCauseRequest request) {
+        aiService.checkRateLimit();
+
+        QcRecord record = qcRecordRepository.findById(request.recordId())
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "Registro de CQ não encontrado: " + request.recordId()));
+
+        String qcContext = aiContextAssembler.assembleRecordWithHistoryContext(
+            record.getId(), record.getExamName(), record.getLevel(), record.getArea(),
+            ROOT_CAUSE_HISTORY_SIZE);
+        String reagentContext = buildReagentCorrelationContext(record);
+        String maintenanceContext = buildMaintenanceCorrelationContext(record);
+
+        return startStream(onDelta -> aiService.analyzeRootCauseStream(
+            qcContext, reagentContext, maintenanceContext, onDelta));
+    }
+
+    // ----------------------------------------------------------------------
+    // Infra de streaming SSE (compartilhada pelos 4 endpoints acima).
+    // ----------------------------------------------------------------------
+
+    /**
+     * Cria o {@link SseEmitter} (apos o pre-flight sincrono do chamador) e submete
+     * o {@code streamWork} ao executor dedicado. O {@code streamWork} recebe o
+     * <em>sink de deltas</em> (o {@code onDelta} a repassar ao {@code *Stream} do
+     * {@code AiService}); o ciclo de vida ({@code meta} -> deltas -> {@code done},
+     * ou {@code error}) e orquestrado por {@link #runStream}.
+     *
+     * @param streamWork trabalho que, dado o sink de deltas, chama o {@code *Stream}
+     *     correspondente do {@code AiService}
+     */
+    private SseEmitter startStream(Consumer<Consumer<String>> streamWork) {
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        aiStreamExecutor.execute(() -> runStream(emitter, streamWork));
+        return emitter;
+    }
+
+    /**
+     * Executa o ciclo de vida do stream no executor: {@code meta} primeiro, depois
+     * o trabalho (que emite os {@code delta} via o sink), depois {@code done}.
+     * Qualquer falha apos o {@code meta} vira evento {@code error} com
+     * {@code partial} indicando se ao menos um {@code delta} ja havia sido enviado.
+     * NUNCA relanca cru — o {@code SseEmitter} pode ja ter mandado bytes ao cliente.
+     */
+    private void runStream(SseEmitter emitter, Consumer<Consumer<String>> streamWork) {
+        boolean[] emittedDelta = {false};
+        // Sink: marca que houve delta e serializa+envia o evento "delta".
+        Consumer<String> deltaSink = text -> {
+            emittedDelta[0] = true;
+            sendDelta(emitter, text);
+        };
+        try {
+            // 1. meta SEMPRE primeiro (disclaimer; invariante assistivo).
+            emitter.send(SseEmitter.event().name("meta")
+                .data(json(Map.of("disclaimer", DISCLAIMER)), MediaType.APPLICATION_JSON));
+            // 2. deltas, via o sink repassado ao *Stream do AiService.
+            streamWork.accept(deltaSink);
+            // 3. done no sucesso.
+            emitter.send(SseEmitter.event().name("done")
+                .data(json(Map.of("finishReason", "stop")), MediaType.APPLICATION_JSON));
+            emitter.complete();
+        } catch (Exception exception) {
+            // Falha apos meta/deltas: emite error (nunca relanca cru) e encerra.
+            log.error("Falha no stream de IA", exception);
+            emitError(emitter, emittedDelta[0]);
+        }
+    }
+
+    /** Serializa e envia um evento {@code delta} {@code {"text": "<pedaco>"}}. */
+    private void sendDelta(SseEmitter emitter, String text) {
+        try {
+            emitter.send(SseEmitter.event().name("delta")
+                .data(json(Map.of("text", text == null ? "" : text)), MediaType.APPLICATION_JSON));
+        } catch (IOException exception) {
+            // Cliente desconectou / socket caiu. O onDelta e chamado de DENTRO do
+            // AiService, cujo try/catch de transporte engole IOException e encerra
+            // o *Stream graciosamente. Relancamos como unchecked para que a falha
+            // suba ate runStream e vire evento "error" (best-effort) + complete().
+            throw new StreamAbortedException(exception);
+        }
+    }
+
+    /** Emite o evento {@code error} e completa o emitter (best-effort). */
+    private void emitError(SseEmitter emitter, boolean partial) {
+        try {
+            emitter.send(SseEmitter.event().name("error")
+                .data(json(linkedMap("message", FRIENDLY_ERROR, "partial", partial)),
+                    MediaType.APPLICATION_JSON));
+        } catch (IOException | RuntimeException ignored) {
+            // Se nem o error pode ser enviado (conexao morta), so resta completar.
+        }
+        try {
+            emitter.complete();
+        } catch (RuntimeException ignored) {
+            // emitter ja pode ter sido completado/abortado pelo container.
+        }
+    }
+
+    /** Serializa um mapa para JSON; degrada para "{}" se algo der errado. */
+    private String json(Map<String, ?> payload) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException exception) {
+            return "{}";
+        }
+    }
+
+    /** Mapa ordenado de 2 entradas (preserva ordem das chaves no JSON do evento). */
+    private Map<String, Object> linkedMap(String k1, Object v1, String k2, Object v2) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put(k1, v1);
+        map.put(k2, v2);
+        return map;
+    }
+
+    /** Converte um {@link ChatMessageDto} validado em {@link AiMessage} (user/assistant). */
+    private AiMessage toAiMessage(ChatMessageDto dto) {
+        return ChatMessageDto.ROLE_ASSISTANT.equals(dto.role())
+            ? AiMessage.assistant(dto.content())
+            : AiMessage.user(dto.content());
+    }
+
+    /** Sinaliza que o cliente desconectou no meio do stream (IOException no send). */
+    private static final class StreamAbortedException extends RuntimeException {
+        StreamAbortedException(Throwable cause) {
+            super(cause);
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -583,57 +824,6 @@ public class AiController {
             return 1;
         }
         return 2;
-    }
-
-    /**
-     * Coleta DETERMINISTICAMENTE (read-only) os candidatos a drift. Para cada
-     * exame ativo (na área, ou em todas se vazia), carrega a série recente da
-     * janela, agrupa por nível e delega ao {@link DriftDetector}. A IA NÃO é
-     * tocada aqui — a detecção é estatística pura. Limita o número de alertas
-     * para proteger o payload.
-     */
-    private List<DriftCandidate> collectDriftCandidates(String area, int days) {
-        LocalDate startDate = LocalDate.now().minusDays(days);
-        boolean allAreas = area == null || area.isBlank();
-
-        List<com.biodiagnostico.entity.QcExam> exams = allAreas
-            ? qcExamRepository.findByIsActiveTrue()
-            : qcExamRepository.findByAreaAndIsActiveTrue(area.toLowerCase(Locale.ROOT));
-
-        List<DriftCandidate> candidates = new ArrayList<>();
-        for (com.biodiagnostico.entity.QcExam exam : exams) {
-            String examName = exam.getName();
-            String examArea = exam.getArea();
-            if (examName == null || examName.isBlank()) {
-                continue;
-            }
-
-            // Série recente do exame na área, mais recente primeiro; janela aplicada em memória.
-            List<QcRecord> records = qcRecordRepository
-                .findByExamNameAndAreaOrderByDateDesc(examName, examArea).stream()
-                .filter(record -> record.getDate() != null && !record.getDate().isBefore(startDate))
-                .limit(DRIFT_MAX_POINTS)
-                .toList();
-            if (records.isEmpty()) {
-                continue;
-            }
-
-            // Agrupa por nível preservando a ordem (mais recente primeiro) dentro de cada nível.
-            Map<String, List<QcRecord>> byLevel = new LinkedHashMap<>();
-            for (QcRecord record : records) {
-                String level = record.getLevel() == null ? "" : record.getLevel();
-                byLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(record);
-            }
-
-            for (Map.Entry<String, List<QcRecord>> entry : byLevel.entrySet()) {
-                driftDetector.detect(examName, entry.getKey(), examArea, entry.getValue())
-                    .ifPresent(candidates::add);
-                if (candidates.size() >= DRIFT_MAX_ALERTS) {
-                    return candidates;
-                }
-            }
-        }
-        return candidates;
     }
 
     /**

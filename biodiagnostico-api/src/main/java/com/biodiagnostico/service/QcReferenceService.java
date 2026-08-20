@@ -31,6 +31,11 @@ public class QcReferenceService {
 
     @Transactional(readOnly = true)
     public List<QcReferenceValue> getReferences(UUID examId, Boolean activeOnly) {
+        return getReferences(examId, null, activeOnly);
+    }
+
+    @Transactional(readOnly = true)
+    public List<QcReferenceValue> getReferences(UUID examId, String area, Boolean activeOnly) {
         boolean onlyActive = Boolean.TRUE.equals(activeOnly);
         List<QcReferenceValue> results;
         if (examId != null && onlyActive) {
@@ -44,6 +49,14 @@ public class QcReferenceService {
         } else {
             results = qcReferenceValueRepository.findAll();
         }
+
+        if (area != null && !area.isBlank()) {
+            String normalizedArea = area.trim().toLowerCase(java.util.Locale.ROOT);
+            results = results.stream()
+                .filter(reference -> reference.getExam() != null && normalizedArea.equalsIgnoreCase(reference.getExam().getArea()))
+                .toList();
+        }
+
         // Forçar inicialização do exam LAZY dentro da transação (open-in-view=false em prod)
         results.forEach(ref -> {
             if (ref.getExam() != null) {

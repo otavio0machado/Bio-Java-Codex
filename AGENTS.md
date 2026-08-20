@@ -311,3 +311,5 @@ Toda resposta final de tarefa deve explicitar, no mínimo:
 ## Diretriz de execução
 
 Este sistema não usa personas soltas. Ele opera como pipeline de engenharia controlado, com papéis claros, gates explícitos, artefatos mínimos e foco em execução confiável ao longo da sprint.
+
+## Imported Claude Cowork project instructions

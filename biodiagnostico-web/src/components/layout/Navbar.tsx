@@ -21,6 +21,7 @@ import logoBio from '../../assets/logobio.png'
 
 const areaNavItems = [
   { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker },
+  { label: 'Coagulação', href: '/qc?area=coagulacao', area: 'coagulacao', icon: Beaker },
   { label: 'Hematologia', href: '/qc?area=hematologia', area: 'hematologia', icon: Beaker },
   { label: 'Imunologia', href: '/qc?area=imunologia', area: 'imunologia', icon: Beaker },
   { label: 'Parasitologia', href: '/qc?area=parasitologia', area: 'parasitologia', icon: Beaker },

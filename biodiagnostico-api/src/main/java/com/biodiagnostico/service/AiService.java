@@ -2,8 +2,8 @@ package com.biodiagnostico.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.biodiagnostico.config.AiProperties;
-import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.exception.BusinessException;
+import com.biodiagnostico.exception.RateLimitException;
 import com.biodiagnostico.service.ai.AiMessage;
 import com.biodiagnostico.service.ai.AiProvider;
 import com.biodiagnostico.service.ai.AiModelRouter;
@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -344,6 +345,9 @@ public class AiService {
             recordAiRequest("analyze", "success");
             sample.stop(aiLatencyTimer("analyze", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("analyze", "business_error");
             sample.stop(aiLatencyTimer("analyze", "business_error"));
@@ -353,6 +357,174 @@ public class AiService {
             sample.stop(aiLatencyTimer("analyze", "error"));
             log.error("Erro na chamada de IA para analyze", exception);
             return FRIENDLY_ERROR;
+        }
+    }
+
+    // ==================================================================
+    // Onda 4 / Fase A — variantes de STREAMING (espelham os bloqueantes)
+    //
+    // Cada metodo *Stream segue a MESMA ordem do bloqueante equivalente,
+    // EXCETO o rate-limit:
+    //   1. monta as MESMAS messages/prompts do bloqueante;
+    //   2. chama aiProvider.completeTextStream(...) repassando o onDelta;
+    //   3. metricas reutilizando os contadores existentes com transport="stream".
+    //
+    // RATE-LIMIT (Onda 4 / Fase A, parte 2): os *Stream NAO chamam
+    // ensureRateLimit() internamente. A checagem e responsabilidade UNICA do
+    // controlador, que chama checkRateLimit() SINCRONAMENTE antes de abrir o
+    // SseEmitter — garante o 429 ANTES do 1o byte e contagem UNICA (1 slot por
+    // requisicao). Os metodos BLOQUEANTES seguem com ensureRateLimit() interno.
+    //
+    // Falha APOS o inicio do stream (IOException/RuntimeException de transporte)
+    // registra metrica de erro e encerra graciosamente — NAO relanca cru, pois o
+    // SseEmitter ja pode ter enviado bytes ao cliente. BusinessException, por
+    // ocorrer ANTES da emissao (ex.: API key ausente), continua propagando.
+    // ==================================================================
+
+    /**
+     * Streaming do chat assistivo (espelha {@link #analyze(String, String)}).
+     *
+     * <p>Diferente do bloqueante, recebe a {@code conversation} ja como lista de
+     * mensagens (historico + pergunta, com papeis {@code user}/{@code assistant})
+     * e monta {@code [system(SYSTEM_PROMPT), (areaContext como user se presente),
+     * ...conversation]}. A mensagem de system e SEMPRE montada pelo backend; o
+     * cliente nunca a fornece.
+     *
+     * @param conversation historico+pergunta (papeis user/assistant), na ordem
+     * @param areaContext  contexto factual da area ja montado (opcional; vira uma
+     *     user-message logo apos o system quando nao nulo/vazio)
+     * @param onDelta      consumidor de cada pedaco de texto da resposta
+     */
+    public void analyzeStream(List<AiMessage> conversation, String areaContext, Consumer<String> onDelta) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            // Rate-limit NAO e checado aqui (Onda 4 / Fase A, parte 2): o controlador
+            // ja chamou checkRateLimit() ANTES de abrir o SseEmitter (429 pre-stream,
+            // contagem unica). Ver bloco de comentario acima.
+            List<AiMessage> messages = new ArrayList<>();
+            messages.add(AiMessage.system(SYSTEM_PROMPT));
+            if (areaContext != null && !areaContext.isBlank()) {
+                messages.add(AiMessage.user(areaContext));
+            }
+            if (conversation != null) {
+                messages.addAll(conversation);
+            }
+            aiProvider.completeTextStream(modelRouter.modelFor(AiTask.CHAT), messages, onDelta);
+            recordAiRequest("analyze", "success", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("analyze", "success", TRANSPORT_STREAM));
+        } catch (RateLimitException exception) {
+            // Defensivo: se algum chamador ainda dispara rate-limit, propaga (nunca degrada).
+            throw exception;
+        } catch (BusinessException exception) {
+            // Falha deterministica antes da emissao (ex.: API key ausente): propaga.
+            recordAiRequest("analyze", "business_error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("analyze", "business_error", TRANSPORT_STREAM));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            // Falha apos inicio do stream: encerra graciosamente (bytes ja podem ter ido ao cliente).
+            recordAiRequest("analyze", "error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("analyze", "error", TRANSPORT_STREAM));
+            log.error("Erro na chamada de IA (stream) para analyze", exception);
+        }
+    }
+
+    /**
+     * Streaming do resumo executivo (espelha
+     * {@link #executiveSummary(String, int, String)}: mesmas messages/prompt).
+     */
+    public void executiveSummaryStream(String area, int days, String context, Consumer<String> onDelta) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            // Rate-limit ja foi checado pelo controlador antes do SseEmitter (ver bloco acima).
+            String areaLabel = (area == null || area.isBlank()) ? "todas as áreas" : area;
+            String userContent = "Área: " + areaLabel
+                + " | Janela: últimos " + days + " dia(s)\n\n"
+                + safeText(context)
+                + "\n\n" + EXECUTIVE_SUMMARY_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            aiProvider.completeTextStream(modelRouter.modelFor(AiTask.EXECUTIVE_SUMMARY), messages, onDelta);
+            recordAiRequest("dashboard-summary", "success", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("dashboard-summary", "success", TRANSPORT_STREAM));
+        } catch (RateLimitException exception) {
+            throw exception;
+        } catch (BusinessException exception) {
+            recordAiRequest("dashboard-summary", "business_error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("dashboard-summary", "business_error", TRANSPORT_STREAM));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("dashboard-summary", "error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("dashboard-summary", "error", TRANSPORT_STREAM));
+            log.error("Erro na chamada de IA (stream) para dashboard-summary", exception);
+        }
+    }
+
+    /**
+     * Streaming da sumarizacao de audit logs (espelha
+     * {@link #summarizeAuditLogs(String)}: mesmas messages/prompt).
+     */
+    public void summarizeAuditLogsStream(String context, Consumer<String> onDelta) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            // Rate-limit ja foi checado pelo controlador antes do SseEmitter (ver bloco acima).
+            String userContent = safeText(context) + "\n\n" + AUDIT_SUMMARY_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            aiProvider.completeTextStream(modelRouter.modelFor(AiTask.AUDIT_SUMMARY), messages, onDelta);
+            recordAiRequest("audit-summary", "success", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("audit-summary", "success", TRANSPORT_STREAM));
+        } catch (RateLimitException exception) {
+            throw exception;
+        } catch (BusinessException exception) {
+            recordAiRequest("audit-summary", "business_error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("audit-summary", "business_error", TRANSPORT_STREAM));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("audit-summary", "error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("audit-summary", "error", TRANSPORT_STREAM));
+            log.error("Erro na chamada de IA (stream) para audit-summary", exception);
+        }
+    }
+
+    /**
+     * Streaming da analise de causa-raiz (espelha
+     * {@link #analyzeRootCause(String, String, String)}: mesmas messages/prompt).
+     */
+    public void analyzeRootCauseStream(
+        String qcContext, String reagentContext, String maintenanceContext, Consumer<String> onDelta
+    ) {
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            // Rate-limit ja foi checado pelo controlador antes do SseEmitter (ver bloco acima).
+            String userContent = safeText(qcContext)
+                + "\nCorrelações de reagente (lotes ativos na área na data do registro):\n"
+                + (reagentContext == null || reagentContext.isBlank()
+                    ? "(sem lotes de reagente correlacionáveis no contexto)\n" : reagentContext)
+                + "\nManutenção/calibração mais recente do equipamento do registro:\n"
+                + (maintenanceContext == null || maintenanceContext.isBlank()
+                    ? "(sem manutenção/calibração registrada para o equipamento)\n" : maintenanceContext)
+                + "\n" + ROOT_CAUSE_PROMPT;
+            List<AiMessage> messages = List.of(
+                AiMessage.system(SYSTEM_PROMPT),
+                AiMessage.user(userContent)
+            );
+            aiProvider.completeTextStream(modelRouter.modelFor(AiTask.ROOT_CAUSE), messages, onDelta);
+            recordAiRequest("qc-root-cause", "success", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("qc-root-cause", "success", TRANSPORT_STREAM));
+        } catch (RateLimitException exception) {
+            throw exception;
+        } catch (BusinessException exception) {
+            recordAiRequest("qc-root-cause", "business_error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("qc-root-cause", "business_error", TRANSPORT_STREAM));
+            throw exception;
+        } catch (java.io.IOException | RuntimeException exception) {
+            recordAiRequest("qc-root-cause", "error", TRANSPORT_STREAM);
+            sample.stop(aiLatencyTimer("qc-root-cause", "error", TRANSPORT_STREAM));
+            log.error("Erro na chamada de IA (stream) para qc-root-cause", exception);
         }
     }
 
@@ -385,6 +557,9 @@ public class AiService {
             recordAiRequest("voice-to-form", "success");
             sample.stop(aiLatencyTimer("voice-to-form", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("voice-to-form", "business_error");
             sample.stop(aiLatencyTimer("voice-to-form", "business_error"));
@@ -453,31 +628,30 @@ public class AiService {
      * decisao de liberar/reprovar permanece com o {@code WestgardEngine}
      * deterministico e com o analista.
      *
-     * @param record  registro de CQ a explicar (nunca {@code null})
-     * @param history historico recente do MESMO exame+nivel+area (pode ser vazio)
+     * <p><strong>Onda 4 / Fase A:</strong> recebe o {@code qcContext} JA MONTADO
+     * (registro em destaque + historico, com violacoes materializadas) pelo
+     * {@link com.biodiagnostico.service.ai.AiContextAssembler} dentro de uma
+     * transacao readOnly. Aqui NAO se toca entidade lazy: so se chama o provedor
+     * (HTTP), fora de qualquer transacao.
+     *
+     * @param qcContext contexto de CQ ja formatado (registro + historico)
      */
-    public String explainViolation(QcRecord record, List<QcRecord> history) {
+    public String explainViolation(String qcContext) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             ensureRateLimit();
-            List<QcRecord> contextRecords = new ArrayList<>();
-            if (record != null) {
-                contextRecords.add(record);
-            }
-            if (history != null) {
-                history.stream()
-                    .filter(item -> item != null && (record == null || item != record))
-                    .forEach(contextRecords::add);
-            }
             List<AiMessage> messages = List.of(
                 AiMessage.system(SYSTEM_PROMPT),
-                AiMessage.user(buildQcContext(contextRecords) + "\n\n" + EXPLAIN_VIOLATION_PROMPT)
+                AiMessage.user(safeText(qcContext) + "\n\n" + EXPLAIN_VIOLATION_PROMPT)
             );
             String result = aiProvider.completeText(
                 modelRouter.modelFor(AiTask.EXPLAIN_VIOLATION), messages, false);
             recordAiRequest("qc-explain", "success");
             sample.stop(aiLatencyTimer("qc-explain", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("qc-explain", "business_error");
             sample.stop(aiLatencyTimer("qc-explain", "business_error"));
@@ -497,9 +671,18 @@ public class AiService {
      * <p><strong>Assistivo e read-only:</strong> sugere se cabe acao (ex.:
      * considerar recalibracao) como RECOMENDACAO, nunca decisao automatica.
      * Se a serie vier vazia, devolve um texto fixo e NAO chama a IA.
+     *
+     * <p><strong>Onda 4 / Fase A:</strong> recebe o {@code qcContext} JA MONTADO
+     * (serie com violacoes materializadas) pelo
+     * {@link com.biodiagnostico.service.ai.AiContextAssembler} dentro de uma
+     * transacao readOnly. {@code qcContext} nulo/vazio sinaliza serie sem dados no
+     * periodo: devolve o texto fixo e NAO chama a IA (mesmo curto-circuito de antes).
+     *
+     * @param qcContext contexto de CQ da serie ja formatado, ou {@code null}/vazio
+     *     quando nao ha dados no periodo
      */
-    public String interpretTrend(String examName, String level, String area, List<QcRecord> series) {
-        if (series == null || series.isEmpty()) {
+    public String interpretTrend(String examName, String level, String area, String qcContext) {
+        if (qcContext == null || qcContext.isBlank()) {
             return "Sem dados suficientes no período para interpretar tendência.";
         }
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -508,7 +691,7 @@ public class AiService {
             String userContent = "Exame: " + safeText(examName)
                 + " | Nível: " + safeText(level)
                 + " | Área: " + safeText(area)
-                + "\n\n" + buildQcContext(series)
+                + "\n\n" + qcContext
                 + "\n\n" + INTERPRET_TREND_PROMPT;
             List<AiMessage> messages = List.of(
                 AiMessage.system(SYSTEM_PROMPT),
@@ -519,6 +702,9 @@ public class AiService {
             recordAiRequest("qc-interpret-trend", "success");
             sample.stop(aiLatencyTimer("qc-interpret-trend", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("qc-interpret-trend", "business_error");
             sample.stop(aiLatencyTimer("qc-interpret-trend", "business_error"));
@@ -558,6 +744,9 @@ public class AiService {
             recordAiRequest("suggest-observation", "success");
             sample.stop(aiLatencyTimer("suggest-observation", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("suggest-observation", "business_error");
             sample.stop(aiLatencyTimer("suggest-observation", "business_error"));
@@ -600,6 +789,9 @@ public class AiService {
             recordAiRequest("dashboard-summary", "success");
             sample.stop(aiLatencyTimer("dashboard-summary", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("dashboard-summary", "business_error");
             sample.stop(aiLatencyTimer("dashboard-summary", "business_error"));
@@ -637,6 +829,9 @@ public class AiService {
             recordAiRequest("audit-summary", "success");
             sample.stop(aiLatencyTimer("audit-summary", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("audit-summary", "business_error");
             sample.stop(aiLatencyTimer("audit-summary", "business_error"));
@@ -656,31 +851,26 @@ public class AiService {
      * <p>NAO altera registro, status, referencia nem violacoes. Apresenta
      * HIPOTESES (aleatorio vs sistematico) e correlacoes plausiveis com
      * reagente/calibracao/manutencao como RECOMENDACAO; a decisao permanece com o
-     * {@code WestgardEngine} deterministico e o analista. Reusa
-     * {@link #buildQcContext(List)} para o registro+historico e anexa os
+     * {@code WestgardEngine} deterministico e o analista. Recebe o {@code qcContext}
+     * (registro+historico) JA MONTADO pelo
+     * {@link com.biodiagnostico.service.ai.AiContextAssembler} e anexa os
      * contextos de reagente e manutencao ja montados pelo controlador.
      *
-     * @param record             registro de CQ em foco (nunca {@code null})
-     * @param history            historico recente do MESMO exame+nivel+area (pode ser vazio)
+     * <p><strong>Onda 4 / Fase A:</strong> as violacoes do registro+historico ja
+     * foram materializadas dentro da transacao readOnly do assembler; aqui so se
+     * chama o provedor (HTTP), fora de qualquer transacao.
+     *
+     * @param qcContext          contexto de CQ (registro em destaque + historico) ja formatado
      * @param reagentContext     texto dos lotes de reagente ativos na area na data (pode ser vazio)
      * @param maintenanceContext texto da manutencao/calibracao mais recente do equipamento (pode ser vazio)
      */
     public String analyzeRootCause(
-        QcRecord record, List<QcRecord> history, String reagentContext, String maintenanceContext
+        String qcContext, String reagentContext, String maintenanceContext
     ) {
         Timer.Sample sample = Timer.start(meterRegistry);
         try {
             ensureRateLimit();
-            List<QcRecord> contextRecords = new ArrayList<>();
-            if (record != null) {
-                contextRecords.add(record);
-            }
-            if (history != null) {
-                history.stream()
-                    .filter(item -> item != null && (record == null || item != record))
-                    .forEach(contextRecords::add);
-            }
-            String userContent = buildQcContext(contextRecords)
+            String userContent = safeText(qcContext)
                 + "\nCorrelações de reagente (lotes ativos na área na data do registro):\n"
                 + (reagentContext == null || reagentContext.isBlank()
                     ? "(sem lotes de reagente correlacionáveis no contexto)\n" : reagentContext)
@@ -697,6 +887,9 @@ public class AiService {
             recordAiRequest("qc-root-cause", "success");
             sample.stop(aiLatencyTimer("qc-root-cause", "success"));
             return result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("qc-root-cause", "business_error");
             sample.stop(aiLatencyTimer("qc-root-cause", "business_error"));
@@ -747,6 +940,9 @@ public class AiService {
             recordAiRequest("priorities", "success");
             sample.stop(aiLatencyTimer("priorities", "success"));
             return result == null ? "" : result;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("priorities", "business_error");
             sample.stop(aiLatencyTimer("priorities", "business_error"));
@@ -809,6 +1005,9 @@ public class AiService {
             recordAiRequest("qc-drift", "success");
             sample.stop(aiLatencyTimer("qc-drift", "success"));
             return details;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("qc-drift", "business_error");
             sample.stop(aiLatencyTimer("qc-drift", "business_error"));
@@ -1010,6 +1209,9 @@ public class AiService {
                 parseExamMismatchResponse(raw, mismatchRows, validExamNames);
             recordAiRequest("validate-batch", "success");
             return parsed;
+        } catch (RateLimitException exception) {
+            // Rate-limit nao degrada: propaga para virar 429 + Retry-After.
+            throw exception;
         } catch (BusinessException exception) {
             recordAiRequest("validate-batch", "business_error");
             log.warn("Falha de negócio na IA para validate-batch; degradando para UNKNOWN_EXAM", exception);
@@ -1201,30 +1403,20 @@ public class AiService {
         return normalized.isBlank() ? "webm" : normalized;
     }
 
-    public String buildQcContext(List<QcRecord> records) {
-        StringBuilder context = new StringBuilder("Dados de Controle de Qualidade do Laboratório Biodiagnóstico:\n\n");
-        for (QcRecord record : records) {
-            context.append(String.format(
-                "Data: %s | Exame: %s | Nível: %s | Valor: %.2f | Alvo: %.2f | SD: %.2f | CV: %.2f%% | Status: %s%n",
-                record.getDate(),
-                record.getExamName(),
-                record.getLevel(),
-                record.getValue(),
-                record.getTargetValue(),
-                record.getTargetSd(),
-                record.getCv(),
-                record.getStatus()
-            ));
-            if (record.getViolations() != null) {
-                record.getViolations().forEach(violation -> context
-                    .append("  -> Violação: ")
-                    .append(violation.getRule())
-                    .append(" - ")
-                    .append(violation.getDescription())
-                    .append('\n'));
-            }
-        }
-        return context.toString();
+    /**
+     * Checagem publica de rate-limit para o controlador de streaming usar ANTES
+     * de abrir o {@code SseEmitter} (e portanto antes do 1o byte enviado). Apenas
+     * delega a {@link #ensureRateLimit()}: lanca {@link RateLimitException} (que
+     * vira 429 + {@code Retry-After}) quando a janela esta esgotada.
+     *
+     * <p>Idempotente do ponto de vista de contrato: os metodos {@code *Stream}
+     * tambem chamam {@code ensureRateLimit()} internamente. O custo de chamar duas
+     * vezes e consumir 2 slots da janela na mesma requisicao; o controlador deve
+     * chamar este metodo OU confiar no check interno do {@code *Stream}, nao ambos
+     * para a mesma chamada (ver nota no controlador da Fase A / tarefa 3b).
+     */
+    public void checkRateLimit() {
+        ensureRateLimit();
     }
 
     private void ensureRateLimit() {
@@ -1235,7 +1427,11 @@ public class AiService {
             calls.pollFirst();
         }
         if (calls.size() >= 10) {
-            throw new BusinessException("Limite de 10 análises por minuto excedido");
+            // A chamada mais antiga ainda na janela sai daqui a (60 - idade) segundos;
+            // so entao havera espaco. Piso 1 (nunca "Retry-After: 0") e teto 60 (a janela).
+            long oldestAgeSeconds = Duration.between(calls.peekFirst(), now).toSeconds();
+            long retryAfterSeconds = Math.max(1L, Math.min(60L, 60L - oldestAgeSeconds));
+            throw new RateLimitException("Limite de 10 análises por minuto excedido", retryAfterSeconds);
         }
         calls.addLast(now);
     }
@@ -1248,20 +1444,42 @@ public class AiService {
         return authentication.getName();
     }
 
+    /** Transporte das chamadas de IA — tag Micrometer {@code transport}. */
+    private static final String TRANSPORT_BLOCKING = "blocking";
+    private static final String TRANSPORT_STREAM = "stream";
+
+    /** Caminho bloqueante: reutiliza os contadores com {@code transport="blocking"}. */
     private void recordAiRequest(String endpoint, String status) {
+        recordAiRequest(endpoint, status, TRANSPORT_BLOCKING);
+    }
+
+    /**
+     * Mesmo contador {@code biodiagnostico.ai.requests}, agora com a tag
+     * {@code transport} ({@code "blocking"} ou {@code "stream"}) — NAO cria
+     * contador novo, apenas distingue a dimensao do transporte.
+     */
+    private void recordAiRequest(String endpoint, String status, String transport) {
         Counter.builder("biodiagnostico.ai.requests")
             .description("Number of AI API requests")
             .tag("endpoint", endpoint)
             .tag("status", status)
+            .tag("transport", transport)
             .register(meterRegistry)
             .increment();
     }
 
+    /** Caminho bloqueante: reutiliza o timer com {@code transport="blocking"}. */
     private Timer aiLatencyTimer(String endpoint, String status) {
+        return aiLatencyTimer(endpoint, status, TRANSPORT_BLOCKING);
+    }
+
+    /** Mesmo timer {@code biodiagnostico.ai.latency} com a tag {@code transport}. */
+    private Timer aiLatencyTimer(String endpoint, String status, String transport) {
         return Timer.builder("biodiagnostico.ai.latency")
             .description("Latency of AI API calls")
             .tag("endpoint", endpoint)
             .tag("status", status)
+            .tag("transport", transport)
             .register(meterRegistry);
     }
 

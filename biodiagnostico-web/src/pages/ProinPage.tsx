@@ -7,6 +7,9 @@ import { canWriteQc } from '../lib/permissions'
 import { cn } from '../utils/cn'
 
 const DashboardTab = lazy(() => import('../components/proin/DashboardTab').then((module) => ({ default: module.DashboardTab })))
+const CoagulacaoArea = lazy(() =>
+  import('../components/proin/CoagulacaoArea').then((module) => ({ default: module.CoagulacaoArea })),
+)
 const HematologiaArea = lazy(() =>
   import('../components/proin/HematologiaArea').then((module) => ({ default: module.HematologiaArea })),
 )
@@ -29,6 +32,7 @@ const UroanaliseArea = lazy(() =>
 
 const areas = [
   { value: 'bioquimica', label: 'Bioquímica' },
+  { value: 'coagulacao', label: 'Coagulação' },
   { value: 'hematologia', label: 'Hematologia' },
   { value: 'imunologia', label: 'Imunologia' },
   { value: 'parasitologia', label: 'Parasitologia' },
@@ -77,6 +81,8 @@ export function ProinPage() {
 
   const renderSpecializedArea = () => {
     switch (currentArea) {
+      case 'coagulacao':
+        return <CoagulacaoArea />
       case 'hematologia':
         return <HematologiaArea />
       case 'imunologia':

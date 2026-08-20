@@ -88,10 +88,13 @@ export function useCreateQcExam() {
   })
 }
 
-export function useQcReferences(examId?: string, activeOnly = false) {
+export function useQcReferences(
+  examIdOrFilters?: string | { examId?: string; area?: string; activeOnly?: boolean },
+  activeOnly = false,
+) {
   return useQuery({
-    queryKey: ['qc-references', examId, activeOnly],
-    queryFn: () => qcService.getReferences(examId, activeOnly),
+    queryKey: ['qc-references', examIdOrFilters, activeOnly],
+    queryFn: () => qcService.getReferences(examIdOrFilters, activeOnly),
   })
 }
 
