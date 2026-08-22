@@ -1,8 +1,6 @@
 import {
-  Building2,
   Check,
   Flame,
-  Layers,
   ShieldCheck,
   Snowflake,
   Sparkles,
@@ -36,10 +34,6 @@ interface PresetOption {
   title: string
   subtitle: string
   icon: any
-  defaultMin: string
-  defaultMax: string
-  defaultMinHum?: string
-  defaultMaxHum?: string
   codePrefix: string
   color: string
   borderActive: string
@@ -51,54 +45,15 @@ const PRESETS: PresetOption[] = [
     title: 'Geladeira',
     subtitle: 'Reagentes, Amostras e Vacinas',
     icon: Snowflake,
-    defaultMin: '2.0',
-    defaultMax: '8.0',
     codePrefix: 'GEL',
     color: 'text-sky-600 bg-sky-50',
     borderActive: 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/40',
-  },
-  {
-    category: 'FREEZER',
-    title: 'Freezer -20°C',
-    subtitle: 'Soros, Controles e Alíquotas',
-    icon: Snowflake,
-    defaultMin: '-25.0',
-    defaultMax: '-15.0',
-    codePrefix: 'FRZ',
-    color: 'text-indigo-600 bg-indigo-50',
-    borderActive: 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40',
-  },
-  {
-    category: 'ULTRAFREEZER' as any,
-    title: 'Ultrafreezer -80°C',
-    subtitle: 'Amostras de Longa Duração',
-    icon: Snowflake,
-    defaultMin: '-86.0',
-    defaultMax: '-70.0',
-    codePrefix: 'ULT',
-    color: 'text-blue-700 bg-blue-50',
-    borderActive: 'border-blue-600 ring-2 ring-blue-600/20 bg-blue-50/40',
-  },
-  {
-    category: 'AMBIENTE',
-    title: 'Ambiente / Sala Técnica',
-    subtitle: 'Salas de Exames & Termohigrometria',
-    icon: Building2,
-    defaultMin: '15.0',
-    defaultMax: '25.0',
-    defaultMinHum: '30.0',
-    defaultMaxHum: '70.0',
-    codePrefix: 'AMB',
-    color: 'text-emerald-600 bg-emerald-50',
-    borderActive: 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/40',
   },
   {
     category: 'ESTUFA',
     title: 'Estufa Bacteriológica',
     subtitle: 'Incubação e Culturas (37°C)',
     icon: Flame,
-    defaultMin: '35.0',
-    defaultMax: '37.0',
     codePrefix: 'EST',
     color: 'text-amber-600 bg-amber-50',
     borderActive: 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/40',
@@ -108,33 +63,9 @@ const PRESETS: PresetOption[] = [
     title: 'Banho-Maria',
     subtitle: 'Reações e Hemostasia (37°C)',
     icon: Flame,
-    defaultMin: '36.0',
-    defaultMax: '38.0',
     codePrefix: 'BM',
     color: 'text-rose-600 bg-rose-50',
     borderActive: 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/40',
-  },
-  {
-    category: 'CENTRIFUGA' as any,
-    title: 'Centrífuga Refrigerada',
-    subtitle: 'Processamento de Sangue (4°C)',
-    icon: Layers,
-    defaultMin: '2.0',
-    defaultMax: '6.0',
-    codePrefix: 'CEN',
-    color: 'text-purple-600 bg-purple-50',
-    borderActive: 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/40',
-  },
-  {
-    category: 'OUTRO',
-    title: 'Personalizado',
-    subtitle: 'Outros Equipamentos',
-    icon: Thermometer,
-    defaultMin: '0.0',
-    defaultMax: '10.0',
-    codePrefix: 'EQP',
-    color: 'text-neutral-600 bg-neutral-100',
-    borderActive: 'border-neutral-700 ring-2 ring-neutral-700/20 bg-neutral-50',
   },
 ]
 
@@ -171,8 +102,8 @@ export function TemperatureLocationModal({
   const [code, setCode] = useState<string>('')
   const [area, setArea] = useState<string>('GERAL')
   const [customArea, setCustomArea] = useState<string>('')
-  const [minTempTarget, setMinTempTarget] = useState<string>('2.0')
-  const [maxTempTarget, setMaxTempTarget] = useState<string>('8.0')
+  const [minTempTarget, setMinTempTarget] = useState<string>('')
+  const [maxTempTarget, setMaxTempTarget] = useState<string>('')
   const [minHumidityTarget, setMinHumidityTarget] = useState<string>('')
   const [maxHumidityTarget, setMaxHumidityTarget] = useState<string>('')
   const [thermometerCode, setThermometerCode] = useState<string>('')
@@ -258,7 +189,11 @@ export function TemperatureLocationModal({
     } else {
       const defaultName = initialName || ''
       setName(defaultName)
-      applyPreset('GELADEIRA', false)
+      setSelectedPreset('GELADEIRA')
+      setMinTempTarget('')
+      setMaxTempTarget('')
+      setMinHumidityTarget('')
+      setMaxHumidityTarget('')
       setArea('GERAL')
       setCustomArea('')
       setThermometerCode('')
@@ -274,14 +209,6 @@ export function TemperatureLocationModal({
 
   const applyPreset = (category: LocationCategory, updateCode = true) => {
     setSelectedPreset(category)
-    const preset = PRESETS.find((p) => p.category === category)
-    if (!preset) return
-
-    setMinTempTarget(preset.defaultMin)
-    setMaxTempTarget(preset.defaultMax)
-    setMinHumidityTarget(preset.defaultMinHum || '')
-    setMaxHumidityTarget(preset.defaultMaxHum || '')
-
     if (updateCode && !isCodeManuallyEdited) {
       setCode(calculateNextCode(category, name))
     }
@@ -430,17 +357,17 @@ Instruções:
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
-        {/* 1. Seleção Rápida de Preset com 1 Clique & Modificação Livre */}
+        {/* 1. Seleção de Tipo de Equipamento */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="block text-xs font-bold text-neutral-800 uppercase tracking-wider">
-              1. Tipo de Equipamento / Ambiente (Preset Rápido)
+              1. Tipo de Equipamento
             </label>
             <span className="text-[11px] text-neutral-500">
-              Clique no tipo para aplicar as faixas ou modifique abaixo
+              Selecione o tipo para gerar o prefixo do código
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {PRESETS.map((p) => {
               const Icon = p.icon
               const isSelected = selectedPreset === p.category
@@ -449,7 +376,7 @@ Instruções:
                   key={p.category}
                   type="button"
                   onClick={() => applyPreset(p.category, true)}
-                  className={`relative flex flex-col items-start rounded-2xl border p-3 text-left transition-all ${
+                  className={`relative flex flex-col items-start rounded-2xl border p-3.5 text-left transition-all ${
                     isSelected
                       ? p.borderActive
                       : 'border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50/80'
@@ -466,11 +393,8 @@ Instruções:
                   <div className="font-semibold text-xs text-neutral-900 leading-tight">
                     {p.title}
                   </div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-1">
+                  <div className="text-[10px] text-neutral-500 mt-0.5">
                     {p.subtitle}
-                  </div>
-                  <div className="mt-2 text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
-                    {p.defaultMin}°C a {p.defaultMax}°C
                   </div>
                 </button>
               )
