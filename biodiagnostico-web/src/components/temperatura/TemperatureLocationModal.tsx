@@ -27,6 +27,7 @@ interface TemperatureLocationModalProps {
   isOpen: boolean
   onClose: () => void
   locationToEdit?: TemperatureLocation | null
+  initialName?: string
   onSuccessCreated?: (createdLocation: TemperatureLocation) => void
 }
 
@@ -157,6 +158,7 @@ export function TemperatureLocationModal({
   isOpen,
   onClose,
   locationToEdit,
+  initialName,
   onSuccessCreated,
 }: TemperatureLocationModalProps) {
   const { toast } = useToast()
@@ -253,10 +255,10 @@ export function TemperatureLocationModal({
       setFrequency(locationToEdit.frequency || 'DIARIO_1X')
       setActive(locationToEdit.active ?? true)
       setNotes(locationToEdit.notes || '')
-      setIsCodeManuallyEdited(true)
     } else {
+      const defaultName = initialName || ''
+      setName(defaultName)
       applyPreset('GELADEIRA', false)
-      setName('')
       setArea('GERAL')
       setCustomArea('')
       setThermometerCode('')
@@ -266,9 +268,9 @@ export function TemperatureLocationModal({
       setActive(true)
       setNotes('')
       setIsCodeManuallyEdited(false)
-      setCode(calculateNextCode('GELADEIRA', ''))
+      setCode(calculateNextCode('GELADEIRA', defaultName))
     }
-  }, [locationToEdit, isOpen])
+  }, [locationToEdit, initialName, isOpen])
 
   const applyPreset = (category: LocationCategory, updateCode = true) => {
     setSelectedPreset(category)

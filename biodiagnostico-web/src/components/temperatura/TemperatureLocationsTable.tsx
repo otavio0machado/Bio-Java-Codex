@@ -64,7 +64,7 @@ export function TemperatureLocationsTable({
         )}
       </div>
 
-      <Card className="overflow-hidden border-neutral-200/80 bg-white shadow-sm sm:rounded-3xl">
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-600 uppercase tracking-wider">

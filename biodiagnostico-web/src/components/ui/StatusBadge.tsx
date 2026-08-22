@@ -21,6 +21,8 @@ const badgeMap: Record<string, string> = {
   APROVADO: 'bg-green-100 text-green-800',
   REPROVADO: 'bg-red-100 text-red-800',
   ALERTA: 'bg-amber-100 text-amber-800',
+  CONFORME: 'bg-green-100 text-green-800',
+  NAO_CONFORME: 'bg-red-100 text-red-800',
   // Reagentes (novos)
   em_estoque: 'bg-green-100 text-green-800',
   em_uso: 'bg-blue-100 text-blue-800',
@@ -33,6 +35,8 @@ const badgeMap: Record<string, string> = {
 }
 
 const labelMap: Record<string, string> = {
+  CONFORME: 'Conforme',
+  NAO_CONFORME: 'Não Conforme',
   em_estoque: 'Em estoque',
   em_uso: 'Em uso',
   fora_de_estoque: 'Fora de estoque',

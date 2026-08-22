@@ -11,6 +11,8 @@ export function useTemperatureLocations(area?: string, active?: boolean) {
   return useQuery({
     queryKey: ['temperature', 'locations', { area, active }],
     queryFn: () => temperatureService.getLocations(area, active),
+    staleTime: 60_000,
+    gcTime: 300_000,
   })
 }
 
@@ -18,6 +20,9 @@ export function useTemperatureRecords(filters?: TemperatureRecordFilters) {
   return useQuery({
     queryKey: ['temperature', 'records', filters],
     queryFn: () => temperatureService.getRecords(filters),
+    staleTime: 30_000,
+    gcTime: 300_000,
+    placeholderData: (previousData) => previousData,
   })
 }
 
@@ -25,7 +30,10 @@ export function useTemperatureSummary() {
   return useQuery({
     queryKey: ['temperature', 'summary'],
     queryFn: () => temperatureService.getSummary(),
+    staleTime: 30_000,
+    gcTime: 300_000,
     refetchInterval: 60000,
+    placeholderData: (previousData) => previousData,
   })
 }
 

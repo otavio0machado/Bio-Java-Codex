@@ -1,6 +1,4 @@
 import {
-  AlertCircle,
-  CheckCircle2,
   Image as ImageIcon,
   Pencil,
   Thermometer,
@@ -9,7 +7,7 @@ import {
 import { useState } from 'react'
 import { useDeleteTemperatureRecord } from '../../hooks/useTemperature'
 import type { TemperatureRecord } from '../../types/temperature'
-import { Button, Card, EmptyState, Modal, useToast } from '../ui'
+import { Button, Card, EmptyState, Modal, StatusBadge, useToast } from '../ui'
 import { formatShortBR } from '../../utils/date'
 
 interface TemperatureMonthlyTableProps {
@@ -50,8 +48,7 @@ export function TemperatureMonthlyTable({
 
   return (
     <div className="space-y-6">
-      {/* Tabela de Medições */}
-      <Card className="overflow-hidden border-neutral-200/80 bg-white shadow-sm sm:rounded-3xl">
+      <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-neutral-200 bg-neutral-50/70 text-xs font-semibold text-neutral-600 uppercase tracking-wider">
@@ -123,20 +120,7 @@ export function TemperatureMonthlyTable({
                       </td>
 
                       <td className="px-4 py-3 text-center whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            isAlert
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200/60'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                          }`}
-                        >
-                          {isAlert ? (
-                            <AlertCircle className="h-3.5 w-3.5" />
-                          ) : (
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                          )}
-                          {isAlert ? 'Não Conforme' : 'Conforme'}
-                        </span>
+                        <StatusBadge status={r.status} />
                       </td>
 
                       <td className="px-4 py-3">

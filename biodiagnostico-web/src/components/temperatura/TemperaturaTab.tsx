@@ -155,13 +155,13 @@ export function TemperaturaTab() {
 
       {/* Navegação por Abas */}
       <div className="border-b border-neutral-200">
-        <nav className="flex space-x-8" aria-label="Abas de Temperatura">
+        <nav className="-mb-px flex space-x-6 sm:space-x-8" aria-label="Abas de Temperatura">
           <button
             type="button"
             onClick={() => setActiveTab('captura')}
-            className={`flex items-center gap-2 border-b-2 py-4 px-1 text-sm font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
               activeTab === 'captura'
-                ? 'border-emerald-600 text-emerald-700'
+                ? 'border-emerald-700 text-emerald-800'
                 : 'border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700'
             }`}
           >
@@ -172,9 +172,9 @@ export function TemperaturaTab() {
           <button
             type="button"
             onClick={() => setActiveTab('mapa')}
-            className={`flex items-center gap-2 border-b-2 py-4 px-1 text-sm font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
               activeTab === 'mapa'
-                ? 'border-emerald-600 text-emerald-700'
+                ? 'border-emerald-700 text-emerald-800'
                 : 'border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700'
             }`}
           >
@@ -185,9 +185,9 @@ export function TemperaturaTab() {
           <button
             type="button"
             onClick={() => setActiveTab('equipamentos')}
-            className={`flex items-center gap-2 border-b-2 py-4 px-1 text-sm font-semibold transition-colors ${
+            className={`flex items-center gap-2 border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
               activeTab === 'equipamentos'
-                ? 'border-emerald-600 text-emerald-700'
+                ? 'border-emerald-700 text-emerald-800'
                 : 'border-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700'
             }`}
           >
@@ -208,7 +208,7 @@ export function TemperaturaTab() {
       {activeTab === 'mapa' && (
         <div className="space-y-6">
           {/* Painel Unificado de Filtros e Exportação */}
-          <Card className="border-neutral-200/80 bg-white p-4 sm:p-5 shadow-sm sm:rounded-3xl">
+          <Card className="p-4 sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 lg:flex lg:items-center">
                 <div className="w-full sm:w-64">
@@ -265,7 +265,7 @@ export function TemperaturaTab() {
                   </Select>
                 </div>
 
-                <div className="w-full sm:w-40">
+                <div className="w-full sm:w-48">
                   <label className="block text-[11px] font-semibold text-neutral-500 mb-1">
                     Filtro de Status:
                   </label>

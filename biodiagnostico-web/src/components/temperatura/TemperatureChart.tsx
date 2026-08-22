@@ -63,7 +63,7 @@ export function TemperatureChart({ location, records, month, year }: Temperature
   const maxVal = Math.ceil(Math.max(...allTemps) + 1)
 
   return (
-    <Card className="border-neutral-200/80 bg-white p-6 shadow-sm sm:rounded-3xl">
+    <Card className="space-y-4">
       <div className="flex flex-col justify-between gap-2 border-b border-neutral-100 pb-4 sm:flex-row sm:items-center">
         <div>
           <h3 className="text-base font-semibold text-neutral-900">

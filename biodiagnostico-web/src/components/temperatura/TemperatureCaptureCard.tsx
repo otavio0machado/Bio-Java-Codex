@@ -4,12 +4,11 @@ import {
   CheckCircle2,
   ChevronDown,
   Loader2,
-  Plus,
   RefreshCw,
   Thermometer,
   X,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import {
   useCreateTemperatureRecord,
@@ -17,7 +16,7 @@ import {
   useTemperatureLocations,
 } from '../../hooks/useTemperature'
 import type { TemperatureRecordRequest } from '../../types/temperature'
-import { Button, Card, Input, Select, TextArea, useToast } from '../ui'
+import { Button, Card, Combobox, type ComboboxOption, Input, Select, StatusBadge, TextArea, useToast } from '../ui'
 import { todayLocal } from '../../utils/date'
 import { TemperatureLocationModal } from './TemperatureLocationModal'
 
@@ -34,6 +33,8 @@ export function TemperatureCaptureCard() {
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState<boolean>(false)
+  const [initialLocationName, setInitialLocationName] = useState<string>('')
+
   const [date, setDate] = useState<string>(todayLocal())
   const [time, setTime] = useState<string>(
     new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -89,7 +90,7 @@ export function TemperatureCaptureCard() {
   const [ocrApplied, setOcrApplied] = useState<boolean>(false)
   const [ocrMessage, setOcrMessage] = useState<string | null>(null)
 
-  // Seleciona primeiro ponto ativo por padrão
+  // Seleciona primeiro ponto ativo por padrão se vazio
   useEffect(() => {
     if (!selectedLocationId && locations && locations.length > 0) {
       setSelectedLocationId(locations[0].id)
@@ -102,7 +103,31 @@ export function TemperatureCaptureCard() {
     }
   }, [user, responsible])
 
+  // Opções para o Combobox
+  const locationOptions = useMemo<ComboboxOption[]>(() => {
+    if (!locations) return []
+    return locations.map((loc) => ({
+      value: loc.id,
+      label: `${loc.name} (${loc.code})`,
+      description: `Faixa Aceitável: ${loc.minTempTarget}°C a ${loc.maxTempTarget}°C · Setor ${loc.area || 'Geral'}`,
+    }))
+  }, [locations])
+
   const selectedLocation = locations?.find((l) => l.id === selectedLocationId)
+
+  // Handler de seleção no Combobox (suporta escolher existente ou criar novo elemento na caixa)
+  const handleLocationComboboxChange = (val: string) => {
+    const found = locations?.find(
+      (l) => l.id === val || l.name.toLowerCase() === val.toLowerCase() || l.code.toLowerCase() === val.toLowerCase()
+    )
+    if (found) {
+      setSelectedLocationId(found.id)
+    } else if (val.trim()) {
+      // Criar novo elemento a partir do texto digitado no Combobox
+      setInitialLocationName(val.trim())
+      setIsNewLocationModalOpen(true)
+    }
+  }
 
   // Avaliação de conformidade em tempo real (baseado no sensor do equipamento OUT)
   const numMin = parseFloat(tempMin.replace(',', '.'))
@@ -271,7 +296,7 @@ export function TemperatureCaptureCard() {
 
     createRecord.mutate(payload, {
       onSuccess: () => {
-        toast.success(`Medição de ${selectedLocation?.name} registrada e auditada com sucesso!`)
+        toast.success(`Medição de ${selectedLocation?.name} registrada com sucesso!`)
         handleReset()
       },
       onError: () => {
@@ -281,14 +306,14 @@ export function TemperatureCaptureCard() {
   }
 
   return (
-    <Card className="border-neutral-200/80 bg-white p-6 shadow-sm sm:rounded-3xl">
+    <Card className="space-y-6">
       <div className="flex flex-col justify-between gap-4 border-b border-neutral-100 pb-5 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-700 text-white shadow-xs">
               <Thermometer className="h-4 w-4" />
             </div>
-            <h2 className="text-lg font-semibold text-neutral-900">
+            <h2 className="text-xl font-semibold text-neutral-900">
               Registro de Temperatura & Termohigrometria
             </h2>
           </div>
@@ -305,7 +330,7 @@ export function TemperatureCaptureCard() {
         )}
       </div>
 
-      <form onSubmit={handleSave} className="mt-6 space-y-6">
+      <form onSubmit={handleSave} className="space-y-6">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* Lado Esquerdo: Evidências Fotográficas do Visor */}
           <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:p-5">
@@ -458,36 +483,23 @@ export function TemperatureCaptureCard() {
           {/* Lado Direito: Formulário de Lançamento */}
           <div className="lg:col-span-7 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* Combobox de Ponto / Equipamento */}
               <div className="sm:col-span-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-neutral-700">
-                    Ponto de Monitoramento / Equipamento *
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setIsNewLocationModalOpen(true)}
-                    className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    Novo Ponto
-                  </button>
-                </div>
-                <Select
+                <Combobox
+                  label="Ponto de Monitoramento / Equipamento *"
+                  placeholder="Selecione ou digite para buscar/criar..."
                   value={selectedLocationId}
-                  onChange={(e) => setSelectedLocationId(e.target.value)}
-                  className="mt-1"
+                  onChange={handleLocationComboboxChange}
+                  options={locationOptions}
+                  allowCustom={true}
+                  createLabel="Cadastrar novo ponto"
                   disabled={loadingLocations}
-                >
-                  {locations?.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name} ({l.code}) — [{l.minTempTarget}°C a {l.maxTempTarget}°C]
-                    </option>
-                  ))}
-                </Select>
+                  icon={<Thermometer className="h-4 w-4 text-emerald-700" />}
+                />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-base font-medium text-neutral-700">
                   Data da Medição *
                 </label>
                 <Input
@@ -500,7 +512,7 @@ export function TemperatureCaptureCard() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-base font-medium text-neutral-700">
                   Hora da Medição *
                 </label>
                 <Input
@@ -513,7 +525,7 @@ export function TemperatureCaptureCard() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-base font-medium text-neutral-700">
                   Período da Medição
                 </label>
                 <Select
@@ -530,7 +542,7 @@ export function TemperatureCaptureCard() {
 
               {/* Bloco de Temperaturas Principais */}
               <div>
-                <label className="block text-xs font-bold text-rose-700">
+                <label className="block text-sm font-bold text-rose-700">
                   Temp. Máxima (Max OUT °C) *
                 </label>
                 <Input
@@ -544,7 +556,7 @@ export function TemperatureCaptureCard() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-sky-700">
+                <label className="block text-sm font-bold text-sky-700">
                   Temp. Mínima (Min OUT °C) *
                 </label>
                 <Input
@@ -559,11 +571,11 @@ export function TemperatureCaptureCard() {
 
               <div>
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-amber-900">
+                  <label className="block text-sm font-bold text-amber-900">
                     Temp. Momento (°C) *
                   </label>
                   {(tempMaxIn || tempMinIn) && (
-                    <span className="text-[10px] text-amber-700 font-medium">
+                    <span className="text-xs text-amber-700 font-medium">
                       Média ({tempMaxIn || '-'} + {tempMinIn || '-'})/2
                     </span>
                   )}
@@ -579,7 +591,7 @@ export function TemperatureCaptureCard() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-sm font-medium text-neutral-700">
                   Umidade Relativa (% UR)
                 </label>
                 <Input
@@ -628,7 +640,7 @@ export function TemperatureCaptureCard() {
               </div>
 
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-base font-medium text-neutral-700">
                   Responsável Técnico / Farmacêutico *
                 </label>
                 <Input
@@ -642,7 +654,7 @@ export function TemperatureCaptureCard() {
               </div>
             </div>
 
-            {/* Banner de Conformidade */}
+            {/* Banner de Conformidade com StatusBadge padrão */}
             {derivedStatus !== 'INDEFINIDO' && (
               <div
                 className={`flex items-start gap-3 rounded-2xl p-4 text-sm ${
@@ -656,13 +668,16 @@ export function TemperatureCaptureCard() {
                 ) : (
                   <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
                 )}
-                <div>
-                  <p className="font-semibold">
-                    {derivedStatus === 'CONFORME'
-                      ? 'Temperatura Conforme com os limites operacionais'
-                      : 'DESVIO TÉRMICO — Temperatura Fora da Faixa!'}
-                  </p>
-                  <p className="mt-0.5 text-xs">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={derivedStatus} />
+                    <span className="font-semibold">
+                      {derivedStatus === 'CONFORME'
+                        ? 'Temperatura Conforme com os limites operacionais'
+                        : 'DESVIO TÉRMICO — Fora da Faixa!'}
+                    </span>
+                  </div>
+                  <p className="text-xs">
                     Faixa Aceitável de {selectedLocation?.name}:{' '}
                     <strong>
                       {selectedLocation?.minTempTarget}°C a {selectedLocation?.maxTempTarget}°C
@@ -692,7 +707,7 @@ export function TemperatureCaptureCard() {
           </div>
         </div>
 
-        {/* Footer do formulário com botão primário limpo */}
+        {/* Footer do formulário com botão primário padrão */}
         <div className="flex items-center justify-end gap-3 border-t border-neutral-100 pt-5">
           <Button type="button" variant="secondary" onClick={handleReset}>
             Limpar
@@ -701,7 +716,7 @@ export function TemperatureCaptureCard() {
             type="submit"
             loading={createRecord.isPending}
             disabled={!selectedLocationId || isNaN(numMin) || isNaN(numMax)}
-            className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-6 shadow-sm"
+            className="px-6"
           >
             Salvar Registro de Temperatura
           </Button>
@@ -711,7 +726,11 @@ export function TemperatureCaptureCard() {
       {/* Modal Rápido de Novo Ponto / Equipamento */}
       <TemperatureLocationModal
         isOpen={isNewLocationModalOpen}
-        onClose={() => setIsNewLocationModalOpen(false)}
+        initialName={initialLocationName}
+        onClose={() => {
+          setIsNewLocationModalOpen(false)
+          setInitialLocationName('')
+        }}
         onSuccessCreated={(created) => {
           setSelectedLocationId(created.id)
         }}
