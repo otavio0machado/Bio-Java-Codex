@@ -38,7 +38,8 @@ export function TemperatureRecordModal({
   const [period, setPeriod] = useState<string>('UNICO')
   const [tempMax, setTempMax] = useState<string>('')
   const [tempMin, setTempMin] = useState<string>('')
-  const [tempCurrent, setTempCurrent] = useState<string>('')
+  const [tempMaxIn, setTempMaxIn] = useState<string>('')
+  const [tempMinIn, setTempMinIn] = useState<string>('')
   const [humidity, setHumidity] = useState<string>('')
   const [responsible, setResponsible] = useState<string>('')
   const [actionTaken, setActionTaken] = useState<string>('')
@@ -52,9 +53,14 @@ export function TemperatureRecordModal({
       setPeriod(recordToEdit.period || 'UNICO')
       setTempMax(String(recordToEdit.tempMax))
       setTempMin(String(recordToEdit.tempMin))
-      setTempCurrent(
-        recordToEdit.tempCurrent !== null && recordToEdit.tempCurrent !== undefined
-          ? String(recordToEdit.tempCurrent)
+      setTempMaxIn(
+        recordToEdit.tempMaxIn !== null && recordToEdit.tempMaxIn !== undefined
+          ? String(recordToEdit.tempMaxIn)
+          : ''
+      )
+      setTempMinIn(
+        recordToEdit.tempMinIn !== null && recordToEdit.tempMinIn !== undefined
+          ? String(recordToEdit.tempMinIn)
           : ''
       )
       setHumidity(
@@ -72,7 +78,8 @@ export function TemperatureRecordModal({
       setPeriod('UNICO')
       setTempMax('')
       setTempMin('')
-      setTempCurrent('')
+      setTempMaxIn('')
+      setTempMinIn('')
       setHumidity('')
       setResponsible(user?.name || '')
       setActionTaken('')
@@ -84,6 +91,8 @@ export function TemperatureRecordModal({
 
   const numMin = parseFloat(tempMin.replace(',', '.'))
   const numMax = parseFloat(tempMax.replace(',', '.'))
+  const numMinIn = tempMinIn ? parseFloat(tempMinIn.replace(',', '.')) : null
+  const numMaxIn = tempMaxIn ? parseFloat(tempMaxIn.replace(',', '.')) : null
   const numHum = humidity ? parseFloat(humidity.replace(',', '.')) : null
 
   let isNonCompliant = false
@@ -117,7 +126,7 @@ export function TemperatureRecordModal({
       return
     }
     if (isNaN(numMin) || isNaN(numMax)) {
-      toast.error('Informe as temperaturas máxima e mínima.')
+      toast.error('Informe as temperaturas máxima e mínima da sonda (OUT).')
       return
     }
     if (isNonCompliant && !actionTaken.trim()) {
@@ -132,7 +141,8 @@ export function TemperatureRecordModal({
       period,
       tempMax: numMax,
       tempMin: numMin,
-      tempCurrent: isNaN(parseFloat(tempCurrent)) ? null : parseFloat(tempCurrent),
+      tempMaxIn: numMaxIn !== null && !isNaN(numMaxIn) ? numMaxIn : null,
+      tempMinIn: numMinIn !== null && !isNaN(numMinIn) ? numMinIn : null,
       humidity: numHum,
       responsible: responsible.trim() || 'Operador',
       actionTaken: actionTaken.trim() || null,
@@ -233,52 +243,63 @@ export function TemperatureRecordModal({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label className="block text-xs font-semibold text-neutral-700">Máx OUT (°C) *</label>
+            <label className="block text-xs font-bold text-rose-700">Máx OUT (°C) *</label>
             <Input
               type="text"
               value={tempMax}
               onChange={(e) => setTempMax(e.target.value)}
               placeholder="Ex: 5.5"
-              className="mt-1 font-semibold"
+              className="mt-1 font-semibold border-rose-200"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-neutral-700">Mín OUT (°C) *</label>
+            <label className="block text-xs font-bold text-sky-700">Mín OUT (°C) *</label>
             <Input
               type="text"
               value={tempMin}
               onChange={(e) => setTempMin(e.target.value)}
               placeholder="Ex: 2.5"
-              className="mt-1 font-semibold"
+              className="mt-1 font-semibold border-sky-200"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-neutral-700">Atual (°C)</label>
+            <label className="block text-xs font-semibold text-amber-800">Máx IN (°C) *</label>
             <Input
               type="text"
-              value={tempCurrent}
-              onChange={(e) => setTempCurrent(e.target.value)}
-              placeholder="Momento"
-              className="mt-1"
+              value={tempMaxIn}
+              onChange={(e) => setTempMaxIn(e.target.value)}
+              placeholder="Ex: 20.2"
+              className="mt-1 font-semibold border-amber-200"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-neutral-700">Umidade (%)</label>
+            <label className="block text-xs font-semibold text-teal-800">Mín IN (°C) *</label>
             <Input
               type="text"
-              value={humidity}
-              onChange={(e) => setHumidity(e.target.value)}
-              placeholder="% UR"
-              className="mt-1"
+              value={tempMinIn}
+              onChange={(e) => setTempMinIn(e.target.value)}
+              placeholder="Ex: 19.6"
+              className="mt-1 font-semibold border-teal-200"
             />
           </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-neutral-700">Umidade Relativa (% UR)</label>
+          <Input
+            type="text"
+            value={humidity}
+            onChange={(e) => setHumidity(e.target.value)}
+            placeholder="Ex: 60"
+            className="mt-1"
+          />
         </div>
 
         <div>

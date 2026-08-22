@@ -60,6 +60,8 @@ export interface TemperatureRecord {
   tempCurrent?: number | null
   tempMax: number
   tempMin: number
+  tempMaxIn?: number | null
+  tempMinIn?: number | null
   humidity?: number | null
   status: TemperatureStatus | string
   responsible: string
@@ -82,6 +84,8 @@ export interface TemperatureRecordRequest {
   tempCurrent?: number | null
   tempMax: number
   tempMin: number
+  tempMaxIn?: number | null
+  tempMinIn?: number | null
   humidity?: number | null
   responsible: string
   actionTaken?: string | null
@@ -106,6 +110,8 @@ export interface TemperatureOcrResponse {
   time?: string | null
   tempMax?: number | null
   tempMin?: number | null
+  tempMaxIn?: number | null
+  tempMinIn?: number | null
   tempCurrent?: number | null
   humidity?: number | null
   extractedDate?: string | null

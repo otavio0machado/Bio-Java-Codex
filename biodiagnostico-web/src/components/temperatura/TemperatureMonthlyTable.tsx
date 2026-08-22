@@ -219,21 +219,23 @@ export function TemperatureMonthlyTable({
           <table className="w-full text-left text-sm">
             <thead className="border-b border-neutral-200 bg-neutral-50 text-xs font-semibold text-neutral-600 uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3.5">Data / Hora</th>
-                <th className="px-4 py-3.5">Equipamento</th>
-                <th className="px-4 py-3.5 text-right">Máx (°C)</th>
-                <th className="px-4 py-3.5 text-right">Mín (°C)</th>
-                <th className="px-4 py-3.5 text-right">Atual (°C)</th>
-                <th className="px-4 py-3.5 text-center">Status</th>
-                <th className="px-4 py-3.5">Responsável</th>
-                <th className="px-4 py-3.5 text-center">Foto / Evidência</th>
-                {canWrite && <th className="px-4 py-3.5 text-right">Ações</th>}
+                <th className="px-3.5 py-3.5">Data / Hora</th>
+                <th className="px-3.5 py-3.5">Equipamento</th>
+                <th className="px-3 py-3.5 text-right text-rose-700">Máx OUT</th>
+                <th className="px-3 py-3.5 text-right text-sky-700">Mín OUT</th>
+                <th className="px-3 py-3.5 text-right text-amber-700">Máx IN</th>
+                <th className="px-3 py-3.5 text-right text-teal-700">Mín IN</th>
+                <th className="px-3 py-3.5 text-right">UR (%)</th>
+                <th className="px-3.5 py-3.5 text-center">Status</th>
+                <th className="px-3.5 py-3.5">Responsável</th>
+                <th className="px-3.5 py-3.5 text-center">Foto / Evidência</th>
+                {canWrite && <th className="px-3.5 py-3.5 text-right">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={canWrite ? 9 : 8} className="p-8 text-center text-neutral-500">
+                  <td colSpan={canWrite ? 11 : 10} className="p-8 text-center text-neutral-500">
                     Carregando medições...
                   </td>
                 </tr>
@@ -247,30 +249,38 @@ export function TemperatureMonthlyTable({
                         isAlert ? 'bg-rose-50/30' : ''
                       }`}
                     >
-                      <td className="px-4 py-3 font-medium text-neutral-900 whitespace-nowrap">
+                      <td className="px-3.5 py-3 font-medium text-neutral-900 whitespace-nowrap">
                         <div>{formatShortBR(r.date)}</div>
                         <div className="text-xs text-neutral-500 font-normal">
                           {r.time ? r.time.substring(0, 5) : '-'} ({r.period})
                         </div>
                       </td>
 
-                      <td className="px-4 py-3">
+                      <td className="px-3.5 py-3">
                         <div className="font-medium text-neutral-800">{r.locationName}</div>
                         <div className="text-xs text-neutral-500">
                           {r.locationCode} • [{r.minTempTarget}°C a {r.maxTempTarget}°C]
                         </div>
                       </td>
 
-                      <td className="px-4 py-3 text-right font-semibold text-rose-600">
+                      <td className="px-3 py-3 text-right font-semibold text-rose-600 whitespace-nowrap">
                         {r.tempMax != null ? `${r.tempMax}°C` : '-'}
                       </td>
 
-                      <td className="px-4 py-3 text-right font-semibold text-sky-600">
+                      <td className="px-3 py-3 text-right font-semibold text-sky-600 whitespace-nowrap">
                         {r.tempMin != null ? `${r.tempMin}°C` : '-'}
                       </td>
 
-                      <td className="px-4 py-3 text-right text-neutral-700">
-                        {r.tempCurrent != null ? `${r.tempCurrent}°C` : '-'}
+                      <td className="px-3 py-3 text-right text-amber-700 whitespace-nowrap">
+                        {r.tempMaxIn != null ? `${r.tempMaxIn}°C` : '-'}
+                      </td>
+
+                      <td className="px-3 py-3 text-right text-teal-700 whitespace-nowrap">
+                        {r.tempMinIn != null ? `${r.tempMinIn}°C` : '-'}
+                      </td>
+
+                      <td className="px-3 py-3 text-right text-neutral-600 whitespace-nowrap">
+                        {r.humidity != null ? `${r.humidity}%` : '-'}
                       </td>
 
                       <td className="px-4 py-3 text-center">

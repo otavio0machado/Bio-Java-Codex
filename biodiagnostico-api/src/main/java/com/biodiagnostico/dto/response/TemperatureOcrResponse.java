@@ -7,6 +7,8 @@ public record TemperatureOcrResponse(
     String time,
     BigDecimal tempMax,
     BigDecimal tempMin,
+    BigDecimal tempMaxIn,
+    BigDecimal tempMinIn,
     BigDecimal tempCurrent,
     BigDecimal humidity,
     LocalDate extractedDate,

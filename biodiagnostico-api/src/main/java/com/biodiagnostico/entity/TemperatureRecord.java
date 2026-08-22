@@ -56,6 +56,12 @@ public class TemperatureRecord {
     @Column(name = "temp_min", nullable = false, precision = 5, scale = 2)
     private BigDecimal tempMin;
 
+    @Column(name = "temp_max_in", precision = 5, scale = 2)
+    private BigDecimal tempMaxIn;
+
+    @Column(name = "temp_min_in", precision = 5, scale = 2)
+    private BigDecimal tempMinIn;
+
     @Column(precision = 5, scale = 2)
     private BigDecimal humidity;
 

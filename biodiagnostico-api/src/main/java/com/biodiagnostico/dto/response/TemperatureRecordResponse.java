@@ -21,6 +21,8 @@ public record TemperatureRecordResponse(
     BigDecimal tempCurrent,
     BigDecimal tempMax,
     BigDecimal tempMin,
+    BigDecimal tempMaxIn,
+    BigDecimal tempMinIn,
     BigDecimal humidity,
     String status,
     String responsible,

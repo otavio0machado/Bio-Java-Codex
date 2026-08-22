@@ -202,6 +202,8 @@ class TemperatureServiceTest {
             new BigDecimal("4.5"),
             new BigDecimal("6.0"),
             new BigDecimal("3.0"),
+            new BigDecimal("20.0"),
+            new BigDecimal("19.5"),
             null,
             "Farmacêutico Responsável",
             null,
@@ -286,11 +288,12 @@ class TemperatureServiceTest {
                   "time": "15:37",
                   "tempMax": 6.1,
                   "tempMin": 0.2,
-                  "tempCurrent": null,
+                  "tempMaxIn": 19.9,
+                  "tempMinIn": 19.6,
                   "humidity": 97.0,
                   "confidence": 0.99,
-                  "statusMessage": "Foto MAX: OUT 6.1°C | Foto MIN: OUT 0.2°C",
-                  "rawText": "MAX OUT 6.1 MIN OUT 0.2 15:37 97%RH"
+                  "statusMessage": "OUT: Máx 6.1°C / Mín 0.2°C | IN: Máx 19.9°C / Mín 19.6°C | UR: 97%",
+                  "rawText": "MAX OUT 6.1 IN 19.9 MIN OUT 0.2 IN 19.6 15:37 97%RH"
                 }
                 """);
 
@@ -305,8 +308,10 @@ class TemperatureServiceTest {
         assertThat(response.time()).isEqualTo("15:37");
         assertThat(response.tempMax()).isEqualByComparingTo("6.1");
         assertThat(response.tempMin()).isEqualByComparingTo("0.2");
+        assertThat(response.tempMaxIn()).isEqualByComparingTo("19.9");
+        assertThat(response.tempMinIn()).isEqualByComparingTo("19.6");
         assertThat(response.humidity()).isEqualByComparingTo("97.0");
-        assertThat(response.statusMessage()).contains("Foto MAX: OUT 6.1°C");
+        assertThat(response.statusMessage()).contains("OUT: Máx 6.1°C / Mín 0.2°C");
         assertThat(response.confidence()).isEqualTo(0.99);
     }
 

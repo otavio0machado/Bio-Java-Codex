@@ -425,6 +425,8 @@ public final class ResponseMapper {
             record.getTempCurrent(),
             record.getTempMax(),
             record.getTempMin(),
+            record.getTempMaxIn(),
+            record.getTempMinIn(),
             record.getHumidity(),
             record.getStatus(),
             record.getResponsible(),

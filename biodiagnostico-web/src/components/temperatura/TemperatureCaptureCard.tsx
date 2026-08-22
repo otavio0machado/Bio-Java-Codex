@@ -41,9 +41,15 @@ export function TemperatureCaptureCard() {
     new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   )
   const [period, setPeriod] = useState<string>('UNICO')
+
+  // Medições OUT (Sonda / Equipamento)
   const [tempMax, setTempMax] = useState<string>('')
   const [tempMin, setTempMin] = useState<string>('')
-  const [tempCurrent, setTempCurrent] = useState<string>('')
+
+  // Medições IN (Sensor Interno / Ambiente da Sala)
+  const [tempMaxIn, setTempMaxIn] = useState<string>('')
+  const [tempMinIn, setTempMinIn] = useState<string>('')
+
   const [humidity, setHumidity] = useState<string>('')
   const [responsible, setResponsible] = useState<string>(user?.name || '')
   const [actionTaken, setActionTaken] = useState<string>('')
@@ -79,9 +85,11 @@ export function TemperatureCaptureCard() {
 
   const selectedLocation = locations?.find((l) => l.id === selectedLocationId)
 
-  // Avaliação de conformidade em tempo real
+  // Avaliação de conformidade em tempo real (baseado no sensor do equipamento OUT)
   const numMin = parseFloat(tempMin.replace(',', '.'))
   const numMax = parseFloat(tempMax.replace(',', '.'))
+  const numMinIn = tempMinIn ? parseFloat(tempMinIn.replace(',', '.')) : null
+  const numMaxIn = tempMaxIn ? parseFloat(tempMaxIn.replace(',', '.')) : null
   const numHum = humidity ? parseFloat(humidity.replace(',', '.')) : null
 
   let derivedStatus: 'CONFORME' | 'NAO_CONFORME' | 'INDEFINIDO' = 'INDEFINIDO'
@@ -163,12 +171,13 @@ export function TemperatureCaptureCard() {
           if (data.time) setTime(data.time)
           if (data.tempMax !== null && data.tempMax !== undefined) setTempMax(String(data.tempMax))
           if (data.tempMin !== null && data.tempMin !== undefined) setTempMin(String(data.tempMin))
-          if (data.tempCurrent !== null && data.tempCurrent !== undefined) setTempCurrent(String(data.tempCurrent))
+          if (data.tempMaxIn !== null && data.tempMaxIn !== undefined) setTempMaxIn(String(data.tempMaxIn))
+          if (data.tempMinIn !== null && data.tempMinIn !== undefined) setTempMinIn(String(data.tempMinIn))
           if (data.humidity !== null && data.humidity !== undefined) setHumidity(String(data.humidity))
           setOcrMessage(data.statusMessage || 'Dados extraídos do display LCD por IA')
           setOcrConfidence(data.confidence ?? 0.95)
 
-          toast.success('Leitura concluída! Valores de temperatura extraídos com Inteligência Artificial.')
+          toast.success('Leitura concluída! Valores extraídos com Inteligência Artificial.')
         },
         onError: () => {
           setOcrMessage('Leitura automática indisponível. Preencha os valores manualmente nos campos.')
@@ -185,7 +194,8 @@ export function TemperatureCaptureCard() {
     setMinFilename('')
     setTempMax('')
     setTempMin('')
-    setTempCurrent('')
+    setTempMaxIn('')
+    setTempMinIn('')
     setHumidity('')
     setActionTaken('')
     setNotes('')
@@ -203,7 +213,7 @@ export function TemperatureCaptureCard() {
       return
     }
     if (isNaN(numMin) || isNaN(numMax)) {
-      toast.error('Informe as temperaturas máxima e mínima registradas.')
+      toast.error('Informe as temperaturas máxima e mínima registradas (OUT).')
       return
     }
     if (derivedStatus === 'NAO_CONFORME' && !actionTaken.trim()) {
@@ -218,7 +228,8 @@ export function TemperatureCaptureCard() {
       period,
       tempMax: numMax,
       tempMin: numMin,
-      tempCurrent: isNaN(parseFloat(tempCurrent)) ? null : parseFloat(tempCurrent),
+      tempMaxIn: numMaxIn !== null && !isNaN(numMaxIn) ? numMaxIn : null,
+      tempMinIn: numMinIn !== null && !isNaN(numMinIn) ? numMinIn : null,
       humidity: numHum,
       responsible: responsible.trim() || 'Operador',
       actionTaken: actionTaken.trim() || null,
@@ -254,7 +265,7 @@ export function TemperatureCaptureCard() {
             </h2>
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            Fotografe o display em modo <strong>MÁXIMA (MAX)</strong> e em modo <strong>MÍNIMA (MIN)</strong> para extração automática por IA.
+            Fotografe o display em modo <strong>MÁXIMA (MAX)</strong> e em modo <strong>MÍNIMA (MIN)</strong> para extração de OUT, IN, umidade e horário.
           </p>
         </div>
 
@@ -529,8 +540,9 @@ export function TemperatureCaptureCard() {
                 </Select>
               </div>
 
+              {/* Bloco 1: Sonda do Equipamento (OUT) */}
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-xs font-bold text-rose-700">
                   Temp. Máxima (Max OUT °C) *
                 </label>
                 <Input
@@ -538,13 +550,13 @@ export function TemperatureCaptureCard() {
                   value={tempMax}
                   onChange={(e) => setTempMax(e.target.value)}
                   placeholder="Ex: 6.1"
-                  className="mt-1 font-semibold text-neutral-900"
+                  className="mt-1 font-semibold text-neutral-900 border-rose-200 focus-within:border-rose-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
+                <label className="block text-xs font-bold text-sky-700">
                   Temp. Mínima (Min OUT °C) *
                 </label>
                 <Input
@@ -552,25 +564,41 @@ export function TemperatureCaptureCard() {
                   value={tempMin}
                   onChange={(e) => setTempMin(e.target.value)}
                   placeholder="Ex: 0.2"
-                  className="mt-1 font-semibold text-neutral-900"
+                  className="mt-1 font-semibold text-neutral-900 border-sky-200 focus-within:border-sky-500"
+                  required
+                />
+              </div>
+
+              {/* Bloco 2: Sensor Interno / Sala (IN) */}
+              <div>
+                <label className="block text-xs font-semibold text-amber-800">
+                  Temp. Máxima (Max IN °C) *
+                </label>
+                <Input
+                  type="text"
+                  value={tempMaxIn}
+                  onChange={(e) => setTempMaxIn(e.target.value)}
+                  placeholder="Ex: 19.9"
+                  className="mt-1 font-semibold text-neutral-900 border-amber-200 focus-within:border-amber-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-neutral-700">
-                  Temp. Atual / Momento (°C)
+                <label className="block text-xs font-semibold text-teal-800">
+                  Temp. Mínima (Min IN °C) *
                 </label>
                 <Input
                   type="text"
-                  value={tempCurrent}
-                  onChange={(e) => setTempCurrent(e.target.value)}
-                  placeholder="Opcional"
-                  className="mt-1"
+                  value={tempMinIn}
+                  onChange={(e) => setTempMinIn(e.target.value)}
+                  placeholder="Ex: 19.6"
+                  className="mt-1 font-semibold text-neutral-900 border-teal-200 focus-within:border-teal-500"
+                  required
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-neutral-700">
                   Umidade Relativa (% UR)
                 </label>
@@ -578,7 +606,7 @@ export function TemperatureCaptureCard() {
                   type="text"
                   value={humidity}
                   onChange={(e) => setHumidity(e.target.value)}
-                  placeholder="Para salas/ambientes"
+                  placeholder="Ex: 60 ou 98"
                   className="mt-1"
                 />
               </div>

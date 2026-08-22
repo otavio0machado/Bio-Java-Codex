@@ -15,6 +15,8 @@ public record TemperatureRecordRequest(
     BigDecimal tempCurrent,
     @NotNull BigDecimal tempMax,
     @NotNull BigDecimal tempMin,
+    BigDecimal tempMaxIn,
+    BigDecimal tempMinIn,
     BigDecimal humidity,
     @NotBlank String responsible,
     String actionTaken,

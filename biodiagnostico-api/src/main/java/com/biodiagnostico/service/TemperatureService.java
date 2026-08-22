@@ -235,6 +235,8 @@ public class TemperatureService {
             .tempCurrent(request.tempCurrent())
             .tempMax(request.tempMax())
             .tempMin(request.tempMin())
+            .tempMaxIn(request.tempMaxIn())
+            .tempMinIn(request.tempMinIn())
             .humidity(request.humidity())
             .status(status)
             .responsible(request.responsible().trim())
@@ -268,6 +270,8 @@ public class TemperatureService {
         record.setTempCurrent(request.tempCurrent());
         record.setTempMax(request.tempMax());
         record.setTempMin(request.tempMin());
+        record.setTempMaxIn(request.tempMaxIn());
+        record.setTempMinIn(request.tempMinIn());
         record.setHumidity(request.humidity());
         record.setStatus(status);
         record.setResponsible(request.responsible().trim());
@@ -420,28 +424,33 @@ public class TemperatureService {
             Você é um leitor de visão computacional de alta precisão especializado em termômetros digitais laboratoriais de máxima e mínima (ex: Metrins 340, Instrusul INS-1342, Incoterm).
             Você receberá %d foto(s) do visor LCD de termômetro laboratorial.
 
-            ESTRUTURA OBRIGATÓRIA DO DISPLAY LCD:
-            1. LINHA SUPERIOR (indicador 'IN' no canto superior direito): sensor interno/ambiente da sala (~18°C a 25°C). IGNORE para tempMax e tempMin.
-            2. LINHA DO MEIO / CENTRAL (indicador 'OUT' no canto direito): sensor externo / sonda do equipamento. **É ESTA LINHA DO MEIO 'OUT' QUE DEVE SER EXTRAÍDA PARA tempMax E tempMin!**
+            ESTRUTURA DO DISPLAY LCD DO TERMÔMETRO:
+            1. LINHA SUPERIOR (indicador 'IN' no canto superior direito): sensor interno / ar ambiente da sala (~18°C a 25°C).
+               - Na Foto 1 (em modo MAX): extraia o valor desta linha como 'tempMaxIn' (Máxima IN).
+               - Na Foto 2 (em modo MIN): extraia o valor desta linha como 'tempMinIn' (Mínima IN).
+            2. LINHA DO MEIO / CENTRAL (indicador 'OUT' no canto direito): sensor externo / sonda do equipamento.
+               - Na Foto 1 (em modo MAX): extraia o valor desta linha como 'tempMax' (Máxima OUT).
+               - Na Foto 2 (em modo MIN): extraia o valor desta linha como 'tempMin' (Mínima OUT).
             3. LINHA INFERIOR: relógio digital 'HH:mm' à esquerda e umidade relativa '%% RH' à direita.
 
-            REGRAS ABSOLUTAS DE EXTRAÇÃO:
-            - 'tempMax': É OBRIGATORIAMENTE E SEMPRE o valor da LINHA DO MEIO ('OUT') do visor em modo MAX (Foto 1). Exemplo: se a linha de cima (IN) for 19.9 e a linha do meio (OUT) for 6.1, 'tempMax' É 6.1 (NUNCA 19.9!).
-            - 'tempMin': É OBRIGATORIAMENTE E SEMPRE o valor da LINHA DO MEIO ('OUT') do visor em modo MIN (Foto 2). Exemplo: se a linha de cima (IN) for 19.6 e a linha do meio (OUT) for 0.2, 'tempMin' É 0.2 (NUNCA 19.6!).
-            - Se foram enviadas 2 fotos (uma para Máxima e outra para Mínima), extraia o valor da LINHA DO MEIO ('OUT') da primeira foto como 'tempMax' e o valor da LINHA DO MEIO ('OUT') da segunda foto como 'tempMin'.
-            - 'time': horário exibido no relógio digital na linha inferior (ex: '15:05', '15:37').
-            - 'humidity': percentual de umidade na linha inferior ao lado de '%% RH' (ex: 97, 98, 60).
-            - NUNCA coloque os valores da linha superior 'IN' em 'tempMax' ou 'tempMin'.
+            REGRAS DE EXTRAÇÃO:
+            - 'tempMax': É OBRIGATORIAMENTE o valor da LINHA DO MEIO ('OUT') da Foto 1 (modo MAX). Exemplo: 6.1
+            - 'tempMin': É OBRIGATORIAMENTE o valor da LINHA DO MEIO ('OUT') da Foto 2 (modo MIN). Exemplo: 0.2
+            - 'tempMaxIn': É OBRIGATORIAMENTE o valor da LINHA SUPERIOR ('IN') da Foto 1 (modo MAX). Exemplo: 19.9
+            - 'tempMinIn': É OBRIGATORIAMENTE o valor da LINHA SUPERIOR ('IN') da Foto 2 (modo MIN). Exemplo: 19.6
+            - 'time': horário exibido no relógio digital (ex: '15:37').
+            - 'humidity': percentual de umidade na linha inferior ao lado de '%% RH' (ex: 98, 97, 60).
 
             Responda ESTRITAMENTE em formato JSON:
             {
               "time": "HH:mm ou null",
               "tempMax": float ou null,
               "tempMin": float ou null,
-              "tempCurrent": float ou null,
+              "tempMaxIn": float ou null,
+              "tempMinIn": float ou null,
               "humidity": float ou null,
               "confidence": float entre 0.0 e 1.0,
-              "statusMessage": "descrição curta (ex: 'Foto 1 MAX (OUT): 6.1°C | Foto 2 MIN (OUT): 0.2°C | Umidade: 98%%')",
+              "statusMessage": "descrição (ex: 'OUT: Máx 6.1°C / Mín 0.2°C | IN: Máx 19.9°C / Mín 19.6°C | UR: 98%%')",
               "rawText": "transcrição dos dados lidos"
             }
             """,
@@ -457,7 +466,8 @@ public class TemperatureService {
             String time = root.path("time").isTextual() ? root.path("time").asText() : null;
             BigDecimal tempMax = root.path("tempMax").isNumber() ? BigDecimal.valueOf(root.path("tempMax").asDouble()) : null;
             BigDecimal tempMin = root.path("tempMin").isNumber() ? BigDecimal.valueOf(root.path("tempMin").asDouble()) : null;
-            BigDecimal tempCurrent = root.path("tempCurrent").isNumber() ? BigDecimal.valueOf(root.path("tempCurrent").asDouble()) : null;
+            BigDecimal tempMaxIn = root.path("tempMaxIn").isNumber() ? BigDecimal.valueOf(root.path("tempMaxIn").asDouble()) : null;
+            BigDecimal tempMinIn = root.path("tempMinIn").isNumber() ? BigDecimal.valueOf(root.path("tempMinIn").asDouble()) : null;
             BigDecimal humidity = root.path("humidity").isNumber() ? BigDecimal.valueOf(root.path("humidity").asDouble()) : null;
             Double confidence = root.path("confidence").isNumber() ? root.path("confidence").asDouble() : 0.95;
             String statusMsg = root.path("statusMessage").asText("Leitura processada com sucesso");
@@ -467,7 +477,9 @@ public class TemperatureService {
                 time,
                 tempMax,
                 tempMin,
-                tempCurrent,
+                tempMaxIn,
+                tempMinIn,
+                null,
                 humidity,
                 LocalDate.now(),
                 confidence,
@@ -478,6 +490,8 @@ public class TemperatureService {
             log.warn("Falha no OCR de visão por IA, aplicando fallback heurístico: {}", e.getMessage());
             return new TemperatureOcrResponse(
                 LocalTime.now().format(TIME_FMT),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -528,7 +542,7 @@ public class TemperatureService {
         }
         csv.append("\n");
 
-        csv.append("Data;Hora;Equipamento;Temp. Máx. (°C);Temp. Mín. (°C);Temp. Momento (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
+        csv.append("Data;Hora;Equipamento;Máx OUT (°C);Mín OUT (°C);Máx IN (°C);Mín IN (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
 
         for (TemperatureRecord r : records) {
             csv.append(r.getDate().format(DATE_FMT)).append(";");
@@ -536,7 +550,8 @@ public class TemperatureService {
             csv.append(r.getLocation() != null ? r.getLocation().getName() : "").append(";");
             csv.append(r.getTempMax() != null ? r.getTempMax().toString().replace('.', ',') : "").append(";");
             csv.append(r.getTempMin() != null ? r.getTempMin().toString().replace('.', ',') : "").append(";");
-            csv.append(r.getTempCurrent() != null ? r.getTempCurrent().toString().replace('.', ',') : "").append(";");
+            csv.append(r.getTempMaxIn() != null ? r.getTempMaxIn().toString().replace('.', ',') : "").append(";");
+            csv.append(r.getTempMinIn() != null ? r.getTempMinIn().toString().replace('.', ',') : "").append(";");
             csv.append(r.getHumidity() != null ? r.getHumidity().toString().replace('.', ',') : "").append(";");
             csv.append(r.getStatus()).append(";");
             csv.append(r.getResponsible()).append(";");
@@ -589,11 +604,11 @@ public class TemperatureService {
             sub.setSpacingAfter(12);
             doc.add(sub);
 
-            PdfPTable table = new PdfPTable(9);
+            PdfPTable table = new PdfPTable(10);
             table.setWidthPercentage(100);
-            table.setWidths(new float[]{10, 8, 22, 10, 10, 10, 12, 18, 20});
+            table.setWidths(new float[]{9, 7, 20, 8, 8, 8, 8, 7, 13, 12});
 
-            String[] headers = {"Data", "Hora", "Equipamento", "Máx (°C)", "Mín (°C)", "Atual (°C)", "Status", "Responsável", "Ação Corretiva"};
+            String[] headers = {"Data", "Hora", "Equipamento", "Máx OUT", "Mín OUT", "Máx IN", "Mín IN", "UR (%)", "Status", "Responsável"};
             for (String h : headers) {
                 PdfPCell cell = new PdfPCell(new Phrase(h, headerFont));
                 cell.setBackgroundColor(new Color(22, 101, 52));
@@ -616,17 +631,25 @@ public class TemperatureService {
 
                 table.addCell(new PdfPCell(new Phrase(r.getLocation() != null ? r.getLocation().getName() : "-", f)));
 
-                PdfPCell cMax = new PdfPCell(new Phrase(r.getTempMax() != null ? String.format("%.1f", r.getTempMax()) : "-", f));
-                cMax.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                table.addCell(cMax);
+                PdfPCell cMaxOut = new PdfPCell(new Phrase(r.getTempMax() != null ? String.format("%.1f", r.getTempMax()) : "-", f));
+                cMaxOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cMaxOut);
 
-                PdfPCell cMin = new PdfPCell(new Phrase(r.getTempMin() != null ? String.format("%.1f", r.getTempMin()) : "-", f));
-                cMin.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                table.addCell(cMin);
+                PdfPCell cMinOut = new PdfPCell(new Phrase(r.getTempMin() != null ? String.format("%.1f", r.getTempMin()) : "-", f));
+                cMinOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cMinOut);
 
-                PdfPCell cCur = new PdfPCell(new Phrase(r.getTempCurrent() != null ? String.format("%.1f", r.getTempCurrent()) : "-", f));
-                cCur.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                table.addCell(cCur);
+                PdfPCell cMaxIn = new PdfPCell(new Phrase(r.getTempMaxIn() != null ? String.format("%.1f", r.getTempMaxIn()) : "-", f));
+                cMaxIn.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cMaxIn);
+
+                PdfPCell cMinIn = new PdfPCell(new Phrase(r.getTempMinIn() != null ? String.format("%.1f", r.getTempMinIn()) : "-", f));
+                cMinIn.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cMinIn);
+
+                PdfPCell cHum = new PdfPCell(new Phrase(r.getHumidity() != null ? String.format("%.0f%%", r.getHumidity()) : "-", f));
+                cHum.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cHum);
 
                 PdfPCell cStatus = new PdfPCell(new Phrase(r.getStatus(), f));
                 cStatus.setHorizontalAlignment(Element.ALIGN_CENTER);
@@ -636,7 +659,6 @@ public class TemperatureService {
                 table.addCell(cStatus);
 
                 table.addCell(new PdfPCell(new Phrase(r.getResponsible(), f)));
-                table.addCell(new PdfPCell(new Phrase(r.getActionTaken() != null ? r.getActionTaken() : "-", f)));
             }
 
             doc.add(table);
