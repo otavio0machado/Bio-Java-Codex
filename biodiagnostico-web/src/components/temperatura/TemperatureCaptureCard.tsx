@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Image as ImageIcon,
   Loader2,
+  Plus,
   RefreshCw,
   Sparkles,
   Upload,
@@ -19,6 +20,7 @@ import {
 import type { TemperatureRecordRequest } from '../../types/temperature'
 import { Button, Card, Input, Select, TextArea, useToast } from '../ui'
 import { todayLocal } from '../../utils/date'
+import { TemperatureLocationModal } from './TemperatureLocationModal'
 
 export function TemperatureCaptureCard() {
   const { user } = useAuth()
@@ -36,6 +38,7 @@ export function TemperatureCaptureCard() {
   const cameraInputMinRef = useRef<HTMLInputElement>(null)
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
+  const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState<boolean>(false)
   const [date, setDate] = useState<string>(todayLocal())
   const [time, setTime] = useState<string>(
     new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -514,9 +517,19 @@ export function TemperatureCaptureCard() {
           <div className="lg:col-span-7 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-neutral-700">
-                  Ponto de Monitoramento / Equipamento *
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-neutral-700">
+                    Ponto de Monitoramento / Equipamento *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsNewLocationModalOpen(true)}
+                    className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Novo Ponto
+                  </button>
+                </div>
                 <Select
                   value={selectedLocationId}
                   onChange={(e) => setSelectedLocationId(e.target.value)}
@@ -743,6 +756,15 @@ export function TemperatureCaptureCard() {
           </Button>
         </div>
       </form>
+
+      {/* Modal Rápido de Novo Ponto / Equipamento */}
+      <TemperatureLocationModal
+        isOpen={isNewLocationModalOpen}
+        onClose={() => setIsNewLocationModalOpen(false)}
+        onSuccessCreated={(created) => {
+          setSelectedLocationId(created.id)
+        }}
+      />
     </Card>
   )
 }
