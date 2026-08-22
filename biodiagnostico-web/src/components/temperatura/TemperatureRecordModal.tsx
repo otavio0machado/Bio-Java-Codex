@@ -140,6 +140,8 @@ export function TemperatureRecordModal({
       ocrApplied: recordToEdit?.ocrApplied ?? false,
       photoUrl: recordToEdit?.photoUrl ?? null,
       photoFilename: recordToEdit?.photoFilename ?? null,
+      photoMinUrl: recordToEdit?.photoMinUrl ?? null,
+      photoMinFilename: recordToEdit?.photoMinFilename ?? null,
     }
 
     if (recordToEdit) {

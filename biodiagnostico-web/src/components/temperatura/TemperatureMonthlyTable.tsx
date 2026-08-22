@@ -41,7 +41,12 @@ export function TemperatureMonthlyTable({
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
   const [selectedStatus, setSelectedStatus] = useState<string>('')
 
-  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; title: string } | null>(null)
+  const [previewPhoto, setPreviewPhoto] = useState<{
+    title: string
+    maxUrl?: string | null
+    minUrl?: string | null
+    activeTab: 'MAX' | 'MIN'
+  } | null>(null)
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false)
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false)
 
@@ -294,20 +299,71 @@ export function TemperatureMonthlyTable({
                         )}
                       </td>
 
-                      <td className="px-4 py-3 text-center">
-                        {r.photoUrl ? (
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        {r.photoUrl && r.photoMinUrl ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewPhoto({
+                                  title: `${r.locationName} — ${formatShortBR(r.date)} ${r.time?.substring(0, 5)}`,
+                                  maxUrl: r.photoUrl,
+                                  minUrl: r.photoMinUrl,
+                                  activeTab: 'MAX',
+                                })
+                              }
+                              className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800 hover:bg-amber-200"
+                              title="Ver Foto da Máxima (MAX)"
+                            >
+                              MAX
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewPhoto({
+                                  title: `${r.locationName} — ${formatShortBR(r.date)} ${r.time?.substring(0, 5)}`,
+                                  maxUrl: r.photoUrl,
+                                  minUrl: r.photoMinUrl,
+                                  activeTab: 'MIN',
+                                })
+                              }
+                              className="inline-flex items-center gap-1 rounded-md bg-sky-100 px-2 py-0.5 text-xs font-bold text-sky-800 hover:bg-sky-200"
+                              title="Ver Foto da Mínima (MIN)"
+                            >
+                              MIN
+                            </button>
+                          </div>
+                        ) : r.photoUrl ? (
                           <button
                             type="button"
                             onClick={() =>
                               setPreviewPhoto({
-                                url: r.photoUrl!,
                                 title: `${r.locationName} — ${formatShortBR(r.date)} ${r.time?.substring(0, 5)}`,
+                                maxUrl: r.photoUrl,
+                                minUrl: null,
+                                activeTab: 'MAX',
                               })
                             }
                             className="inline-flex items-center gap-1 rounded-xl bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-200"
                           >
                             <Eye className="h-3.5 w-3.5 text-neutral-500" />
-                            Ver Foto
+                            Foto Máx
+                          </button>
+                        ) : r.photoMinUrl ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewPhoto({
+                                title: `${r.locationName} — ${formatShortBR(r.date)} ${r.time?.substring(0, 5)}`,
+                                maxUrl: null,
+                                minUrl: r.photoMinUrl,
+                                activeTab: 'MIN',
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded-xl bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-200"
+                          >
+                            <Eye className="h-3.5 w-3.5 text-neutral-500" />
+                            Foto Mín
                           </button>
                         ) : (
                           <span className="text-xs text-neutral-400">-</span>
@@ -363,12 +419,48 @@ export function TemperatureMonthlyTable({
           title={`Evidência Fotográfica: ${previewPhoto.title}`}
         >
           <div className="space-y-4">
-            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-black/5 p-2">
+            {previewPhoto.maxUrl && previewPhoto.minUrl && (
+              <div className="flex items-center justify-center gap-2 border-b border-neutral-200 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setPreviewPhoto({ ...previewPhoto, activeTab: 'MAX' })}
+                  className={`rounded-xl px-4 py-1.5 text-xs font-bold transition-colors ${
+                    previewPhoto.activeTab === 'MAX'
+                      ? 'bg-amber-500 text-white shadow-xs'
+                      : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                  }`}
+                >
+                  🔥 Foto da Máxima (MAX)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewPhoto({ ...previewPhoto, activeTab: 'MIN' })}
+                  className={`rounded-xl px-4 py-1.5 text-xs font-bold transition-colors ${
+                    previewPhoto.activeTab === 'MIN'
+                      ? 'bg-sky-500 text-white shadow-xs'
+                      : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                  }`}
+                >
+                  ❄️ Foto da Mínima (MIN)
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-black/5 p-2 text-center">
               <img
-                src={previewPhoto.url}
-                alt="Foto do Termômetro"
+                src={
+                  (previewPhoto.activeTab === 'MIN' && previewPhoto.minUrl)
+                    ? previewPhoto.minUrl
+                    : (previewPhoto.maxUrl || previewPhoto.minUrl || '')
+                }
+                alt={`Foto do Termômetro (${previewPhoto.activeTab})`}
                 className="max-h-[70vh] w-full object-contain"
               />
+              <p className="mt-2 text-xs font-medium text-neutral-600">
+                {previewPhoto.activeTab === 'MAX'
+                  ? 'Exibindo visor em modo MÁXIMA (MAX)'
+                  : 'Exibindo visor em modo MÍNIMA (MIN)'}
+              </p>
             </div>
             <div className="flex justify-end">
               <Button variant="secondary" onClick={() => setPreviewPhoto(null)}>

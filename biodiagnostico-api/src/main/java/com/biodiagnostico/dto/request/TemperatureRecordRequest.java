@@ -21,6 +21,8 @@ public record TemperatureRecordRequest(
     String notes,
     String photoUrl,
     String photoFilename,
+    String photoMinUrl,
+    String photoMinFilename,
     String ocrRawResult,
     Boolean ocrApplied
 ) {

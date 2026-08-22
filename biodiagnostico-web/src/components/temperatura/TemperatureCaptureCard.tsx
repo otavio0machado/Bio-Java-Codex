@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Sparkles,
   Upload,
+  X,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useAuth } from '../../hooks/useAuth'
@@ -26,8 +27,13 @@ export function TemperatureCaptureCard() {
   const processPhoto = useProcessTemperaturePhoto()
   const createRecord = useCreateTemperatureRecord()
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const cameraInputRef = useRef<HTMLInputElement>(null)
+  // Inputs ocultos para Foto 1 (Máxima)
+  const fileInputMaxRef = useRef<HTMLInputElement>(null)
+  const cameraInputMaxRef = useRef<HTMLInputElement>(null)
+
+  // Inputs ocultos para Foto 2 (Mínima)
+  const fileInputMinRef = useRef<HTMLInputElement>(null)
+  const cameraInputMinRef = useRef<HTMLInputElement>(null)
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
   const [date, setDate] = useState<string>(todayLocal())
@@ -43,8 +49,17 @@ export function TemperatureCaptureCard() {
   const [actionTaken, setActionTaken] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
 
-  const [previewImage, setPreviewImage] = useState<string | null>(null)
-  const [photoFilename, setPhotoFilename] = useState<string>('')
+  // Estados de Imagem: Foto Máxima (Slot 1)
+  const [maxImage, setMaxImage] = useState<string | null>(null)
+  const [maxMimeType, setMaxMimeType] = useState<string>('image/jpeg')
+  const [maxFilename, setMaxFilename] = useState<string>('')
+
+  // Estados de Imagem: Foto Mínima (Slot 2)
+  const [minImage, setMinImage] = useState<string | null>(null)
+  const [minMimeType, setMinMimeType] = useState<string>('image/jpeg')
+  const [minFilename, setMinFilename] = useState<string>('')
+
+  // Estados de OCR/IA
   const [ocrApplied, setOcrApplied] = useState<boolean>(false)
   const [ocrMessage, setOcrMessage] = useState<string | null>(null)
   const [ocrConfidence, setOcrConfidence] = useState<number | null>(null)
@@ -93,25 +108,53 @@ export function TemperatureCaptureCard() {
     derivedStatus = tempOk && humOk ? 'CONFORME' : 'NAO_CONFORME'
   }
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  // Handler de foto Máxima (Slot 1)
+  const handleMaxFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    setPhotoFilename(file.name)
+    setMaxFilename(file.name)
+    setMaxMimeType(file.type || 'image/jpeg')
     const reader = new FileReader()
     reader.onload = () => {
       const base64 = reader.result as string
-      setPreviewImage(base64)
-      processWithAi(base64, file.type)
+      setMaxImage(base64)
+      triggerAiOcr(base64, file.type || 'image/jpeg', minImage, minMimeType)
     }
     reader.readAsDataURL(file)
   }
 
-  const processWithAi = (base64: string, mimeType: string) => {
+  // Handler de foto Mínima (Slot 2)
+  const handleMinFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setMinFilename(file.name)
+    setMinMimeType(file.type || 'image/jpeg')
+    const reader = new FileReader()
+    reader.onload = () => {
+      const base64 = reader.result as string
+      setMinImage(base64)
+      triggerAiOcr(maxImage, maxMimeType, base64, file.type || 'image/jpeg')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const triggerAiOcr = (
+    imgMax: string | null,
+    mimeMax: string,
+    imgMin: string | null,
+    mimeMin: string
+  ) => {
+    const primaryImg = imgMax || imgMin
+    if (!primaryImg) return
+
     processPhoto.mutate(
       {
-        imageBase64: base64,
-        mimeType: mimeType || 'image/jpeg',
+        imageBase64: imgMax || undefined,
+        mimeType: mimeMax || 'image/jpeg',
+        imageMinBase64: imgMin || undefined,
+        mimeTypeMin: mimeMin || 'image/jpeg',
         locationId: selectedLocationId || undefined,
       },
       {
@@ -122,22 +165,24 @@ export function TemperatureCaptureCard() {
           if (data.tempMin !== null && data.tempMin !== undefined) setTempMin(String(data.tempMin))
           if (data.tempCurrent !== null && data.tempCurrent !== undefined) setTempCurrent(String(data.tempCurrent))
           if (data.humidity !== null && data.humidity !== undefined) setHumidity(String(data.humidity))
-          setOcrMessage(data.statusMessage || 'Dados extraídos automaticamente do display LCD')
+          setOcrMessage(data.statusMessage || 'Dados extraídos do display LCD por IA')
           setOcrConfidence(data.confidence ?? 0.95)
 
-          toast.success('Foto do display processada! Valores extraídos com Inteligência Artificial.')
+          toast.success('Leitura concluída! Valores de temperatura extraídos com Inteligência Artificial.')
         },
         onError: () => {
-          setOcrMessage('Leitura automática indisponível. Preencha os valores manualmente.')
-          toast.info('Não foi possível ler o display com clareza. Digite os valores nos campos.')
+          setOcrMessage('Leitura automática indisponível. Preencha os valores manualmente nos campos.')
+          toast.info('Não foi possível ler os dígitos com clareza. Digite os valores nos campos.')
         },
       }
     )
   }
 
   const handleReset = () => {
-    setPreviewImage(null)
-    setPhotoFilename('')
+    setMaxImage(null)
+    setMaxFilename('')
+    setMinImage(null)
+    setMinFilename('')
     setTempMax('')
     setTempMin('')
     setTempCurrent('')
@@ -178,8 +223,10 @@ export function TemperatureCaptureCard() {
       responsible: responsible.trim() || 'Operador',
       actionTaken: actionTaken.trim() || null,
       notes: notes.trim() || null,
-      photoUrl: previewImage || null,
-      photoFilename: photoFilename || null,
+      photoUrl: maxImage || null,
+      photoFilename: maxFilename || null,
+      photoMinUrl: minImage || null,
+      photoMinFilename: minFilename || null,
       ocrApplied,
     }
 
@@ -203,11 +250,11 @@ export function TemperatureCaptureCard() {
               <Sparkles className="h-4 w-4" />
             </div>
             <h2 className="text-lg font-semibold text-neutral-900">
-              Lançamento Rápido & Leitura de Foto (IA)
+              Lançamento Rápido & Leitura de Fotos por IA
             </h2>
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            Tire uma foto do visor LCD do termômetro ou preencha os dados da medição.
+            Fotografe o display em modo <strong>MÁXIMA (MAX)</strong> e em modo <strong>MÍNIMA (MIN)</strong> para extração automática por IA.
           </p>
         </div>
 
@@ -221,94 +268,199 @@ export function TemperatureCaptureCard() {
 
       <form onSubmit={handleSave} className="mt-6 space-y-6">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Lado Esquerdo: Área de Captura de Foto */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 p-5">
+          {/* Lado Esquerdo: Slots de Fotos Duplas (Máxima + Mínima) */}
+          <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 p-4 sm:p-5">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-600">
-                Evidência Fotográfica (Visor do Termômetro)
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-700">
+                  Evidências Fotográficas do Visor
+                </label>
+                {(maxImage || minImage) && (
+                  <button
+                    type="button"
+                    onClick={() => triggerAiOcr(maxImage, maxMimeType, minImage, minMimeType)}
+                    className="flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Re-analisar IA
+                  </button>
+                )}
+              </div>
 
-              {previewImage ? (
-                <div className="relative mt-3 overflow-hidden rounded-2xl border border-neutral-200 bg-black/5">
-                  <img
-                    src={previewImage}
-                    alt="Visor do Termômetro"
-                    className="h-56 w-full object-contain"
-                  />
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-3 py-2 text-xs text-white backdrop-blur-sm">
-                    <span className="truncate max-w-[200px]">{photoFilename}</span>
-                    <button
-                      type="button"
-                      onClick={handleReset}
-                      className="flex items-center gap-1 text-neutral-200 hover:text-white"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Trocar foto
-                    </button>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {/* SLOT 1: FOTO MÁXIMA */}
+                <div className="flex flex-col rounded-xl border border-neutral-200 bg-white p-3 shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                      MAX • Foto Máxima
+                    </span>
+                    {maxImage && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMaxImage(null)
+                          setMaxFilename('')
+                        }}
+                        className="text-neutral-400 hover:text-neutral-600"
+                        title="Remover foto"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="mt-3 flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-white p-8 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                    <ImageIcon className="h-6 w-6" />
-                  </div>
-                  <p className="mt-3 text-sm font-medium text-neutral-800">
-                    Arraste a foto do termômetro aqui
-                  </p>
-                  <p className="mt-1 text-xs text-neutral-500">
-                    JPG, PNG ou foto direta da câmera do celular
-                  </p>
 
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  {maxImage ? (
+                    <div className="relative mt-2 overflow-hidden rounded-lg border border-neutral-200 bg-black/5">
+                      <img
+                        src={maxImage}
+                        alt="Visor Máxima"
+                        className="h-32 w-full object-contain"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-2 py-1 text-[10px] text-white">
+                        {maxFilename || 'Foto Máxima'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50/50 p-2 text-center">
+                      <ImageIcon className="h-6 w-6 text-amber-500/80" />
+                      <span className="mt-1 text-[11px] font-medium text-neutral-600">
+                        Visor em modo MAX
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-2.5 flex items-center gap-1.5">
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 text-[11px] py-1 h-8"
+                      onClick={() => cameraInputMaxRef.current?.click()}
                     >
-                      <Upload className="mr-1.5 h-3.5 w-3.5" />
-                      Enviar Arquivo
+                      <Camera className="mr-1 h-3 w-3" />
+                      Câmera
                     </Button>
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      onClick={() => cameraInputRef.current?.click()}
+                      className="flex-1 text-[11px] py-1 h-8"
+                      onClick={() => fileInputMaxRef.current?.click()}
                     >
-                      <Camera className="mr-1.5 h-3.5 w-3.5" />
-                      Tirar Foto
+                      <Upload className="mr-1 h-3 w-3" />
+                      Arquivo
                     </Button>
                   </div>
                 </div>
-              )}
 
-              {/* Hidden Inputs para Upload e Câmera */}
+                {/* SLOT 2: FOTO MÍNIMA */}
+                <div className="flex flex-col rounded-xl border border-neutral-200 bg-white p-3 shadow-xs">
+                  <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">
+                      MIN • Foto Mínima
+                    </span>
+                    {minImage && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMinImage(null)
+                          setMinFilename('')
+                        }}
+                        className="text-neutral-400 hover:text-neutral-600"
+                        title="Remover foto"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {minImage ? (
+                    <div className="relative mt-2 overflow-hidden rounded-lg border border-neutral-200 bg-black/5">
+                      <img
+                        src={minImage}
+                        alt="Visor Mínima"
+                        className="h-32 w-full object-contain"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-2 py-1 text-[10px] text-white">
+                        {minFilename || 'Foto Mínima'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50/50 p-2 text-center">
+                      <ImageIcon className="h-6 w-6 text-sky-500/80" />
+                      <span className="mt-1 text-[11px] font-medium text-neutral-600">
+                        Visor em modo MIN
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-2.5 flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 text-[11px] py-1 h-8"
+                      onClick={() => cameraInputMinRef.current?.click()}
+                    >
+                      <Camera className="mr-1 h-3 w-3" />
+                      Câmera
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1 text-[11px] py-1 h-8"
+                      onClick={() => fileInputMinRef.current?.click()}
+                    >
+                      <Upload className="mr-1 h-3 w-3" />
+                      Arquivo
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Inputs Ocultos de Arquivo e Câmera */}
               <input
-                ref={fileInputRef}
+                ref={fileInputMaxRef}
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={handleFileChange}
+                onChange={handleMaxFileChange}
               />
               <input
-                ref={cameraInputRef}
+                ref={cameraInputMaxRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
                 className="hidden"
-                onChange={handleFileChange}
+                onChange={handleMaxFileChange}
+              />
+              <input
+                ref={fileInputMinRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleMinFileChange}
+              />
+              <input
+                ref={cameraInputMinRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleMinFileChange}
               />
             </div>
 
             {processPhoto.isPending && (
               <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-100/70 p-3 text-xs font-medium text-emerald-900">
                 <Loader2 className="h-4 w-4 animate-spin text-emerald-700" />
-                <span>Analisando visor com Inteligência Artificial...</span>
+                <span>Analisando visor(es) com Inteligência Artificial...</span>
               </div>
             )}
 
             {ocrMessage && !processPhoto.isPending && (
-              <p className="text-xs text-neutral-500 italic">
+              <p className="text-xs text-neutral-600 bg-white/80 border border-neutral-200 rounded-xl p-2.5">
                 {ocrMessage}
               </p>
             )}
@@ -379,13 +531,13 @@ export function TemperatureCaptureCard() {
 
               <div>
                 <label className="block text-xs font-semibold text-neutral-700">
-                  Temp. Máxima (Max OUT °C) *
+                  Temp. Máxima (Max OUT/IN °C) *
                 </label>
                 <Input
                   type="text"
                   value={tempMax}
                   onChange={(e) => setTempMax(e.target.value)}
-                  placeholder="Ex: 5.5"
+                  placeholder="Ex: 6.1"
                   className="mt-1 font-semibold text-neutral-900"
                   required
                 />
@@ -393,13 +545,13 @@ export function TemperatureCaptureCard() {
 
               <div>
                 <label className="block text-xs font-semibold text-neutral-700">
-                  Temp. Mínima (Min OUT °C) *
+                  Temp. Mínima (Min OUT/IN °C) *
                 </label>
                 <Input
                   type="text"
                   value={tempMin}
                   onChange={(e) => setTempMin(e.target.value)}
-                  placeholder="Ex: 2.8"
+                  placeholder="Ex: 0.2"
                   className="mt-1 font-semibold text-neutral-900"
                   required
                 />

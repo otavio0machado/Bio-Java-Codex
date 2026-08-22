@@ -153,7 +153,7 @@ describe('TemperaturaTab', () => {
     expect(screen.getByText('Monitoramento Hoje')).toBeInTheDocument()
     expect(screen.getByText('5 de 7')).toBeInTheDocument()
     expect(
-      screen.getByText('Lançamento Rápido & Leitura de Foto (IA)')
+      screen.getByText('Lançamento Rápido & Leitura de Fotos por IA')
     ).toBeInTheDocument()
   })
 

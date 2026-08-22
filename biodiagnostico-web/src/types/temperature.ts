@@ -67,6 +67,8 @@ export interface TemperatureRecord {
   notes?: string | null
   photoUrl?: string | null
   photoFilename?: string | null
+  photoMinUrl?: string | null
+  photoMinFilename?: string | null
   ocrApplied: boolean
   createdAt?: string
   updatedAt?: string
@@ -86,13 +88,17 @@ export interface TemperatureRecordRequest {
   notes?: string | null
   photoUrl?: string | null
   photoFilename?: string | null
+  photoMinUrl?: string | null
+  photoMinFilename?: string | null
   ocrRawResult?: string | null
   ocrApplied?: boolean
 }
 
 export interface TemperatureOcrRequest {
-  imageBase64: string
+  imageBase64?: string
   mimeType?: string
+  imageMinBase64?: string
+  mimeTypeMin?: string
   locationId?: string
 }
 

@@ -432,6 +432,8 @@ public final class ResponseMapper {
             record.getNotes(),
             record.getPhotoUrl(),
             record.getPhotoFilename(),
+            record.getPhotoMinUrl(),
+            record.getPhotoMinFilename(),
             record.getOcrApplied(),
             record.getCreatedAt(),
             record.getUpdatedAt()

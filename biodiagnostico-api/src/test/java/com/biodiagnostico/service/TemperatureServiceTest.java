@@ -209,6 +209,8 @@ class TemperatureServiceTest {
             null,
             null,
             null,
+            null,
+            null,
             true
         );
 
@@ -251,9 +253,9 @@ class TemperatureServiceTest {
     }
 
     @Test
-    @DisplayName("processThermometerPhoto com IA deve parsear JSON de visão")
+    @DisplayName("processThermometerPhoto com IA deve parsear JSON de visão única")
     void processThermometerPhoto_comIa_parseiaJson() throws Exception {
-        when(aiProvider.completeVision(any(), any(), eq("abc123base64"), eq("image/jpeg")))
+        when(aiProvider.completeVisionMulti(any(), any(), any()))
             .thenReturn("""
                 {
                   "time": "15:05",
@@ -273,6 +275,39 @@ class TemperatureServiceTest {
         assertThat(response.tempMax()).isEqualByComparingTo("1.9");
         assertThat(response.tempMin()).isEqualByComparingTo("1.9");
         assertThat(response.confidence()).isEqualTo(0.98);
+    }
+
+    @Test
+    @DisplayName("processThermometerPhoto com fotos duplas (MAX e MIN) deve parsear ambos os visores")
+    void processThermometerPhoto_comFotosDuplas() throws Exception {
+        when(aiProvider.completeVisionMulti(any(), any(), any()))
+            .thenReturn("""
+                {
+                  "time": "15:37",
+                  "tempMax": 6.1,
+                  "tempMin": 0.2,
+                  "tempCurrent": null,
+                  "humidity": 97.0,
+                  "confidence": 0.99,
+                  "statusMessage": "Foto MAX: OUT 6.1°C | Foto MIN: OUT 0.2°C",
+                  "rawText": "MAX OUT 6.1 MIN OUT 0.2 15:37 97%RH"
+                }
+                """);
+
+        var response = temperatureService.processThermometerPhoto(
+            "maxPhotoBase64",
+            "image/jpeg",
+            "minPhotoBase64",
+            "image/jpeg",
+            null
+        );
+
+        assertThat(response.time()).isEqualTo("15:37");
+        assertThat(response.tempMax()).isEqualByComparingTo("6.1");
+        assertThat(response.tempMin()).isEqualByComparingTo("0.2");
+        assertThat(response.humidity()).isEqualByComparingTo("97.0");
+        assertThat(response.statusMessage()).contains("Foto MAX: OUT 6.1°C");
+        assertThat(response.confidence()).isEqualTo(0.99);
     }
 
     @Test

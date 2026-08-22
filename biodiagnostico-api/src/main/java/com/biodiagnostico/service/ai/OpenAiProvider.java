@@ -184,12 +184,26 @@ public class OpenAiProvider implements AiProvider {
     @Override
     public String completeVision(String model, String prompt, String imageBase64, String mimeType)
         throws java.io.IOException {
-        String effectiveMime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
-        String dataUrl = "data:" + effectiveMime + ";base64," + imageBase64;
-        List<Map<String, Object>> content = List.of(
-            Map.of("type", "text", "text", prompt),
-            Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))
-        );
+        return completeVisionMulti(model, prompt, List.of(new VisionImage(imageBase64, mimeType)));
+    }
+
+    @Override
+    public String completeVisionMulti(String model, String prompt, List<VisionImage> images)
+        throws java.io.IOException {
+        if (images == null || images.isEmpty()) {
+            throw new BusinessException("Nenhuma imagem fornecida para análise.");
+        }
+        List<Map<String, Object>> content = new ArrayList<>();
+        content.add(Map.of("type", "text", "text", prompt));
+
+        for (VisionImage img : images) {
+            if (img != null && img.base64() != null && !img.base64().isBlank()) {
+                String effectiveMime = (img.mimeType() != null && !img.mimeType().isBlank()) ? img.mimeType() : "image/jpeg";
+                String dataUrl = "data:" + effectiveMime + ";base64," + img.base64();
+                content.add(Map.of("type", "image_url", "image_url", Map.of("url", dataUrl)));
+            }
+        }
+
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("model", model);
         body.put("messages", List.of(Map.of("role", "user", "content", content)));

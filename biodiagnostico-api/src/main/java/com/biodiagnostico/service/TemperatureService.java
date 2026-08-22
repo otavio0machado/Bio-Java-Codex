@@ -34,6 +34,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -242,6 +243,8 @@ public class TemperatureService {
             .notes(request.notes())
             .photoUrl(request.photoUrl())
             .photoFilename(request.photoFilename())
+            .photoMinUrl(request.photoMinUrl())
+            .photoMinFilename(request.photoMinFilename())
             .ocrRawResult(request.ocrRawResult())
             .ocrApplied(request.ocrApplied() != null ? request.ocrApplied() : false)
             .build();
@@ -275,6 +278,12 @@ public class TemperatureService {
         }
         if (request.photoFilename() != null) {
             record.setPhotoFilename(request.photoFilename());
+        }
+        if (request.photoMinUrl() != null) {
+            record.setPhotoMinUrl(request.photoMinUrl());
+        }
+        if (request.photoMinFilename() != null) {
+            record.setPhotoMinFilename(request.photoMinFilename());
         }
         if (request.ocrRawResult() != null) {
             record.setOcrRawResult(request.ocrRawResult());
@@ -372,21 +381,68 @@ public class TemperatureService {
         );
     }
 
-    // ========================================================================
-    // 4. OCR / VISÃO COMPUTACIONAL DO VISOR DO TERMÔMETRO
-    // ========================================================================
-
     public TemperatureOcrResponse processThermometerPhoto(String imageBase64, String mimeType, UUID locationId) {
-        if (imageBase64 == null || imageBase64.isBlank()) {
-            throw new BusinessException("Imagem base64 não fornecida.");
+        return processThermometerPhoto(imageBase64, mimeType, null, null, locationId);
+    }
+
+    public TemperatureOcrResponse processThermometerPhoto(
+        String imageBase64,
+        String mimeType,
+        String imageMinBase64,
+        String mimeTypeMin,
+        UUID locationId
+    ) {
+        List<AiProvider.VisionImage> images = new ArrayList<>();
+
+        if (imageBase64 != null && !imageBase64.isBlank()) {
+            String clean = imageBase64.contains(",") ? imageBase64.substring(imageBase64.indexOf(",") + 1) : imageBase64;
+            String mime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
+            images.add(new AiProvider.VisionImage(clean, mime));
         }
 
-        String cleanBase64 = imageBase64.contains(",") ? imageBase64.substring(imageBase64.indexOf(",") + 1) : imageBase64;
-        String effectiveMime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
+        if (imageMinBase64 != null && !imageMinBase64.isBlank()) {
+            String cleanMin = imageMinBase64.contains(",") ? imageMinBase64.substring(imageMinBase64.indexOf(",") + 1) : imageMinBase64;
+            String mimeMin = (mimeTypeMin != null && !mimeTypeMin.isBlank()) ? mimeTypeMin : "image/jpeg";
+            images.add(new AiProvider.VisionImage(cleanMin, mimeMin));
+        }
 
-        String prompt = """
-            Você é um leitor de visão computacional de alta precisão para termômetros digitais laboratoriais de máxima e mínima (ex: Incoterm, Jprolab SH-102, TFA).
-            Analise a imagem e extraia os dados do visor LCD.
+        if (images.isEmpty()) {
+            throw new BusinessException("Nenhuma imagem fornecida para leitura.");
+        }
+
+        // Busca contexto do equipamento se locationId fornecido
+        TemperatureLocation loc = null;
+        if (locationId != null) {
+            loc = locationRepository.findById(locationId).orElse(null);
+        }
+        boolean isRefrigeratedOrEquipment = loc != null && (
+            "GELADEIRA".equalsIgnoreCase(loc.getCategory()) ||
+            "FREEZER".equalsIgnoreCase(loc.getCategory()) ||
+            "ESTUFA".equalsIgnoreCase(loc.getCategory()) ||
+            "BANHO_MARIA".equalsIgnoreCase(loc.getCategory())
+        );
+
+        String prompt = String.format("""
+            Você é um leitor de visão computacional de alta precisão para termômetros digitais laboratoriais de máxima e mínima (ex: Metrins 340, Instrusul INS-1342, Incoterm).
+            Você receberá %d foto(s) do visor LCD do termômetro:
+            - Quando o termômetro está em modo 'MAX', exibe o indicador MAX à esquerda e mostra a temperatura máxima registrada.
+            - Quando o termômetro está em modo 'MIN', exibe o indicador MIN à esquerda e mostra a temperatura mínima registrada.
+            - Linha superior com indicador 'IN': sensor interno (temperatura ambiente da sala).
+            - Linha do meio com indicador 'OUT': sensor externo (sonda dentro de geladeiras, freezers, estufas, banho-maria).
+            - Linha inferior: relógio digital 'HH:mm' e umidade relativa '%% RH'.
+
+            Contexto do ponto de monitoramento: %s (Categoria: %s).
+            Regra de extração: %s
+
+            Instruções obrigatórias:
+            1. 'tempMax': temperatura máxima. Se for geladeira/freezer/estufa, use o valor OUT da foto MAX. Se for sala/ambiente, use o valor IN da foto MAX.
+            2. 'tempMin': temperatura mínima. Se for geladeira/freezer/estufa, use o valor OUT da foto MIN. Se for sala/ambiente, use o valor IN da foto MIN.
+            3. 'tempCurrent': temperatura atual/momento se houver foto sem indicador MAX/MIN, senão null.
+            4. 'humidity': umidade relativa em %% (indicador RH).
+            5. 'time': horário exibido no relógio digital (ex: '15:05', '15:37').
+            6. Ignore números de etiquetas de calibração ou patrimônio para a data da medição.
+            7. Suporte números negativos (ex: -18.5, 0.2, 1.9, 6.1). Converta vírgulas em pontos.
+
             Responda ESTRITAMENTE em JSON com a estrutura:
             {
               "time": "HH:mm ou null",
@@ -395,20 +451,19 @@ public class TemperatureService {
               "tempCurrent": float ou null,
               "humidity": float ou null,
               "confidence": float entre 0.0 e 1.0,
-              "statusMessage": "descrição curta",
-              "rawText": "texto lido"
+              "statusMessage": "descrição curta (ex: 'Foto 1 MAX: OUT 6.1°C | Foto 2 MIN: OUT 0.2°C')",
+              "rawText": "texto lido dos visores"
             }
-            Regras obrigatórias:
-            1. 'tempMax' é o valor ao lado ou acima de MAX (ou MAX OUT). Ex: 1.9.
-            2. 'tempMin' é o valor ao lado ou acima de MIN (ou MIN OUT). Ex: 1.9.
-            3. 'time' é a hora mostrada no visor (ex: '15:05'). Se não houver, null.
-            4. Ignore etiquetas adesivas de calibração ou patrimônio para a data de medição.
-            5. Suporte números negativos (ex: -18.5). Converta vírgulas em pontos.
-            """;
+            """,
+            images.size(),
+            loc != null ? loc.getName() : "Equipamento/Ambiente Geral",
+            loc != null ? loc.getCategory() : "GERAL",
+            isRefrigeratedOrEquipment ? "Usar valor da linha OUT (sonda externa)" : "Usar valor da linha IN (ambiente) se sala, ou OUT se sonda"
+        );
 
         try {
             String model = modelRouter.modelFor(AiTask.TEMPERATURE_OCR);
-            String aiResult = aiProvider.completeVision(model, prompt, cleanBase64, effectiveMime);
+            String aiResult = aiProvider.completeVisionMulti(model, prompt, images);
 
             JsonNode root = objectMapper.readTree(aiResult);
 
@@ -417,7 +472,7 @@ public class TemperatureService {
             BigDecimal tempMin = root.path("tempMin").isNumber() ? BigDecimal.valueOf(root.path("tempMin").asDouble()) : null;
             BigDecimal tempCurrent = root.path("tempCurrent").isNumber() ? BigDecimal.valueOf(root.path("tempCurrent").asDouble()) : null;
             BigDecimal humidity = root.path("humidity").isNumber() ? BigDecimal.valueOf(root.path("humidity").asDouble()) : null;
-            Double confidence = root.path("confidence").isNumber() ? root.path("confidence").asDouble() : 0.90;
+            Double confidence = root.path("confidence").isNumber() ? root.path("confidence").asDouble() : 0.95;
             String statusMsg = root.path("statusMessage").asText("Leitura processada com sucesso");
             String rawText = root.path("rawText").asText("");
 

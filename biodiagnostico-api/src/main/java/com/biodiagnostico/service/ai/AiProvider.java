@@ -14,6 +14,8 @@ import java.util.List;
  */
 public interface AiProvider {
 
+    record VisionImage(String base64, String mimeType) {}
+
     /**
      * Completa um chat de texto.
      *
@@ -68,8 +70,7 @@ public interface AiProvider {
         throws java.io.IOException;
 
     /**
-     * Completa uma requisicao multimodal de visao (imagem + instrucao textual),
-     * tipicamente retornando JSON com os dados do visor/termometro extraidos.
+     * Completa uma requisicao multimodal de visao com uma unica imagem.
      *
      * @param model       id do modelo de visao a usar
      * @param prompt      instrucao textual que acompanha a imagem
@@ -80,6 +81,20 @@ public interface AiProvider {
      */
     default String completeVision(String model, String prompt, String imageBase64, String mimeType)
         throws java.io.IOException {
-        throw new UnsupportedOperationException("Visao computacional nao suportada neste provedor.");
+        return completeVisionMulti(model, prompt, List.of(new VisionImage(imageBase64, mimeType)));
+    }
+
+    /**
+     * Completa uma requisicao multimodal de visao com multiplas imagens (ex: foto Máxima + foto Mínima).
+     *
+     * @param model   id do modelo de visao a usar
+     * @param prompt  instrucao textual que acompanha as imagens
+     * @param images  lista de imagens codificadas em base64 com tipo MIME
+     * @return o texto da resposta (tipicamente JSON; nunca vazio)
+     * @throws java.io.IOException em falha de parsing/transporte
+     */
+    default String completeVisionMulti(String model, String prompt, List<VisionImage> images)
+        throws java.io.IOException {
+        throw new UnsupportedOperationException("Visao computacional multimodal nao suportada neste provedor.");
     }
 }

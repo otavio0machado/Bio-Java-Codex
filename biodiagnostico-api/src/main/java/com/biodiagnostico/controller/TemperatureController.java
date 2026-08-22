@@ -158,6 +158,8 @@ public class TemperatureController {
         TemperatureOcrResponse response = temperatureService.processThermometerPhoto(
             request.imageBase64(),
             request.mimeType(),
+            request.imageMinBase64(),
+            request.mimeTypeMin(),
             request.locationId()
         );
         return ResponseEntity.ok(response);

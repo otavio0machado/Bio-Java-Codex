@@ -82,6 +82,12 @@ public class TemperatureRecord {
     @Column(name = "photo_filename", length = 255)
     private String photoFilename;
 
+    @Column(name = "photo_min_url", columnDefinition = "TEXT")
+    private String photoMinUrl;
+
+    @Column(name = "photo_min_filename", length = 255)
+    private String photoMinFilename;
+
     @Column(name = "ocr_raw_result", columnDefinition = "TEXT")
     private String ocrRawResult;
 

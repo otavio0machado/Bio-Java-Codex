@@ -28,6 +28,8 @@ public record TemperatureRecordResponse(
     String notes,
     String photoUrl,
     String photoFilename,
+    String photoMinUrl,
+    String photoMinFilename,
     Boolean ocrApplied,
     Instant createdAt,
     Instant updatedAt
