@@ -143,7 +143,7 @@ export function TemperaturaTab() {
                 Controle de Temperatura & Termohigrometria
               </h1>
               <p className="text-sm text-neutral-500">
-                Monitoramento diário de cadeia de frio, estufas, banho-maria e salas técnicas (RDC 786/2023).
+                Monitoramento diário de cadeia de frio, estufas, banho-maria e salas técnicas (RDC 978/2025).
               </p>
             </div>
           </div>

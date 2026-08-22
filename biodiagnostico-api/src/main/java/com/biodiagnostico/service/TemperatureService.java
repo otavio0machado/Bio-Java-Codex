@@ -688,7 +688,7 @@ public class TemperatureService {
             doc.add(table);
 
             Paragraph footer = new Paragraph(
-                "\nDocumento emitido eletronicamente conforme ANVISA RDC 786/2023. Rastreabilidade e integridade asseguradas pelo Sistema Biodiagnóstico.",
+                "\nDocumento emitido eletronicamente conforme ANVISA RDC 978/2025 e RDC 786/2023. Rastreabilidade e integridade asseguradas pelo Sistema Biodiagnóstico.",
                 new Font(Font.HELVETICA, 7, Font.ITALIC, Color.GRAY)
             );
             footer.setAlignment(Element.ALIGN_CENTER);

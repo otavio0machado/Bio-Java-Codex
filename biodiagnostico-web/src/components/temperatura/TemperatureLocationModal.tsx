@@ -5,13 +5,17 @@ import {
   Layers,
   ShieldCheck,
   Snowflake,
+  Sparkles,
   Thermometer,
+  Wand2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   useCreateTemperatureLocation,
+  useTemperatureLocations,
   useUpdateTemperatureLocation,
 } from '../../hooks/useTemperature'
+import { aiService } from '../../services/aiService'
 import type {
   LocationCategory,
   TemperatureLocation,
@@ -38,7 +42,6 @@ interface PresetOption {
   codePrefix: string
   color: string
   borderActive: string
-  badgeColor: string
 }
 
 const PRESETS: PresetOption[] = [
@@ -52,24 +55,33 @@ const PRESETS: PresetOption[] = [
     codePrefix: 'GEL',
     color: 'text-sky-600 bg-sky-50',
     borderActive: 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/40',
-    badgeColor: 'bg-sky-100 text-sky-800',
   },
   {
     category: 'FREEZER',
-    title: 'Freezer',
-    subtitle: 'Soros, Controles e Placas',
+    title: 'Freezer -20°C',
+    subtitle: 'Soros, Controles e Alíquotas',
     icon: Snowflake,
     defaultMin: '-25.0',
     defaultMax: '-15.0',
     codePrefix: 'FRZ',
     color: 'text-indigo-600 bg-indigo-50',
     borderActive: 'border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/40',
-    badgeColor: 'bg-indigo-100 text-indigo-800',
+  },
+  {
+    category: 'ULTRAFREEZER' as any,
+    title: 'Ultrafreezer -80°C',
+    subtitle: 'Amostras de Longa Duração',
+    icon: Snowflake,
+    defaultMin: '-86.0',
+    defaultMax: '-70.0',
+    codePrefix: 'ULT',
+    color: 'text-blue-700 bg-blue-50',
+    borderActive: 'border-blue-600 ring-2 ring-blue-600/20 bg-blue-50/40',
   },
   {
     category: 'AMBIENTE',
-    title: 'Ambiente / Sala',
-    subtitle: 'Sala Técnica & Termohigrometria',
+    title: 'Ambiente / Sala Técnica',
+    subtitle: 'Salas de Exames & Termohigrometria',
     icon: Building2,
     defaultMin: '15.0',
     defaultMax: '25.0',
@@ -78,55 +90,67 @@ const PRESETS: PresetOption[] = [
     codePrefix: 'AMB',
     color: 'text-emerald-600 bg-emerald-50',
     borderActive: 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/40',
-    badgeColor: 'bg-emerald-100 text-emerald-800',
   },
   {
     category: 'ESTUFA',
     title: 'Estufa Bacteriológica',
-    subtitle: 'Incubação e Cultura',
+    subtitle: 'Incubação e Culturas (37°C)',
     icon: Flame,
     defaultMin: '35.0',
     defaultMax: '37.0',
     codePrefix: 'EST',
     color: 'text-amber-600 bg-amber-50',
     borderActive: 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/40',
-    badgeColor: 'bg-amber-100 text-amber-800',
   },
   {
     category: 'BANHO_MARIA',
     title: 'Banho-Maria',
-    subtitle: 'Reações e Aquecimento',
+    subtitle: 'Reações e Hemostasia (37°C)',
     icon: Flame,
     defaultMin: '36.0',
     defaultMax: '38.0',
     codePrefix: 'BM',
     color: 'text-rose-600 bg-rose-50',
     borderActive: 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/40',
-    badgeColor: 'bg-rose-100 text-rose-800',
+  },
+  {
+    category: 'CENTRIFUGA' as any,
+    title: 'Centrífuga Refrigerada',
+    subtitle: 'Processamento de Sangue (4°C)',
+    icon: Layers,
+    defaultMin: '2.0',
+    defaultMax: '6.0',
+    codePrefix: 'CEN',
+    color: 'text-purple-600 bg-purple-50',
+    borderActive: 'border-purple-500 ring-2 ring-purple-500/20 bg-purple-50/40',
   },
   {
     category: 'OUTRO',
     title: 'Personalizado',
     subtitle: 'Outros Equipamentos',
-    icon: Layers,
+    icon: Thermometer,
     defaultMin: '0.0',
     defaultMax: '10.0',
     codePrefix: 'EQP',
     color: 'text-neutral-600 bg-neutral-100',
     borderActive: 'border-neutral-700 ring-2 ring-neutral-700/20 bg-neutral-50',
-    badgeColor: 'bg-neutral-200 text-neutral-800',
   },
 ]
 
 const AREA_OPTIONS = [
   { value: 'GERAL', label: 'Geral / Compartilhado' },
-  { value: 'BIOQUIMICA', label: 'Bioquímica' },
-  { value: 'HEMATOLOGIA', label: 'Hematologia' },
-  { value: 'IMUNOLOGIA', label: 'Imunologia' },
-  { value: 'MICROBIOLOGIA', label: 'Microbiologia' },
+  { value: 'BIOQUIMICA', label: 'Bioquímica Clínica' },
+  { value: 'HEMATOLOGIA', label: 'Hematologia & Hemostasia' },
+  { value: 'IMUNOLOGIA', label: 'Imunologia & Hormônios' },
+  { value: 'MICROBIOLOGIA', label: 'Microbiologia & Culturas' },
   { value: 'COAGULACAO', label: 'Coagulação' },
-  { value: 'URINALISE', label: 'Uroanálise' },
-  { value: 'TRIAGEM', label: 'Triagem / Recepção' },
+  { value: 'URINALISE', label: 'Uroanálise & Parasitologia' },
+  { value: 'BIOMOL', label: 'Biologia Molecular / Genética' },
+  { value: 'TRIAGEM', label: 'Triagem & Recepção de Amostras' },
+  { value: 'SALA_COLETA', label: 'Sala de Coleta de Pacientes' },
+  { value: 'ALMOXARIFADO', label: 'Almoxarifado & Estoque de Reagentes' },
+  { value: 'SALA_TECNICA', label: 'Sala Técnica Principal' },
+  { value: 'OUTRO', label: 'Outro Setor (Personalizado)' },
 ]
 
 export function TemperatureLocationModal({
@@ -136,6 +160,7 @@ export function TemperatureLocationModal({
   onSuccessCreated,
 }: TemperatureLocationModalProps) {
   const { toast } = useToast()
+  const { data: existingLocations } = useTemperatureLocations()
   const createLocation = useCreateTemperatureLocation()
   const updateLocation = useUpdateTemperatureLocation()
 
@@ -143,6 +168,7 @@ export function TemperatureLocationModal({
   const [name, setName] = useState<string>('')
   const [code, setCode] = useState<string>('')
   const [area, setArea] = useState<string>('GERAL')
+  const [customArea, setCustomArea] = useState<string>('')
   const [minTempTarget, setMinTempTarget] = useState<string>('2.0')
   const [maxTempTarget, setMaxTempTarget] = useState<string>('8.0')
   const [minHumidityTarget, setMinHumidityTarget] = useState<string>('')
@@ -153,16 +179,62 @@ export function TemperatureLocationModal({
   const [frequency, setFrequency] = useState<string>('DIARIO_1X')
   const [active, setActive] = useState<boolean>(true)
   const [notes, setNotes] = useState<string>('')
+  const [isGeneratingNotes, setIsGeneratingNotes] = useState<boolean>(false)
 
-  // Estado para controlar se o usuário customizou manualmente o código
+  // Estado para controlar se o usuário editou manualmente o código
   const [isCodeManuallyEdited, setIsCodeManuallyEdited] = useState<boolean>(false)
+
+  // Função para calcular o próximo código automaticamente
+  const calculateNextCode = (category: string, nameHint: string): string => {
+    const preset = PRESETS.find((p) => p.category === category)
+    const prefix = preset ? preset.codePrefix : 'EQP'
+
+    // Se o usuário digitou um número no nome (ex: "Geladeira 3" -> "GEL-03")
+    const numMatch = nameHint.match(/\d+/)
+    if (numMatch) {
+      return `${prefix}-${String(numMatch[0]).padStart(2, '0')}`
+    }
+
+    if (!existingLocations || existingLocations.length === 0) {
+      return `${prefix}-01`
+    }
+
+    // Busca todos os números usados com o mesmo prefixo
+    const usedNumbers: number[] = existingLocations
+      .filter((loc) => loc.id !== locationToEdit?.id)
+      .map((loc) => {
+        const codeUpper = (loc.code || '').toUpperCase()
+        if (codeUpper.startsWith(prefix)) {
+          const match = codeUpper.match(/(\d+)$/)
+          return match ? parseInt(match[1], 10) : 0
+        }
+        return 0
+      })
+      .filter((n) => n > 0)
+
+    const maxNum = usedNumbers.length > 0 ? Math.max(...usedNumbers) : 0
+    const nextNum = (maxNum + 1).toString().padStart(2, '0')
+    return `${prefix}-${nextNum}`
+  }
 
   useEffect(() => {
     if (locationToEdit) {
       setSelectedPreset((locationToEdit.category as LocationCategory) || 'GELADEIRA')
       setName(locationToEdit.name)
       setCode(locationToEdit.code)
-      setArea(locationToEdit.area || 'GERAL')
+
+      const knownArea = AREA_OPTIONS.some((o) => o.value === locationToEdit.area)
+      if (knownArea) {
+        setArea(locationToEdit.area)
+        setCustomArea('')
+      } else if (locationToEdit.area) {
+        setArea('OUTRO')
+        setCustomArea(locationToEdit.area)
+      } else {
+        setArea('GERAL')
+        setCustomArea('')
+      }
+
       setMinTempTarget(String(locationToEdit.minTempTarget))
       setMaxTempTarget(String(locationToEdit.maxTempTarget))
       setMinHumidityTarget(
@@ -186,6 +258,7 @@ export function TemperatureLocationModal({
       applyPreset('GELADEIRA', false)
       setName('')
       setArea('GERAL')
+      setCustomArea('')
       setThermometerCode('')
       setCalibrationCertNumber('')
       setCalibrationDueDate('')
@@ -193,6 +266,7 @@ export function TemperatureLocationModal({
       setActive(true)
       setNotes('')
       setIsCodeManuallyEdited(false)
+      setCode(calculateNextCode('GELADEIRA', ''))
     }
   }, [locationToEdit, isOpen])
 
@@ -207,19 +281,72 @@ export function TemperatureLocationModal({
     setMaxHumidityTarget(preset.defaultMaxHum || '')
 
     if (updateCode && !isCodeManuallyEdited) {
-      setCode(`${preset.codePrefix}-01`)
+      setCode(calculateNextCode(category, name))
     }
   }
 
   const handleNameChange = (val: string) => {
     setName(val)
     if (!isCodeManuallyEdited && !locationToEdit) {
-      const preset = PRESETS.find((p) => p.category === selectedPreset)
-      const prefix = preset ? preset.codePrefix : 'EQP'
-      // Tenta extrair número do nome digitado (ex: "Geladeira 2" -> "GEL-02")
-      const numMatch = val.match(/\d+/)
-      const numStr = numMatch ? String(numMatch[0]).padStart(2, '0') : '01'
-      setCode(`${prefix}-${numStr}`)
+      setCode(calculateNextCode(selectedPreset, val))
+    }
+  }
+
+  const handleRegenerateCode = () => {
+    const next = calculateNextCode(selectedPreset, name)
+    setCode(next)
+    setIsCodeManuallyEdited(false)
+    toast.info(`Código sugerido: ${next}`)
+  }
+
+  // Gerador de Observações com IA (RDC 978/2025)
+  const handleGenerateAiNotes = async () => {
+    try {
+      setIsGeneratingNotes(true)
+      const sectorLabel = area === 'OUTRO' ? customArea || 'Laboratório Clínico' : (AREA_OPTIONS.find((o) => o.value === area)?.label || area)
+      const equipTitle = PRESETS.find((p) => p.category === selectedPreset)?.title || selectedPreset
+
+      const prompt = `Gere uma observação técnica operacional sucinta (máximo 2 a 3 frases) para a ficha de qualificação e cadastro do seguinte ponto térmico em laboratório de análises clínicas:
+Equipamento: ${name || equipTitle} (${code || 'TAG'})
+Tipo: ${equipTitle}
+Setor: ${sectorLabel}
+Faixa Aceitável: ${minTempTarget}°C a ${maxTempTarget}°C
+Frequência: ${frequency}
+Termômetro: ${thermometerCode || 'Sensor Digital Calibrado'}
+Certificado Calibração: ${calibrationCertNumber || 'Conforme plano de calibração RBC'}
+Rascunho/Ideia do Operador: ${notes.trim() || 'Nenhum, gere do zero com foco em boas práticas e RDC 978/2025'}
+
+Instruções:
+- Seja formal, direto e profissional (padrão POP/ANVISA RDC 978/2025).
+- Responda apenas com o texto da observação sem aspas, títulos ou introduções.`
+
+      const responseText = await aiService.analyze({
+        prompt,
+        context: `Contexto: Cadastro de Equipamento Térmico no Sistema Laboratorial Biodiagnóstico conforme RDC 978/2025 e RDC 786/2023.`,
+      })
+
+      if (responseText && responseText.trim().length > 10) {
+        setNotes(responseText.trim())
+        toast.success('Observação gerada com sucesso pela IA!')
+      } else {
+        throw new Error('Resposta vazia da IA')
+      }
+    } catch {
+      // Fallback determinístico elegante e instantâneo
+      const sectorLabel = area === 'OUTRO' ? customArea || 'Laboratório Clínico' : (AREA_OPTIONS.find((o) => o.value === area)?.label || area)
+
+      let fallback = `Ponto de monitoramento térmico destinado ao setor de ${sectorLabel}. Faixa operacional controlada de ${minTempTarget}°C a ${maxTempTarget}°C em conformidade com as Boas Práticas Laboratoriais e RDC 978/2025.`
+      if (notes.trim()) {
+        fallback += ` Observação do operador: ${notes.trim()}.`
+      }
+      if (thermometerCode) {
+        fallback += ` Monitorado via ${thermometerCode} com calibração RBC vigente.`
+      }
+
+      setNotes(fallback)
+      toast.success('Observação técnica padronizada gerada com sucesso!')
+    } finally {
+      setIsGeneratingNotes(false)
     }
   }
 
@@ -244,11 +371,13 @@ export function TemperatureLocationModal({
       return
     }
 
+    const finalArea = area === 'OUTRO' ? (customArea.trim() || 'GERAL') : area
+
     const payload: TemperatureLocationRequest = {
       name: name.trim(),
       code: code.trim().toUpperCase(),
       category: selectedPreset,
-      area,
+      area: finalArea,
       minTempTarget: numMin,
       maxTempTarget: numMax,
       minHumidityTarget: numMinHum,
@@ -295,16 +424,21 @@ export function TemperatureLocationModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={locationToEdit ? 'Editar Ponto de Monitoramento' : 'Novo Ponto de Monitoramento'}
+      title={locationToEdit ? 'Editar Ponto de Monitoramento' : 'Novo Ponto de Monitoramento (RDC 978/2025)'}
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
-        {/* 1. Seleção Rápida de Preset com 1 Clique */}
+        {/* 1. Seleção Rápida de Preset com 1 Clique & Modificação Livre */}
         <div>
-          <label className="block text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">
-            1. Tipo de Equipamento / Ambiente (Preset Rápido)
-          </label>
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-bold text-neutral-800 uppercase tracking-wider">
+              1. Tipo de Equipamento / Ambiente (Preset Rápido)
+            </label>
+            <span className="text-[11px] text-neutral-500">
+              Clique no tipo para aplicar as faixas ou modifique abaixo
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             {PRESETS.map((p) => {
               const Icon = p.icon
               const isSelected = selectedPreset === p.category
@@ -320,7 +454,7 @@ export function TemperatureLocationModal({
                   }`}
                 >
                   {isSelected && (
-                    <div className="absolute top-2.5 right-2.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm">
+                    <div className="absolute top-2.5 right-2.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs">
                       <Check className="h-2.5 w-2.5 stroke-[3]" />
                     </div>
                   )}
@@ -330,10 +464,10 @@ export function TemperatureLocationModal({
                   <div className="font-semibold text-xs text-neutral-900 leading-tight">
                     {p.title}
                   </div>
-                  <div className="text-[11px] text-neutral-500 mt-0.5 line-clamp-1">
+                  <div className="text-[10px] text-neutral-500 mt-0.5 line-clamp-1">
                     {p.subtitle}
                   </div>
-                  <div className="mt-2 text-[10px] font-mono font-medium text-emerald-700 bg-emerald-50/80 px-1.5 py-0.5 rounded-md border border-emerald-200/50">
+                  <div className="mt-2 text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200/60">
                     {p.defaultMin}°C a {p.defaultMax}°C
                   </div>
                 </button>
@@ -342,19 +476,19 @@ export function TemperatureLocationModal({
           </div>
         </div>
 
-        {/* 2. Identificação e Setor */}
+        {/* 2. Identificação, Código Automático e Setor */}
         <div className="rounded-2xl border border-neutral-200/80 bg-neutral-50/50 p-4 space-y-3.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-700">
-              2. Identificação & Setor Técnico
+            <span className="text-xs font-bold uppercase tracking-wider text-neutral-800">
+              2. Identificação, Código & Setor Técnico
             </span>
             <span className="text-[11px] text-neutral-400 font-normal">
-              Aparecerá nos relatórios ANVISA e no lançamento diário
+              Conformidade RDC 978/2025
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-            <div className="sm:col-span-2">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-12">
+            <div className="sm:col-span-7">
               <label className="block text-xs font-semibold text-neutral-700">
                 Nome do Ponto / Equipamento *
               </label>
@@ -368,10 +502,21 @@ export function TemperatureLocationModal({
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-neutral-700">
-                Tag / Código *
-              </label>
+            <div className="sm:col-span-5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-neutral-700">
+                  Código / Tag *
+                </label>
+                <button
+                  type="button"
+                  onClick={handleRegenerateCode}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
+                  title="Gerar próximo código automático livre"
+                >
+                  <Wand2 className="h-3 w-3" />
+                  Auto-Gerar
+                </button>
+              </div>
               <Input
                 type="text"
                 value={code}
@@ -402,6 +547,16 @@ export function TemperatureLocationModal({
                   </option>
                 ))}
               </Select>
+              {area === 'OUTRO' && (
+                <Input
+                  type="text"
+                  value={customArea}
+                  onChange={(e) => setCustomArea(e.target.value)}
+                  placeholder="Digite o nome do setor técnico..."
+                  className="mt-2 text-xs"
+                  required
+                />
+              )}
             </div>
 
             <div>
@@ -416,6 +571,7 @@ export function TemperatureLocationModal({
                 <option value="DIARIO_1X">1x ao dia (Diário Único)</option>
                 <option value="DIARIO_2X">2x ao dia (Manhã e Tarde)</option>
                 <option value="DIARIO_3X">3x ao dia (Turnos M / T / N)</option>
+                <option value="CONTINUO">Contínuo (Sensor / Datalogger)</option>
               </Select>
             </div>
           </div>
@@ -427,17 +583,17 @@ export function TemperatureLocationModal({
             <div className="flex items-center gap-1.5">
               <Thermometer className="h-4 w-4 text-emerald-700" />
               <span className="text-xs font-bold uppercase tracking-wider text-emerald-900">
-                3. Faixas Aceitáveis (Critério de Conformidade)
+                3. Faixas Aceitáveis de Operação
               </span>
             </div>
-            <span className="text-[11px] text-emerald-700">
-              Valores fora desta faixa gerarão alerta de não-conformidade
+            <span className="text-[11px] text-emerald-700 font-medium">
+              Desvios fora desta faixa alertam Não-Conformidade
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
-              <label className="block text-xs font-semibold text-rose-700">
+              <label className="block text-xs font-bold text-rose-700">
                 Temp. Mín (°C) *
               </label>
               <Input
@@ -451,7 +607,7 @@ export function TemperatureLocationModal({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-rose-700">
+              <label className="block text-xs font-bold text-rose-700">
                 Temp. Máx (°C) *
               </label>
               <Input
@@ -465,7 +621,7 @@ export function TemperatureLocationModal({
             </div>
 
             <div>
-              <label className="block text-xs text-neutral-600">
+              <label className="block text-xs text-neutral-600 font-medium">
                 UR Mín (%) <span className="text-neutral-400 font-normal">opcional</span>
               </label>
               <Input
@@ -478,7 +634,7 @@ export function TemperatureLocationModal({
             </div>
 
             <div>
-              <label className="block text-xs text-neutral-600">
+              <label className="block text-xs text-neutral-600 font-medium">
                 UR Máx (%) <span className="text-neutral-400 font-normal">opcional</span>
               </label>
               <Input
@@ -492,7 +648,7 @@ export function TemperatureLocationModal({
           </div>
         </div>
 
-        {/* 4. Rastreabilidade ANVISA e Calibração RBC */}
+        {/* 4. Termômetro Vinculado & Calibração RBC */}
         <div className="rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 space-y-3">
           <div className="flex items-center gap-1.5">
             <ShieldCheck className="h-4 w-4 text-neutral-700" />
@@ -503,7 +659,7 @@ export function TemperatureLocationModal({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
-              <label className="block text-xs text-neutral-600">Identificação do Termômetro</label>
+              <label className="block text-xs text-neutral-600 font-medium">Identificação do Termômetro</label>
               <Input
                 type="text"
                 value={thermometerCode}
@@ -514,7 +670,7 @@ export function TemperatureLocationModal({
             </div>
 
             <div>
-              <label className="block text-xs text-neutral-600">Certificado RBC</label>
+              <label className="block text-xs text-neutral-600 font-medium">Certificado RBC</label>
               <Input
                 type="text"
                 value={calibrationCertNumber}
@@ -525,7 +681,7 @@ export function TemperatureLocationModal({
             </div>
 
             <div>
-              <label className="block text-xs text-neutral-600">Validade da Calibração</label>
+              <label className="block text-xs text-neutral-600 font-medium">Validade da Calibração</label>
               <Input
                 type="date"
                 value={calibrationDueDate}
@@ -536,7 +692,34 @@ export function TemperatureLocationModal({
           </div>
         </div>
 
-        {/* 5. Pré-visualização Operacional */}
+        {/* 5. Observações Gerais & Assistência com IA */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-semibold text-neutral-700">
+              Observações Gerais & POP (Opcional)
+            </label>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateAiNotes}
+              loading={isGeneratingNotes}
+              className="text-xs h-7 px-2.5 text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200/80"
+            >
+              <Sparkles className="mr-1 h-3 w-3 text-emerald-600" />
+              {notes.trim() ? 'Aprimorar com IA' : 'Gerar Observação com IA'}
+            </Button>
+          </div>
+          <TextArea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Ex: Ponto de monitoramento exclusivo para armazenamento de reagentes de rotina. Termostato com alarme de temperatura..."
+            rows={2}
+            className="mt-1 text-xs"
+          />
+        </div>
+
+        {/* 6. Pré-visualização do Ponto */}
         {name && (
           <div className="rounded-2xl border border-neutral-200/90 bg-white p-3.5 shadow-xs flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -548,26 +731,15 @@ export function TemperatureLocationModal({
                   {name} <span className="font-mono text-neutral-500 font-normal">({code || 'TAG'})</span>
                 </div>
                 <div className="text-[11px] text-neutral-500">
-                  Setor {area} • Faixa de conformidade: <strong className="text-emerald-700 font-semibold">{minTempTarget}°C a {maxTempTarget}°C</strong>
+                  Setor: {area === 'OUTRO' ? customArea || 'Geral' : (AREA_OPTIONS.find((o) => o.value === area)?.label || area)} • Faixa: <strong className="text-emerald-700 font-semibold">{minTempTarget}°C a {maxTempTarget}°C</strong>
                 </div>
               </div>
             </div>
             <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800">
-              Pronto para Lançamento
+              RDC 978/2025
             </span>
           </div>
         )}
-
-        <div>
-          <label className="block text-xs font-semibold text-neutral-700">Observações Gerais (Opcional)</label>
-          <TextArea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Localização específica na bancada, detalhes do sensor, etc."
-            rows={2}
-            className="mt-1"
-          />
-        </div>
 
         <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-100">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -576,6 +748,7 @@ export function TemperatureLocationModal({
           <Button
             type="submit"
             loading={createLocation.isPending || updateLocation.isPending}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold shadow-xs"
           >
             {locationToEdit ? 'Atualizar Ponto' : 'Cadastrar Ponto de Monitoramento'}
           </Button>
