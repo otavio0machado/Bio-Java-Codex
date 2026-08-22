@@ -50,10 +50,32 @@ export function TemperatureCaptureCard() {
   const [tempMaxIn, setTempMaxIn] = useState<string>('')
   const [tempMinIn, setTempMinIn] = useState<string>('')
 
+  // Temperatura Momento (Calculada como média (Max IN + Min IN)/2 ou editável)
+  const [tempCurrent, setTempCurrent] = useState<string>('')
+
   const [humidity, setHumidity] = useState<string>('')
   const [responsible, setResponsible] = useState<string>(user?.name || '')
   const [actionTaken, setActionTaken] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
+
+  // Efeito para recalcular Temp. Momento automaticamente quando Max IN e Min IN forem informados
+  const handleMaxInChange = (val: string) => {
+    setTempMaxIn(val)
+    const nMaxIn = parseFloat(val.replace(',', '.'))
+    const nMinIn = parseFloat(tempMinIn.replace(',', '.'))
+    if (!isNaN(nMaxIn) && !isNaN(nMinIn)) {
+      setTempCurrent(((nMaxIn + nMinIn) / 2).toFixed(1))
+    }
+  }
+
+  const handleMinInChange = (val: string) => {
+    setTempMinIn(val)
+    const nMaxIn = parseFloat(tempMaxIn.replace(',', '.'))
+    const nMinIn = parseFloat(val.replace(',', '.'))
+    if (!isNaN(nMaxIn) && !isNaN(nMinIn)) {
+      setTempCurrent(((nMaxIn + nMinIn) / 2).toFixed(1))
+    }
+  }
 
   // Estados de Imagem: Foto Máxima (Slot 1)
   const [maxImage, setMaxImage] = useState<string | null>(null)
@@ -90,6 +112,7 @@ export function TemperatureCaptureCard() {
   const numMax = parseFloat(tempMax.replace(',', '.'))
   const numMinIn = tempMinIn ? parseFloat(tempMinIn.replace(',', '.')) : null
   const numMaxIn = tempMaxIn ? parseFloat(tempMaxIn.replace(',', '.')) : null
+  const numCurrent = tempCurrent ? parseFloat(tempCurrent.replace(',', '.')) : null
   const numHum = humidity ? parseFloat(humidity.replace(',', '.')) : null
 
   let derivedStatus: 'CONFORME' | 'NAO_CONFORME' | 'INDEFINIDO' = 'INDEFINIDO'
@@ -173,6 +196,14 @@ export function TemperatureCaptureCard() {
           if (data.tempMin !== null && data.tempMin !== undefined) setTempMin(String(data.tempMin))
           if (data.tempMaxIn !== null && data.tempMaxIn !== undefined) setTempMaxIn(String(data.tempMaxIn))
           if (data.tempMinIn !== null && data.tempMinIn !== undefined) setTempMinIn(String(data.tempMinIn))
+
+          // Calcula Temp. Momento = (Max IN + Min IN) / 2
+          if (data.tempMaxIn !== null && data.tempMaxIn !== undefined && data.tempMinIn !== null && data.tempMinIn !== undefined) {
+            setTempCurrent(((data.tempMaxIn + data.tempMinIn) / 2).toFixed(1))
+          } else if (data.tempCurrent !== null && data.tempCurrent !== undefined) {
+            setTempCurrent(String(data.tempCurrent))
+          }
+
           if (data.humidity !== null && data.humidity !== undefined) setHumidity(String(data.humidity))
           setOcrMessage(data.statusMessage || 'Dados extraídos do display LCD por IA')
           setOcrConfidence(data.confidence ?? 0.95)
@@ -196,6 +227,7 @@ export function TemperatureCaptureCard() {
     setTempMin('')
     setTempMaxIn('')
     setTempMinIn('')
+    setTempCurrent('')
     setHumidity('')
     setActionTaken('')
     setNotes('')
@@ -228,6 +260,7 @@ export function TemperatureCaptureCard() {
       period,
       tempMax: numMax,
       tempMin: numMin,
+      tempCurrent: numCurrent !== null && !isNaN(numCurrent) ? numCurrent : null,
       tempMaxIn: numMaxIn !== null && !isNaN(numMaxIn) ? numMaxIn : null,
       tempMinIn: numMinIn !== null && !isNaN(numMinIn) ? numMinIn : null,
       humidity: numHum,
@@ -569,36 +602,29 @@ export function TemperatureCaptureCard() {
                 />
               </div>
 
-              {/* Bloco 2: Sensor Interno / Sala (IN) */}
+              {/* Bloco 2: Temperatura Momento (Média Max IN + Min IN / 2) */}
               <div>
-                <label className="block text-xs font-semibold text-amber-800">
-                  Temp. Máxima (Max IN °C) *
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-amber-900">
+                    Temp. Momento (°C) *
+                  </label>
+                  {(tempMaxIn || tempMinIn) && (
+                    <span className="text-[10px] text-amber-700 font-medium">
+                      Média ({tempMaxIn || '-'} + {tempMinIn || '-'})/2
+                    </span>
+                  )}
+                </div>
                 <Input
                   type="text"
-                  value={tempMaxIn}
-                  onChange={(e) => setTempMaxIn(e.target.value)}
-                  placeholder="Ex: 19.9"
-                  className="mt-1 font-semibold text-neutral-900 border-amber-200 focus-within:border-amber-500"
+                  value={tempCurrent}
+                  onChange={(e) => setTempCurrent(e.target.value)}
+                  placeholder="Ex: 19.8"
+                  className="mt-1 font-semibold text-neutral-900 border-amber-200 focus-within:border-amber-500 bg-amber-50/20"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-teal-800">
-                  Temp. Mínima (Min IN °C) *
-                </label>
-                <Input
-                  type="text"
-                  value={tempMinIn}
-                  onChange={(e) => setTempMinIn(e.target.value)}
-                  placeholder="Ex: 19.6"
-                  className="mt-1 font-semibold text-neutral-900 border-teal-200 focus-within:border-teal-500"
-                  required
-                />
-              </div>
-
-              <div className="sm:col-span-2">
                 <label className="block text-xs font-semibold text-neutral-700">
                   Umidade Relativa (% UR)
                 </label>
@@ -608,6 +634,33 @@ export function TemperatureCaptureCard() {
                   onChange={(e) => setHumidity(e.target.value)}
                   placeholder="Ex: 60 ou 98"
                   className="mt-1"
+                />
+              </div>
+
+              {/* Bloco 3: Detalhes dos Sensores IN (Leitura Secundária do Visor) */}
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-500">
+                  Sensor Interno Máx (Max IN °C)
+                </label>
+                <Input
+                  type="text"
+                  value={tempMaxIn}
+                  onChange={(e) => handleMaxInChange(e.target.value)}
+                  placeholder="Ex: 19.9"
+                  className="mt-1 text-xs text-neutral-600 border-neutral-200"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-medium text-neutral-500">
+                  Sensor Interno Mín (Min IN °C)
+                </label>
+                <Input
+                  type="text"
+                  value={tempMinIn}
+                  onChange={(e) => handleMinInChange(e.target.value)}
+                  placeholder="Ex: 19.6"
+                  className="mt-1 text-xs text-neutral-600 border-neutral-200"
                 />
               </div>
 

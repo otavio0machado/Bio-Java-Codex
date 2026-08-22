@@ -227,12 +227,17 @@ public class TemperatureService {
             responsibleUser = userRepository.findByUsername(authenticatedUsername).orElse(null);
         }
 
+        BigDecimal tempCurrent = request.tempCurrent();
+        if (tempCurrent == null && request.tempMaxIn() != null && request.tempMinIn() != null) {
+            tempCurrent = request.tempMaxIn().add(request.tempMinIn()).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+        }
+
         TemperatureRecord record = TemperatureRecord.builder()
             .location(location)
             .date(request.date())
             .time(request.time())
             .period(request.period() != null ? request.period() : "UNICO")
-            .tempCurrent(request.tempCurrent())
+            .tempCurrent(tempCurrent)
             .tempMax(request.tempMax())
             .tempMin(request.tempMin())
             .tempMaxIn(request.tempMaxIn())
@@ -261,13 +266,18 @@ public class TemperatureService {
 
         String status = evaluateStatus(location, request.tempMin(), request.tempMax(), request.humidity());
 
+        BigDecimal tempCurrent = request.tempCurrent();
+        if (tempCurrent == null && request.tempMaxIn() != null && request.tempMinIn() != null) {
+            tempCurrent = request.tempMaxIn().add(request.tempMinIn()).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+        }
+
         record.setLocation(location);
         record.setDate(request.date());
         record.setTime(request.time());
         if (request.period() != null) {
             record.setPeriod(request.period());
         }
-        record.setTempCurrent(request.tempCurrent());
+        record.setTempCurrent(tempCurrent);
         record.setTempMax(request.tempMax());
         record.setTempMin(request.tempMin());
         record.setTempMaxIn(request.tempMaxIn());
@@ -470,6 +480,15 @@ public class TemperatureService {
             BigDecimal tempMinIn = root.path("tempMinIn").isNumber() ? BigDecimal.valueOf(root.path("tempMinIn").asDouble()) : null;
             BigDecimal humidity = root.path("humidity").isNumber() ? BigDecimal.valueOf(root.path("humidity").asDouble()) : null;
             Double confidence = root.path("confidence").isNumber() ? root.path("confidence").asDouble() : 0.95;
+
+            // Calcula Temperatura Momento a partir da média aritmética de (Max IN + Min IN) / 2
+            BigDecimal tempCurrent = null;
+            if (tempMaxIn != null && tempMinIn != null) {
+                tempCurrent = tempMaxIn.add(tempMinIn).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+            } else if (root.path("tempCurrent").isNumber()) {
+                tempCurrent = BigDecimal.valueOf(root.path("tempCurrent").asDouble()).setScale(1, RoundingMode.HALF_UP);
+            }
+
             String statusMsg = root.path("statusMessage").asText("Leitura processada com sucesso");
             String rawText = root.path("rawText").asText("");
 
@@ -479,7 +498,7 @@ public class TemperatureService {
                 tempMin,
                 tempMaxIn,
                 tempMinIn,
-                null,
+                tempCurrent,
                 humidity,
                 LocalDate.now(),
                 confidence,
@@ -542,16 +561,20 @@ public class TemperatureService {
         }
         csv.append("\n");
 
-        csv.append("Data;Hora;Equipamento;Máx OUT (°C);Mín OUT (°C);Máx IN (°C);Mín IN (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
+        csv.append("Data;Hora;Equipamento;Máx OUT (°C);Mín OUT (°C);Temp. Momento (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
 
         for (TemperatureRecord r : records) {
+            BigDecimal current = r.getTempCurrent();
+            if (current == null && r.getTempMaxIn() != null && r.getTempMinIn() != null) {
+                current = r.getTempMaxIn().add(r.getTempMinIn()).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+            }
+
             csv.append(r.getDate().format(DATE_FMT)).append(";");
             csv.append(r.getTime().format(TIME_FMT)).append(";");
             csv.append(r.getLocation() != null ? r.getLocation().getName() : "").append(";");
             csv.append(r.getTempMax() != null ? r.getTempMax().toString().replace('.', ',') : "").append(";");
             csv.append(r.getTempMin() != null ? r.getTempMin().toString().replace('.', ',') : "").append(";");
-            csv.append(r.getTempMaxIn() != null ? r.getTempMaxIn().toString().replace('.', ',') : "").append(";");
-            csv.append(r.getTempMinIn() != null ? r.getTempMinIn().toString().replace('.', ',') : "").append(";");
+            csv.append(current != null ? current.toString().replace('.', ',') : "").append(";");
             csv.append(r.getHumidity() != null ? r.getHumidity().toString().replace('.', ',') : "").append(";");
             csv.append(r.getStatus()).append(";");
             csv.append(r.getResponsible()).append(";");
@@ -604,11 +627,11 @@ public class TemperatureService {
             sub.setSpacingAfter(12);
             doc.add(sub);
 
-            PdfPTable table = new PdfPTable(10);
+            PdfPTable table = new PdfPTable(9);
             table.setWidthPercentage(100);
-            table.setWidths(new float[]{9, 7, 20, 8, 8, 8, 8, 7, 13, 12});
+            table.setWidths(new float[]{10, 8, 22, 10, 10, 10, 8, 10, 12});
 
-            String[] headers = {"Data", "Hora", "Equipamento", "Máx OUT", "Mín OUT", "Máx IN", "Mín IN", "UR (%)", "Status", "Responsável"};
+            String[] headers = {"Data", "Hora", "Equipamento", "Máx OUT", "Mín OUT", "Momento", "UR (%)", "Status", "Responsável"};
             for (String h : headers) {
                 PdfPCell cell = new PdfPCell(new Phrase(h, headerFont));
                 cell.setBackgroundColor(new Color(22, 101, 52));
@@ -621,6 +644,11 @@ public class TemperatureService {
                 boolean isAlert = "NAO_CONFORME".equalsIgnoreCase(r.getStatus());
                 Font f = isAlert ? cellAlertFont : cellFont;
 
+                BigDecimal current = r.getTempCurrent();
+                if (current == null && r.getTempMaxIn() != null && r.getTempMinIn() != null) {
+                    current = r.getTempMaxIn().add(r.getTempMinIn()).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+                }
+
                 PdfPCell cData = new PdfPCell(new Phrase(r.getDate().format(DATE_FMT), f));
                 cData.setHorizontalAlignment(Element.ALIGN_CENTER);
                 table.addCell(cData);
@@ -631,21 +659,17 @@ public class TemperatureService {
 
                 table.addCell(new PdfPCell(new Phrase(r.getLocation() != null ? r.getLocation().getName() : "-", f)));
 
-                PdfPCell cMaxOut = new PdfPCell(new Phrase(r.getTempMax() != null ? String.format("%.1f", r.getTempMax()) : "-", f));
+                PdfPCell cMaxOut = new PdfPCell(new Phrase(r.getTempMax() != null ? String.format("%.1f°C", r.getTempMax()) : "-", f));
                 cMaxOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
                 table.addCell(cMaxOut);
 
-                PdfPCell cMinOut = new PdfPCell(new Phrase(r.getTempMin() != null ? String.format("%.1f", r.getTempMin()) : "-", f));
+                PdfPCell cMinOut = new PdfPCell(new Phrase(r.getTempMin() != null ? String.format("%.1f°C", r.getTempMin()) : "-", f));
                 cMinOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
                 table.addCell(cMinOut);
 
-                PdfPCell cMaxIn = new PdfPCell(new Phrase(r.getTempMaxIn() != null ? String.format("%.1f", r.getTempMaxIn()) : "-", f));
-                cMaxIn.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                table.addCell(cMaxIn);
-
-                PdfPCell cMinIn = new PdfPCell(new Phrase(r.getTempMinIn() != null ? String.format("%.1f", r.getTempMinIn()) : "-", f));
-                cMinIn.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                table.addCell(cMinIn);
+                PdfPCell cCur = new PdfPCell(new Phrase(current != null ? String.format("%.1f°C", current) : "-", f));
+                cCur.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                table.addCell(cCur);
 
                 PdfPCell cHum = new PdfPCell(new Phrase(r.getHumidity() != null ? String.format("%.0f%%", r.getHumidity()) : "-", f));
                 cHum.setHorizontalAlignment(Element.ALIGN_RIGHT);

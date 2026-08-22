@@ -310,6 +310,7 @@ class TemperatureServiceTest {
         assertThat(response.tempMin()).isEqualByComparingTo("0.2");
         assertThat(response.tempMaxIn()).isEqualByComparingTo("19.9");
         assertThat(response.tempMinIn()).isEqualByComparingTo("19.6");
+        assertThat(response.tempCurrent()).isEqualByComparingTo("19.8");
         assertThat(response.humidity()).isEqualByComparingTo("97.0");
         assertThat(response.statusMessage()).contains("OUT: Máx 6.1°C / Mín 0.2°C");
         assertThat(response.confidence()).isEqualTo(0.99);

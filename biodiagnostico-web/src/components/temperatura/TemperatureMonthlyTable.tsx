@@ -223,8 +223,7 @@ export function TemperatureMonthlyTable({
                 <th className="px-3.5 py-3.5">Equipamento</th>
                 <th className="px-3 py-3.5 text-right text-rose-700">Máx OUT</th>
                 <th className="px-3 py-3.5 text-right text-sky-700">Mín OUT</th>
-                <th className="px-3 py-3.5 text-right text-amber-700">Máx IN</th>
-                <th className="px-3 py-3.5 text-right text-teal-700">Mín IN</th>
+                <th className="px-3 py-3.5 text-right text-amber-800">Momento</th>
                 <th className="px-3 py-3.5 text-right">UR (%)</th>
                 <th className="px-3.5 py-3.5 text-center">Status</th>
                 <th className="px-3.5 py-3.5">Responsável</th>
@@ -235,13 +234,20 @@ export function TemperatureMonthlyTable({
             <tbody className="divide-y divide-neutral-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={canWrite ? 11 : 10} className="p-8 text-center text-neutral-500">
+                  <td colSpan={canWrite ? 10 : 9} className="p-8 text-center text-neutral-500">
                     Carregando medições...
                   </td>
                 </tr>
               ) : records && records.length > 0 ? (
                 records.map((r) => {
                   const isAlert = r.status === 'NAO_CONFORME'
+                  const displayCurrent =
+                    r.tempCurrent != null
+                      ? r.tempCurrent
+                      : r.tempMaxIn != null && r.tempMinIn != null
+                      ? Number(((r.tempMaxIn + r.tempMinIn) / 2).toFixed(1))
+                      : null
+
                   return (
                     <tr
                       key={r.id}
@@ -271,12 +277,8 @@ export function TemperatureMonthlyTable({
                         {r.tempMin != null ? `${r.tempMin}°C` : '-'}
                       </td>
 
-                      <td className="px-3 py-3 text-right text-amber-700 whitespace-nowrap">
-                        {r.tempMaxIn != null ? `${r.tempMaxIn}°C` : '-'}
-                      </td>
-
-                      <td className="px-3 py-3 text-right text-teal-700 whitespace-nowrap">
-                        {r.tempMinIn != null ? `${r.tempMinIn}°C` : '-'}
+                      <td className="px-3 py-3 text-right font-medium text-amber-800 whitespace-nowrap">
+                        {displayCurrent != null ? `${displayCurrent}°C` : '-'}
                       </td>
 
                       <td className="px-3 py-3 text-right text-neutral-600 whitespace-nowrap">

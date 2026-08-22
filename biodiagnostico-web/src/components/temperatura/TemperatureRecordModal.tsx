@@ -38,12 +38,31 @@ export function TemperatureRecordModal({
   const [period, setPeriod] = useState<string>('UNICO')
   const [tempMax, setTempMax] = useState<string>('')
   const [tempMin, setTempMin] = useState<string>('')
+  const [tempCurrent, setTempCurrent] = useState<string>('')
   const [tempMaxIn, setTempMaxIn] = useState<string>('')
   const [tempMinIn, setTempMinIn] = useState<string>('')
   const [humidity, setHumidity] = useState<string>('')
   const [responsible, setResponsible] = useState<string>('')
   const [actionTaken, setActionTaken] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
+
+  const handleMaxInChange = (val: string) => {
+    setTempMaxIn(val)
+    const nMax = parseFloat(val.replace(',', '.'))
+    const nMin = parseFloat(tempMinIn.replace(',', '.'))
+    if (!isNaN(nMax) && !isNaN(nMin)) {
+      setTempCurrent(((nMax + nMin) / 2).toFixed(1))
+    }
+  }
+
+  const handleMinInChange = (val: string) => {
+    setTempMinIn(val)
+    const nMax = parseFloat(tempMaxIn.replace(',', '.'))
+    const nMin = parseFloat(val.replace(',', '.'))
+    if (!isNaN(nMax) && !isNaN(nMin)) {
+      setTempCurrent(((nMax + nMin) / 2).toFixed(1))
+    }
+  }
 
   useEffect(() => {
     if (recordToEdit) {
@@ -53,6 +72,13 @@ export function TemperatureRecordModal({
       setPeriod(recordToEdit.period || 'UNICO')
       setTempMax(String(recordToEdit.tempMax))
       setTempMin(String(recordToEdit.tempMin))
+      setTempCurrent(
+        recordToEdit.tempCurrent !== null && recordToEdit.tempCurrent !== undefined
+          ? String(recordToEdit.tempCurrent)
+          : recordToEdit.tempMaxIn != null && recordToEdit.tempMinIn != null
+          ? ((recordToEdit.tempMaxIn + recordToEdit.tempMinIn) / 2).toFixed(1)
+          : ''
+      )
       setTempMaxIn(
         recordToEdit.tempMaxIn !== null && recordToEdit.tempMaxIn !== undefined
           ? String(recordToEdit.tempMaxIn)
@@ -78,6 +104,7 @@ export function TemperatureRecordModal({
       setPeriod('UNICO')
       setTempMax('')
       setTempMin('')
+      setTempCurrent('')
       setTempMaxIn('')
       setTempMinIn('')
       setHumidity('')
@@ -91,6 +118,7 @@ export function TemperatureRecordModal({
 
   const numMin = parseFloat(tempMin.replace(',', '.'))
   const numMax = parseFloat(tempMax.replace(',', '.'))
+  const numCurrent = tempCurrent ? parseFloat(tempCurrent.replace(',', '.')) : null
   const numMinIn = tempMinIn ? parseFloat(tempMinIn.replace(',', '.')) : null
   const numMaxIn = tempMaxIn ? parseFloat(tempMaxIn.replace(',', '.')) : null
   const numHum = humidity ? parseFloat(humidity.replace(',', '.')) : null
@@ -141,6 +169,7 @@ export function TemperatureRecordModal({
       period,
       tempMax: numMax,
       tempMin: numMin,
+      tempCurrent: numCurrent !== null && !isNaN(numCurrent) ? numCurrent : null,
       tempMaxIn: numMaxIn !== null && !isNaN(numMaxIn) ? numMaxIn : null,
       tempMinIn: numMinIn !== null && !isNaN(numMinIn) ? numMinIn : null,
       humidity: numHum,
@@ -269,37 +298,56 @@ export function TemperatureRecordModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-amber-800">Máx IN (°C) *</label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-amber-900">Temp. Momento (°C) *</label>
+              {(tempMaxIn || tempMinIn) && (
+                <span className="text-[10px] text-amber-700 font-medium">
+                  Média ({tempMaxIn || '-'} + {tempMinIn || '-'})/2
+                </span>
+              )}
+            </div>
             <Input
               type="text"
-              value={tempMaxIn}
-              onChange={(e) => setTempMaxIn(e.target.value)}
-              placeholder="Ex: 20.2"
-              className="mt-1 font-semibold border-amber-200"
+              value={tempCurrent}
+              onChange={(e) => setTempCurrent(e.target.value)}
+              placeholder="Ex: 19.8"
+              className="mt-1 font-semibold border-amber-200 bg-amber-50/20"
+              required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-teal-800">Mín IN (°C) *</label>
+            <label className="block text-xs font-semibold text-neutral-700">Umidade Relativa (% UR)</label>
+            <Input
+              type="text"
+              value={humidity}
+              onChange={(e) => setHumidity(e.target.value)}
+              placeholder="Ex: 60"
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-medium text-neutral-500">Sensor Interno Máx (Max IN °C)</label>
+            <Input
+              type="text"
+              value={tempMaxIn}
+              onChange={(e) => handleMaxInChange(e.target.value)}
+              placeholder="Ex: 20.2"
+              className="mt-1 text-xs text-neutral-600 border-neutral-200"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-medium text-neutral-500">Sensor Interno Mín (Min IN °C)</label>
             <Input
               type="text"
               value={tempMinIn}
-              onChange={(e) => setTempMinIn(e.target.value)}
+              onChange={(e) => handleMinInChange(e.target.value)}
               placeholder="Ex: 19.6"
-              className="mt-1 font-semibold border-teal-200"
+              className="mt-1 text-xs text-neutral-600 border-neutral-200"
             />
           </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-neutral-700">Umidade Relativa (% UR)</label>
-          <Input
-            type="text"
-            value={humidity}
-            onChange={(e) => setHumidity(e.target.value)}
-            placeholder="Ex: 60"
-            className="mt-1"
-          />
         </div>
 
         <div>
