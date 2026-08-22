@@ -459,7 +459,9 @@ public class TemperatureService {
         LocalDate end = ym.atEndOfMonth();
 
         TemperatureLocation location = locationId != null ? getLocationById(locationId) : null;
-        List<TemperatureRecord> records = recordRepository.findRecordsInPeriod(start, end, locationId, null);
+        List<TemperatureRecord> records = locationId != null
+            ? recordRepository.findByLocationAndPeriod(start, end, locationId)
+            : recordRepository.findInPeriod(start, end);
 
         StringBuilder csv = new StringBuilder();
         // BOM UTF-8 para Excel abrir acentuação perfeitamente
@@ -514,7 +516,9 @@ public class TemperatureService {
         LocalDate end = ym.atEndOfMonth();
 
         TemperatureLocation location = locationId != null ? getLocationById(locationId) : null;
-        List<TemperatureRecord> records = recordRepository.findRecordsInPeriod(start, end, locationId, null);
+        List<TemperatureRecord> records = locationId != null
+            ? recordRepository.findByLocationAndPeriod(start, end, locationId)
+            : recordRepository.findInPeriod(start, end);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Document doc = new Document(PageSize.A4.rotate(), 20, 20, 20, 20);
