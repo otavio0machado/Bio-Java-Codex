@@ -28,6 +28,17 @@ export function canWriteMaintenance(user: User | null): boolean {
   return false
 }
 
+export function canWriteTemperature(user: User | null): boolean {
+  if (!user) return false
+  if (user.role === 'ADMIN') return true
+  if (user.role === 'FUNCIONARIO') {
+    return user.permissions.includes('TEMPERATURE_WRITE') ||
+           user.permissions.includes('MAINTENANCE_WRITE') ||
+           user.permissions.includes('QC_WRITE')
+  }
+  return false
+}
+
 export function canImport(user: User | null): boolean {
   if (!user) return false
   if (user.role === 'ADMIN') return true
@@ -51,8 +62,16 @@ export const PERMISSION_LABELS: Record<string, string> = {
   QC_WRITE: 'Registrar CQ',
   REAGENT_WRITE: 'Gerenciar Reagentes',
   MAINTENANCE_WRITE: 'Registrar Manutenção',
+  TEMPERATURE_WRITE: 'Controle de Temperatura',
   DOWNLOAD: 'Baixar Relatórios',
   IMPORT: 'Importar Dados',
 }
 
-export const ALL_PERMISSIONS = ['QC_WRITE', 'REAGENT_WRITE', 'MAINTENANCE_WRITE', 'DOWNLOAD', 'IMPORT'] as const
+export const ALL_PERMISSIONS = [
+  'QC_WRITE',
+  'REAGENT_WRITE',
+  'MAINTENANCE_WRITE',
+  'TEMPERATURE_WRITE',
+  'DOWNLOAD',
+  'IMPORT',
+] as const

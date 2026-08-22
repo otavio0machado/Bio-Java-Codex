@@ -66,4 +66,20 @@ public interface AiProvider {
      */
     String completeAudio(String model, String prompt, String audioBase64, String audioFormat)
         throws java.io.IOException;
+
+    /**
+     * Completa uma requisicao multimodal de visao (imagem + instrucao textual),
+     * tipicamente retornando JSON com os dados do visor/termometro extraidos.
+     *
+     * @param model       id do modelo de visao a usar
+     * @param prompt      instrucao textual que acompanha a imagem
+     * @param imageBase64 imagem codificada em base64
+     * @param mimeType    tipo MIME da imagem (ex.: {@code "image/jpeg"}, {@code "image/png"})
+     * @return o texto da resposta (tipicamente JSON; nunca vazio)
+     * @throws java.io.IOException em falha de parsing/transporte
+     */
+    default String completeVision(String model, String prompt, String imageBase64, String mimeType)
+        throws java.io.IOException {
+        throw new UnsupportedOperationException("Visao computacional nao suportada neste provedor.");
+    }
 }

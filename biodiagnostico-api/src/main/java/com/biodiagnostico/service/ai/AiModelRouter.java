@@ -39,7 +39,8 @@ public class AiModelRouter {
         Map.entry(AiTask.AUDIT_SUMMARY, TIER_MEDIUM),
         Map.entry(AiTask.ROOT_CAUSE, TIER_ADVANCED),
         Map.entry(AiTask.PRIORITIES, TIER_MEDIUM),
-        Map.entry(AiTask.DRIFT_DETECTION, TIER_MEDIUM)
+        Map.entry(AiTask.DRIFT_DETECTION, TIER_MEDIUM),
+        Map.entry(AiTask.TEMPERATURE_OCR, TIER_MEDIUM)
     );
 
     private final AiProperties properties;

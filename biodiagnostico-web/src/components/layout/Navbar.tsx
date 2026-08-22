@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
   Settings,
+  Thermometer,
   Users,
   User,
   Wrench,
@@ -32,6 +33,7 @@ const areaNavItems = [
 const managementNavItems = [
   { label: 'Reagentes', href: '/reagentes', area: null, icon: FlaskConical },
   { label: 'Manutenção', href: '/manutencao', area: null, icon: Wrench },
+  { label: 'Temperatura', href: '/temperatura', area: null, icon: Thermometer },
   { label: 'Relatórios', href: '/relatorios', area: null, icon: FileText },
 ]
 

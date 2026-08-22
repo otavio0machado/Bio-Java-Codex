@@ -914,3 +914,5 @@ export interface ImmunologyRun {
   createdAt: string
   results: ImmunologyRunResult[]
 }
+
+export * from './temperature'

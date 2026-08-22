@@ -13,6 +13,9 @@ const ReagentesPage = lazy(() =>
 const ManutencaoPage = lazy(() =>
   import('./pages/ManutencaoPage').then((module) => ({ default: module.ManutencaoPage })),
 )
+const TemperaturaPage = lazy(() =>
+  import('./pages/TemperaturaPage').then((module) => ({ default: module.TemperaturaPage })),
+)
 const RelatoriosPage = lazy(() =>
   import('./pages/RelatoriosPage').then((module) => ({ default: module.RelatoriosPage })),
 )
@@ -104,6 +107,14 @@ export default function App() {
             element={
               <Suspense fallback={<RouteFallback />}>
                 <ManutencaoPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/temperatura"
+            element={
+              <Suspense fallback={<RouteFallback />}>
+                <TemperaturaPage />
               </Suspense>
             }
           />

@@ -181,6 +181,22 @@ public class OpenAiProvider implements AiProvider {
         return extractContent(callChatCompletions(body));
     }
 
+    @Override
+    public String completeVision(String model, String prompt, String imageBase64, String mimeType)
+        throws java.io.IOException {
+        String effectiveMime = (mimeType != null && !mimeType.isBlank()) ? mimeType : "image/jpeg";
+        String dataUrl = "data:" + effectiveMime + ";base64," + imageBase64;
+        List<Map<String, Object>> content = List.of(
+            Map.of("type", "text", "text", prompt),
+            Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))
+        );
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", List.of(Map.of("role", "user", "content", content)));
+        body.put("response_format", Map.of("type", "json_object"));
+        return extractContent(callChatCompletions(body));
+    }
+
     private JsonNode callChatCompletions(Map<String, Object> body) throws java.io.IOException {
         String apiKey = requireApiKey();
         String url = baseUrl() + "/chat/completions";

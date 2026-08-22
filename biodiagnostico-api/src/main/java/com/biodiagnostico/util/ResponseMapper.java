@@ -382,4 +382,59 @@ public final class ResponseMapper {
             movement.getCreatedAt()
         );
     }
+
+    public static com.biodiagnostico.dto.response.TemperatureLocationResponse toTemperatureLocationResponse(
+        com.biodiagnostico.entity.TemperatureLocation loc
+    ) {
+        return new com.biodiagnostico.dto.response.TemperatureLocationResponse(
+            loc.getId(),
+            loc.getName(),
+            loc.getCode(),
+            loc.getCategory(),
+            loc.getArea(),
+            loc.getMinTempTarget(),
+            loc.getMaxTempTarget(),
+            loc.getMinHumidityTarget(),
+            loc.getMaxHumidityTarget(),
+            loc.getThermometerCode(),
+            loc.getCalibrationCertNumber(),
+            loc.getCalibrationDueDate(),
+            loc.getFrequency(),
+            loc.getActive(),
+            loc.getNotes(),
+            loc.getCreatedAt(),
+            loc.getUpdatedAt()
+        );
+    }
+
+    public static com.biodiagnostico.dto.response.TemperatureRecordResponse toTemperatureRecordResponse(
+        com.biodiagnostico.entity.TemperatureRecord record
+    ) {
+        return new com.biodiagnostico.dto.response.TemperatureRecordResponse(
+            record.getId(),
+            record.getLocation() != null ? record.getLocation().getId() : null,
+            record.getLocation() != null ? record.getLocation().getName() : null,
+            record.getLocation() != null ? record.getLocation().getCode() : null,
+            record.getLocation() != null ? record.getLocation().getCategory() : null,
+            record.getLocation() != null ? record.getLocation().getArea() : null,
+            record.getLocation() != null ? record.getLocation().getMinTempTarget() : null,
+            record.getLocation() != null ? record.getLocation().getMaxTempTarget() : null,
+            record.getDate(),
+            record.getTime(),
+            record.getPeriod(),
+            record.getTempCurrent(),
+            record.getTempMax(),
+            record.getTempMin(),
+            record.getHumidity(),
+            record.getStatus(),
+            record.getResponsible(),
+            record.getActionTaken(),
+            record.getNotes(),
+            record.getPhotoUrl(),
+            record.getPhotoFilename(),
+            record.getOcrApplied(),
+            record.getCreatedAt(),
+            record.getUpdatedAt()
+        );
+    }
 }
