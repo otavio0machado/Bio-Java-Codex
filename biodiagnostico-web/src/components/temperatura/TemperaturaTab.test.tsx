@@ -142,7 +142,7 @@ describe('TemperaturaTab', () => {
     )
   }
 
-  it('renderiza título, KPIs e card de captura rápida', () => {
+  it('renderiza título, KPIs e card de registro diário', () => {
     renderComponent()
 
     expect(
@@ -153,19 +153,19 @@ describe('TemperaturaTab', () => {
     expect(screen.getByText('Monitoramento Hoje')).toBeInTheDocument()
     expect(screen.getByText('5 de 7')).toBeInTheDocument()
     expect(
-      screen.getByText('Lançamento Rápido & Leitura de Fotos por IA')
+      screen.getByText('Registro de Temperatura & Termohigrometria')
     ).toBeInTheDocument()
   })
 
-  it('permite alternar para a aba Mapa Mensal & Gráficos e exibe registros', () => {
+  it('permite alternar para a aba Histórico & Gráficos e exibe registros', () => {
     renderComponent()
 
-    const mapaTab = screen.getByRole('button', { name: /mapa mensal & gráficos/i })
+    const mapaTab = screen.getByRole('button', { name: /histórico & gráficos/i })
     fireEvent.click(mapaTab)
 
     expect(screen.getByText('Curva de Controle Térmico — Geladeira 1 - Reagentes Bioquímica')).toBeInTheDocument()
     expect(screen.getByText('Dr. Farmacêutico')).toBeInTheDocument()
-    expect(screen.getByText('CONFORME')).toBeInTheDocument()
+    expect(screen.getByText('Conforme')).toBeInTheDocument()
   })
 
   it('permite alternar para a aba Equipamentos & Calibração', () => {

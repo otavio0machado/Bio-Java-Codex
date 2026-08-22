@@ -102,13 +102,15 @@ const mockReferences: QcReferenceValue[] = [
   },
 ]
 
+import { todayLocal } from '../../utils/date'
+
 const mockRecords: QcRecord[] = [
   {
     id: 'rec-1',
     referenceId: 'ref-1',
     examName: 'TP - Atividade (%)',
     area: 'coagulacao',
-    date: '2026-08-20',
+    date: todayLocal(),
     level: 'Normal',
     lotNumber: 'COAG 03142026',
     value: 84,
@@ -130,7 +132,7 @@ const mockRecords: QcRecord[] = [
     referenceId: 'ref-2',
     examName: 'TP - INR',
     area: 'coagulacao',
-    date: '2026-08-20',
+    date: todayLocal(),
     level: 'Normal',
     lotNumber: 'COAG 03142026',
     value: 1.05,

@@ -2,12 +2,11 @@ import {
   AlertCircle,
   Camera,
   CheckCircle2,
-  Image as ImageIcon,
+  ChevronDown,
   Loader2,
   Plus,
   RefreshCw,
-  Sparkles,
-  Upload,
+  Thermometer,
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
@@ -29,13 +28,9 @@ export function TemperatureCaptureCard() {
   const processPhoto = useProcessTemperaturePhoto()
   const createRecord = useCreateTemperatureRecord()
 
-  // Inputs ocultos para Foto 1 (Máxima)
+  // Inputs ocultos para Foto 1 (Máxima) e Foto 2 (Mínima)
   const fileInputMaxRef = useRef<HTMLInputElement>(null)
-  const cameraInputMaxRef = useRef<HTMLInputElement>(null)
-
-  // Inputs ocultos para Foto 2 (Mínima)
   const fileInputMinRef = useRef<HTMLInputElement>(null)
-  const cameraInputMinRef = useRef<HTMLInputElement>(null)
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState<boolean>(false)
@@ -90,10 +85,9 @@ export function TemperatureCaptureCard() {
   const [minMimeType, setMinMimeType] = useState<string>('image/jpeg')
   const [minFilename, setMinFilename] = useState<string>('')
 
-  // Estados de OCR/IA
+  // Estados de OCR
   const [ocrApplied, setOcrApplied] = useState<boolean>(false)
   const [ocrMessage, setOcrMessage] = useState<string | null>(null)
-  const [ocrConfidence, setOcrConfidence] = useState<number | null>(null)
 
   // Seleciona primeiro ponto ativo por padrão
   useEffect(() => {
@@ -208,14 +202,13 @@ export function TemperatureCaptureCard() {
           }
 
           if (data.humidity !== null && data.humidity !== undefined) setHumidity(String(data.humidity))
-          setOcrMessage(data.statusMessage || 'Dados extraídos do display LCD por IA')
-          setOcrConfidence(data.confidence ?? 0.95)
+          setOcrMessage(data.statusMessage || 'Valores lidos automaticamente do display')
 
-          toast.success('Leitura concluída! Valores extraídos com Inteligência Artificial.')
+          toast.success('Leitura concluída! Campos preenchidos automaticamente.')
         },
         onError: () => {
-          setOcrMessage('Leitura automática indisponível. Preencha os valores manualmente nos campos.')
-          toast.info('Não foi possível ler os dígitos com clareza. Digite os valores nos campos.')
+          setOcrMessage('Leitura automática não concluída. Digite os valores nos campos.')
+          toast.info('Não foi possível ler todos os dígitos. Digite os valores manualmente.')
         },
       }
     )
@@ -236,7 +229,6 @@ export function TemperatureCaptureCard() {
     setNotes('')
     setOcrApplied(false)
     setOcrMessage(null)
-    setOcrConfidence(null)
     setTime(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
   }
 
@@ -292,54 +284,54 @@ export function TemperatureCaptureCard() {
     <Card className="border-neutral-200/80 bg-white p-6 shadow-sm sm:rounded-3xl">
       <div className="flex flex-col justify-between gap-4 border-b border-neutral-100 pb-5 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
-              <Sparkles className="h-4 w-4" />
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-700 text-white shadow-xs">
+              <Thermometer className="h-4 w-4" />
             </div>
             <h2 className="text-lg font-semibold text-neutral-900">
-              Lançamento Rápido & Leitura de Fotos por IA
+              Registro de Temperatura & Termohigrometria
             </h2>
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            Fotografe o display em modo <strong>MÁXIMA (MAX)</strong> e em modo <strong>MÍNIMA (MIN)</strong> para extração de OUT, IN, umidade e horário.
+            Fotografe o visor do termômetro para leitura automática ou digite os valores da rotina.
           </p>
         </div>
 
         {ocrApplied && (
-          <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 border border-emerald-200/60">
+          <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-3.5 py-1.5 text-xs font-semibold text-emerald-800 border border-emerald-200">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-            <span>Dados extraídos via OCR/IA ({Math.round((ocrConfidence || 0.95) * 100)}% precisão)</span>
+            <span>Leitura do display aplicada</span>
           </div>
         )}
       </div>
 
       <form onSubmit={handleSave} className="mt-6 space-y-6">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Lado Esquerdo: Slots de Fotos Duplas (Máxima + Mínima) */}
-          <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 p-4 sm:p-5">
+          {/* Lado Esquerdo: Evidências Fotográficas do Visor */}
+          <div className="lg:col-span-5 flex flex-col justify-between space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:p-5">
             <div>
               <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-700">
-                  Evidências Fotográficas do Visor
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-700">
+                  Fotos do Visor do Termômetro
                 </label>
                 {(maxImage || minImage) && (
                   <button
                     type="button"
                     onClick={() => triggerAiOcr(maxImage, maxMimeType, minImage, minMimeType)}
-                    className="flex items-center gap-1 text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                    className="flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition-colors"
                   >
                     <RefreshCw className="h-3 w-3" />
-                    Re-analisar IA
+                    Re-analisar
                   </button>
                 )}
               </div>
 
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="mt-3.5 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                 {/* SLOT 1: FOTO MÁXIMA */}
-                <div className="flex flex-col rounded-xl border border-neutral-200 bg-white p-3 shadow-xs">
+                <div className="flex flex-col rounded-2xl border border-neutral-200 bg-white p-3 shadow-xs">
                   <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">
-                      MAX • Foto Máxima
+                    <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 border border-rose-200/50">
+                      Visor em MÁX
                     </span>
                     {maxImage && (
                       <button
@@ -348,7 +340,7 @@ export function TemperatureCaptureCard() {
                           setMaxImage(null)
                           setMaxFilename('')
                         }}
-                        className="text-neutral-400 hover:text-neutral-600"
+                        className="text-neutral-400 hover:text-rose-600 p-0.5 rounded-md hover:bg-neutral-100"
                         title="Remover foto"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -357,54 +349,45 @@ export function TemperatureCaptureCard() {
                   </div>
 
                   {maxImage ? (
-                    <div className="relative mt-2 overflow-hidden rounded-lg border border-neutral-200 bg-black/5">
+                    <div className="relative mt-2.5 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900">
                       <img
                         src={maxImage}
                         alt="Visor Máxima"
-                        className="h-32 w-full object-contain"
+                        className="h-36 w-full object-contain"
                       />
-                      <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-2 py-1 text-[10px] text-white">
-                        {maxFilename || 'Foto Máxima'}
-                      </div>
                     </div>
                   ) : (
-                    <div className="mt-2 flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50/50 p-2 text-center">
-                      <ImageIcon className="h-6 w-6 text-amber-500/80" />
-                      <span className="mt-1 text-[11px] font-medium text-neutral-600">
-                        Visor em modo MAX
+                    <button
+                      type="button"
+                      onClick={() => fileInputMaxRef.current?.click()}
+                      className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 hover:bg-emerald-50/40 hover:border-emerald-300 transition-all p-3 text-center cursor-pointer group"
+                    >
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-xs text-neutral-500 group-hover:text-emerald-700 group-hover:scale-105 transition-all">
+                        <Camera className="h-4 w-4" />
+                      </div>
+                      <span className="mt-2 text-xs font-semibold text-neutral-700 group-hover:text-emerald-800">
+                        Anexar Foto MAX
                       </span>
-                    </div>
+                      <span className="text-[10px] text-neutral-400 mt-0.5">
+                        Linha OUT central
+                      </span>
+                    </button>
                   )}
 
-                  <div className="mt-2.5 flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="flex-1 text-[11px] py-1 h-8"
-                      onClick={() => cameraInputMaxRef.current?.click()}
-                    >
-                      <Camera className="mr-1 h-3 w-3" />
-                      Câmera
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="flex-1 text-[11px] py-1 h-8"
-                      onClick={() => fileInputMaxRef.current?.click()}
-                    >
-                      <Upload className="mr-1 h-3 w-3" />
-                      Arquivo
-                    </Button>
-                  </div>
+                  <input
+                    ref={fileInputMaxRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleMaxFileChange}
+                  />
                 </div>
 
                 {/* SLOT 2: FOTO MÍNIMA */}
-                <div className="flex flex-col rounded-xl border border-neutral-200 bg-white p-3 shadow-xs">
+                <div className="flex flex-col rounded-2xl border border-neutral-200 bg-white p-3 shadow-xs">
                   <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-sky-100 px-2 py-0.5 text-[11px] font-bold text-sky-800">
-                      MIN • Foto Mínima
+                    <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-bold text-sky-700 border border-sky-200/50">
+                      Visor em MÍN
                     </span>
                     {minImage && (
                       <button
@@ -413,7 +396,7 @@ export function TemperatureCaptureCard() {
                           setMinImage(null)
                           setMinFilename('')
                         }}
-                        className="text-neutral-400 hover:text-neutral-600"
+                        className="text-neutral-400 hover:text-rose-600 p-0.5 rounded-md hover:bg-neutral-100"
                         title="Remover foto"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -422,98 +405,57 @@ export function TemperatureCaptureCard() {
                   </div>
 
                   {minImage ? (
-                    <div className="relative mt-2 overflow-hidden rounded-lg border border-neutral-200 bg-black/5">
+                    <div className="relative mt-2.5 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900">
                       <img
                         src={minImage}
                         alt="Visor Mínima"
-                        className="h-32 w-full object-contain"
+                        className="h-36 w-full object-contain"
                       />
-                      <div className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-2 py-1 text-[10px] text-white">
-                        {minFilename || 'Foto Mínima'}
-                      </div>
                     </div>
                   ) : (
-                    <div className="mt-2 flex h-32 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-200 bg-neutral-50/50 p-2 text-center">
-                      <ImageIcon className="h-6 w-6 text-sky-500/80" />
-                      <span className="mt-1 text-[11px] font-medium text-neutral-600">
-                        Visor em modo MIN
+                    <button
+                      type="button"
+                      onClick={() => fileInputMinRef.current?.click()}
+                      className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 hover:bg-sky-50/40 hover:border-sky-300 transition-all p-3 text-center cursor-pointer group"
+                    >
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-xs text-neutral-500 group-hover:text-sky-700 group-hover:scale-105 transition-all">
+                        <Camera className="h-4 w-4" />
+                      </div>
+                      <span className="mt-2 text-xs font-semibold text-neutral-700 group-hover:text-sky-800">
+                        Anexar Foto MIN
                       </span>
-                    </div>
+                      <span className="text-[10px] text-neutral-400 mt-0.5">
+                        Linha OUT central
+                      </span>
+                    </button>
                   )}
 
-                  <div className="mt-2.5 flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="flex-1 text-[11px] py-1 h-8"
-                      onClick={() => cameraInputMinRef.current?.click()}
-                    >
-                      <Camera className="mr-1 h-3 w-3" />
-                      Câmera
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="flex-1 text-[11px] py-1 h-8"
-                      onClick={() => fileInputMinRef.current?.click()}
-                    >
-                      <Upload className="mr-1 h-3 w-3" />
-                      Arquivo
-                    </Button>
-                  </div>
+                  <input
+                    ref={fileInputMinRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleMinFileChange}
+                  />
                 </div>
               </div>
-
-              {/* Inputs Ocultos de Arquivo e Câmera */}
-              <input
-                ref={fileInputMaxRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleMaxFileChange}
-              />
-              <input
-                ref={cameraInputMaxRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleMaxFileChange}
-              />
-              <input
-                ref={fileInputMinRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleMinFileChange}
-              />
-              <input
-                ref={cameraInputMinRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleMinFileChange}
-              />
             </div>
 
             {processPhoto.isPending && (
-              <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-100/70 p-3 text-xs font-medium text-emerald-900">
+              <div className="flex items-center justify-center gap-2 rounded-xl bg-emerald-100/70 p-3 text-xs font-semibold text-emerald-900">
                 <Loader2 className="h-4 w-4 animate-spin text-emerald-700" />
-                <span>Analisando visor(es) com Inteligência Artificial...</span>
+                <span>Lendo dígitos do display...</span>
               </div>
             )}
 
             {ocrMessage && !processPhoto.isPending && (
-              <p className="text-xs text-neutral-600 bg-white/80 border border-neutral-200 rounded-xl p-2.5">
+              <p className="text-xs text-neutral-600 bg-white border border-neutral-200 rounded-xl p-2.5 font-medium">
                 {ocrMessage}
               </p>
             )}
           </div>
 
-          {/* Lado Direito: Formulário com Valores e Validação */}
+          {/* Lado Direito: Formulário de Lançamento */}
           <div className="lg:col-span-7 space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
@@ -586,7 +528,7 @@ export function TemperatureCaptureCard() {
                 </Select>
               </div>
 
-              {/* Bloco 1: Sonda do Equipamento (OUT) */}
+              {/* Bloco de Temperaturas Principais */}
               <div>
                 <label className="block text-xs font-bold text-rose-700">
                   Temp. Máxima (Max OUT °C) *
@@ -615,7 +557,6 @@ export function TemperatureCaptureCard() {
                 />
               </div>
 
-              {/* Bloco 2: Temperatura Momento (Média Max IN + Min IN / 2) */}
               <div>
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-bold text-amber-900">
@@ -650,31 +591,40 @@ export function TemperatureCaptureCard() {
                 />
               </div>
 
-              {/* Bloco 3: Detalhes dos Sensores IN (Leitura Secundária do Visor) */}
-              <div>
-                <label className="block text-[11px] font-medium text-neutral-500">
-                  Sensor Interno Máx (Max IN °C)
-                </label>
-                <Input
-                  type="text"
-                  value={tempMaxIn}
-                  onChange={(e) => handleMaxInChange(e.target.value)}
-                  placeholder="Ex: 19.9"
-                  className="mt-1 text-xs text-neutral-600 border-neutral-200"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-medium text-neutral-500">
-                  Sensor Interno Mín (Min IN °C)
-                </label>
-                <Input
-                  type="text"
-                  value={tempMinIn}
-                  onChange={(e) => handleMinInChange(e.target.value)}
-                  placeholder="Ex: 19.6"
-                  className="mt-1 text-xs text-neutral-600 border-neutral-200"
-                />
+              {/* Detalhes Retráteis: Sensores Internos da Sala (IN) */}
+              <div className="sm:col-span-2">
+                <details className="group rounded-2xl border border-neutral-200 bg-neutral-50/40 p-3">
+                  <summary className="flex cursor-pointer items-center justify-between text-xs font-semibold text-neutral-600 hover:text-neutral-900">
+                    <span>Valores dos Sensores Internos (Max IN / Min IN)</span>
+                    <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180 text-neutral-400" />
+                  </summary>
+                  <div className="mt-3 grid grid-cols-1 gap-3 pt-3 border-t border-neutral-200/60 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-[11px] font-medium text-neutral-600">
+                        Sensor Interno Máx (Max IN °C)
+                      </label>
+                      <Input
+                        type="text"
+                        value={tempMaxIn}
+                        onChange={(e) => handleMaxInChange(e.target.value)}
+                        placeholder="Ex: 19.9"
+                        className="mt-1 text-xs bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-neutral-600">
+                        Sensor Interno Mín (Min IN °C)
+                      </label>
+                      <Input
+                        type="text"
+                        value={tempMinIn}
+                        onChange={(e) => handleMinInChange(e.target.value)}
+                        placeholder="Ex: 19.6"
+                        className="mt-1 text-xs bg-white"
+                      />
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <div className="sm:col-span-2">
@@ -742,7 +692,7 @@ export function TemperatureCaptureCard() {
           </div>
         </div>
 
-        {/* Footer do formulário */}
+        {/* Footer do formulário com botão primário limpo */}
         <div className="flex items-center justify-end gap-3 border-t border-neutral-100 pt-5">
           <Button type="button" variant="secondary" onClick={handleReset}>
             Limpar
@@ -751,6 +701,7 @@ export function TemperatureCaptureCard() {
             type="submit"
             loading={createRecord.isPending}
             disabled={!selectedLocationId || isNaN(numMin) || isNaN(numMax)}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white font-semibold px-6 shadow-sm"
           >
             Salvar Registro de Temperatura
           </Button>
