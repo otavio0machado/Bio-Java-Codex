@@ -415,34 +415,25 @@ public class TemperatureService {
         if (locationId != null) {
             loc = locationRepository.findById(locationId).orElse(null);
         }
-        boolean isRoomOnly = loc != null && "AMBIENTE".equalsIgnoreCase(loc.getCategory());
 
         String prompt = String.format("""
             Você é um leitor de visão computacional de alta precisão especializado em termômetros digitais laboratoriais de máxima e mínima (ex: Metrins 340, Instrusul INS-1342, Incoterm).
             Você receberá %d foto(s) do visor LCD de termômetro laboratorial.
 
-            ESTRUTURA DO DISPLAY LCD DO TERMÔMETRO:
-            1. LINHA SUPERIOR (indicador 'IN' no canto superior direito): mede o sensor interno (temperatura ambiente da sala onde fica o aparelho, tipicamente ~18°C a 25°C).
-            2. LINHA DO MEIO / CENTRAL (indicador 'OUT' no canto direito do centro): mede o sensor externo/sonda que fica dentro da geladeira, freezer, estufa ou banho-maria.
+            ESTRUTURA OBRIGATÓRIA DO DISPLAY LCD:
+            1. LINHA SUPERIOR (indicador 'IN' no canto superior direito): sensor interno/ambiente da sala (~18°C a 25°C). IGNORE para tempMax e tempMin.
+            2. LINHA DO MEIO / CENTRAL (indicador 'OUT' no canto direito): sensor externo / sonda do equipamento. **É ESTA LINHA DO MEIO 'OUT' QUE DEVE SER EXTRAÍDA PARA tempMax E tempMin!**
             3. LINHA INFERIOR: relógio digital 'HH:mm' à esquerda e umidade relativa '%% RH' à direita.
-            4. INDICADORES LATERAIS DE MÁXIMA E MÍNIMA (à esquerda):
-               - Quando o visor está em modo 'MAX', exibe a palavra 'MAX' à esquerda tanto para IN quanto para OUT.
-               - Quando o visor está em modo 'MIN', exibe a palavra 'MIN' à esquerda tanto para IN quanto para OUT.
 
-            CONTEXTO DO MONITORAMENTO:
-            - Ponto: %s (Categoria: %s)
-            - Tipo de sensor alvo: %s
+            REGRAS ABSOLUTAS DE EXTRAÇÃO:
+            - 'tempMax': É OBRIGATORIAMENTE E SEMPRE o valor da LINHA DO MEIO ('OUT') do visor em modo MAX (Foto 1). Exemplo: se a linha de cima (IN) for 19.9 e a linha do meio (OUT) for 6.1, 'tempMax' É 6.1 (NUNCA 19.9!).
+            - 'tempMin': É OBRIGATORIAMENTE E SEMPRE o valor da LINHA DO MEIO ('OUT') do visor em modo MIN (Foto 2). Exemplo: se a linha de cima (IN) for 19.6 e a linha do meio (OUT) for 0.2, 'tempMin' É 0.2 (NUNCA 19.6!).
+            - Se foram enviadas 2 fotos (uma para Máxima e outra para Mínima), extraia o valor da LINHA DO MEIO ('OUT') da primeira foto como 'tempMax' e o valor da LINHA DO MEIO ('OUT') da segunda foto como 'tempMin'.
+            - 'time': horário exibido no relógio digital na linha inferior (ex: '15:05', '15:37').
+            - 'humidity': percentual de umidade na linha inferior ao lado de '%% RH' (ex: 97, 98, 60).
+            - NUNCA coloque os valores da linha superior 'IN' em 'tempMax' ou 'tempMin'.
 
-            REGRAS DE EXTRAÇÃO CRÍTICAS:
-            %s
-
-            INSTRUÇÕES ADICIONAIS:
-            - Suporte a números com vírgula ou ponto (ex: 0.2, 6.1, 19.6, 19.9, -18.5). Sempre retorne como float/número.
-            - Extraia o horário do relógio da linha inferior (ex: '15:37').
-            - Extraia a umidade da linha inferior RH (ex: 97, 98).
-            - Ignore números de etiquetas adesivas patrimoniais ou selos de calibração externos colados no plástico.
-
-            Responda ESTRITAMENTE em formato JSON com a seguinte estrutura:
+            Responda ESTRITAMENTE em formato JSON:
             {
               "time": "HH:mm ou null",
               "tempMax": float ou null,
@@ -450,22 +441,11 @@ public class TemperatureService {
               "tempCurrent": float ou null,
               "humidity": float ou null,
               "confidence": float entre 0.0 e 1.0,
-              "statusMessage": "descrição detalhada (ex: 'Foto MAX: OUT 6.1°C (geladeira), IN 19.9°C (sala) | Foto MIN: OUT 0.2°C (geladeira), IN 19.6°C (sala)')",
-              "rawText": "transcrição do que foi identificado nos visores"
+              "statusMessage": "descrição curta (ex: 'Foto 1 MAX (OUT): 6.1°C | Foto 2 MIN (OUT): 0.2°C | Umidade: 98%%')",
+              "rawText": "transcrição dos dados lidos"
             }
             """,
-            images.size(),
-            loc != null ? loc.getName() : "Equipamento Laboratorial",
-            loc != null ? loc.getCategory() : "GELADEIRA/EQUIPAMENTO",
-            isRoomOnly ? "Sensor Interno 'IN' (Ambiente de Sala)" : "Sensor Externo 'OUT' / Sonda Central (Equipamento)",
-            isRoomOnly
-                ? "- 'tempMax': pegue o valor da LINHA SUPERIOR ('IN') do visor em modo MAX.\n- 'tempMin': pegue o valor da LINHA SUPERIOR ('IN') do visor em modo MIN."
-                : """
-                ATENÇÃO: Este monitoramento é de EQUIPAMENTO/CADEIA DE FRIO (Geladeira, Freezer, Estufa, etc.).
-                - 'tempMax': É OBRIGATORIAMENTE o valor da LINHA DO MEIO ('OUT') do visor em modo MAX! (Exemplo: se a foto MAX mostra 19.9 na linha de cima e 6.1 na linha do meio, tempMax É 6.1, NUNCA 19.9!).
-                - 'tempMin': É OBRIGATORIAMENTE o valor da LINHA DO MEIO ('OUT') do visor em modo MIN! (Exemplo: se a foto MIN mostra 19.6 na linha de cima e 0.2 na linha do meio, tempMin É 0.2, NUNCA 19.6!).
-                - NUNCA use a linha superior 'IN' para tempMax/tempMin de equipamentos; a linha superior é apenas a temperatura da sala!
-                """
+            images.size()
         );
 
         try {

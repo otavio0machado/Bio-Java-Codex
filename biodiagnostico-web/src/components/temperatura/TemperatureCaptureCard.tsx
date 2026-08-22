@@ -531,7 +531,7 @@ export function TemperatureCaptureCard() {
 
               <div>
                 <label className="block text-xs font-semibold text-neutral-700">
-                  Temp. Máxima (Max OUT/IN °C) *
+                  Temp. Máxima (Max OUT °C) *
                 </label>
                 <Input
                   type="text"
@@ -545,7 +545,7 @@ export function TemperatureCaptureCard() {
 
               <div>
                 <label className="block text-xs font-semibold text-neutral-700">
-                  Temp. Mínima (Min OUT/IN °C) *
+                  Temp. Mínima (Min OUT °C) *
                 </label>
                 <Input
                   type="text"
