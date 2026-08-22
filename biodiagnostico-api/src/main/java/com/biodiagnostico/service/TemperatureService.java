@@ -79,7 +79,16 @@ public class TemperatureService {
 
     @Transactional(readOnly = true)
     public List<TemperatureLocation> getLocations(String area, Boolean active) {
-        return locationRepository.findWithFilters(area, active);
+        boolean hasArea = area != null && !area.trim().isEmpty();
+        if (hasArea && active != null) {
+            return locationRepository.findByAreaIgnoreCaseAndActiveOrderByNameAsc(area.trim(), active);
+        } else if (hasArea) {
+            return locationRepository.findByAreaIgnoreCaseOrderByNameAsc(area.trim());
+        } else if (active != null) {
+            return locationRepository.findByActiveOrderByNameAsc(active);
+        } else {
+            return locationRepository.findAllByOrderByNameAsc();
+        }
     }
 
     @Transactional(readOnly = true)
@@ -186,7 +195,18 @@ public class TemperatureService {
             end = ym.atEndOfMonth();
         }
 
-        return recordRepository.findRecordsInPeriod(start, end, locationId, status);
+        boolean hasLoc = locationId != null;
+        boolean hasStatus = status != null && !status.trim().isEmpty();
+
+        if (hasLoc && hasStatus) {
+            return recordRepository.findByLocationAndStatusAndPeriod(start, end, locationId, status.trim().toUpperCase());
+        } else if (hasLoc) {
+            return recordRepository.findByLocationAndPeriod(start, end, locationId);
+        } else if (hasStatus) {
+            return recordRepository.findByStatusAndPeriod(start, end, status.trim().toUpperCase());
+        } else {
+            return recordRepository.findInPeriod(start, end);
+        }
     }
 
     @Transactional(readOnly = true)

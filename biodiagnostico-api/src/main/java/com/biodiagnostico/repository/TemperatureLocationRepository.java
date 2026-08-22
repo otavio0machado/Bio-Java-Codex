@@ -1,6 +1,7 @@
 package com.biodiagnostico.repository;
 
 import com.biodiagnostico.entity.TemperatureLocation;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,24 +13,17 @@ public interface TemperatureLocationRepository extends JpaRepository<Temperature
 
     List<TemperatureLocation> findByActiveTrueOrderByNameAsc();
 
+    List<TemperatureLocation> findByActiveOrderByNameAsc(boolean active);
+
     List<TemperatureLocation> findAllByOrderByNameAsc();
 
     Optional<TemperatureLocation> findByCode(String code);
 
     List<TemperatureLocation> findByCategoryAndActiveTrue(String category);
 
-    List<TemperatureLocation> findByAreaAndActiveTrue(String area);
+    List<TemperatureLocation> findByAreaIgnoreCaseAndActiveOrderByNameAsc(String area, boolean active);
 
-    @Query("""
-        SELECT loc FROM TemperatureLocation loc
-        WHERE (:area IS NULL OR LOWER(loc.area) = LOWER(:area))
-          AND (:active IS NULL OR loc.active = :active)
-        ORDER BY loc.name ASC
-        """)
-    List<TemperatureLocation> findWithFilters(
-        @Param("area") String area,
-        @Param("active") Boolean active
-    );
+    List<TemperatureLocation> findByAreaIgnoreCaseOrderByNameAsc(String area);
 
     @Query("""
         SELECT loc FROM TemperatureLocation loc
@@ -38,5 +32,5 @@ public interface TemperatureLocationRepository extends JpaRepository<Temperature
           AND loc.active = TRUE
         ORDER BY loc.calibrationDueDate ASC
         """)
-    List<TemperatureLocation> findExpiringCalibrations(@Param("limitDate") java.time.LocalDate limitDate);
+    List<TemperatureLocation> findExpiringCalibrations(@Param("limitDate") LocalDate limitDate);
 }

@@ -274,4 +274,38 @@ class TemperatureServiceTest {
         assertThat(response.tempMin()).isEqualByComparingTo("1.9");
         assertThat(response.confidence()).isEqualTo(0.98);
     }
+
+    @Test
+    @DisplayName("getLocations sem filtros deve chamar findAllByOrderByNameAsc")
+    void getLocations_semFiltros() {
+        when(locationRepository.findAllByOrderByNameAsc()).thenReturn(List.of(new TemperatureLocation()));
+
+        List<TemperatureLocation> result = temperatureService.getLocations(null, null);
+
+        assertThat(result).hasSize(1);
+        verify(locationRepository).findAllByOrderByNameAsc();
+    }
+
+    @Test
+    @DisplayName("getLocations com área e ativo deve chamar findByAreaIgnoreCaseAndActiveOrderByNameAsc")
+    void getLocations_comAreaEAtivo() {
+        when(locationRepository.findByAreaIgnoreCaseAndActiveOrderByNameAsc("BIOQUIMICA", true))
+            .thenReturn(List.of(new TemperatureLocation()));
+
+        List<TemperatureLocation> result = temperatureService.getLocations("BIOQUIMICA", true);
+
+        assertThat(result).hasSize(1);
+        verify(locationRepository).findByAreaIgnoreCaseAndActiveOrderByNameAsc("BIOQUIMICA", true);
+    }
+
+    @Test
+    @DisplayName("getRecords sem filtros deve chamar findInPeriod")
+    void getRecords_semFiltros() {
+        when(recordRepository.findInPeriod(any(), any())).thenReturn(List.of(new TemperatureRecord()));
+
+        List<TemperatureRecord> result = temperatureService.getRecords(null, 8, 2026, null, null, null);
+
+        assertThat(result).hasSize(1);
+        verify(recordRepository).findInPeriod(any(), any());
+    }
 }

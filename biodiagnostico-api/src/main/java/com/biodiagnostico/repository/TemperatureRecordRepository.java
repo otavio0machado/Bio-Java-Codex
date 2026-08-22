@@ -21,11 +21,48 @@ public interface TemperatureRecordRepository extends JpaRepository<TemperatureRe
         SELECT r FROM TemperatureRecord r
         JOIN FETCH r.location loc
         WHERE r.date BETWEEN :startDate AND :endDate
-          AND (:locationId IS NULL OR loc.id = :locationId)
-          AND (:status IS NULL OR r.status = :status)
         ORDER BY r.date DESC, r.time DESC
         """)
-    List<TemperatureRecord> findRecordsInPeriod(
+    List<TemperatureRecord> findInPeriod(
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+        SELECT r FROM TemperatureRecord r
+        JOIN FETCH r.location loc
+        WHERE r.date BETWEEN :startDate AND :endDate
+          AND loc.id = :locationId
+        ORDER BY r.date DESC, r.time DESC
+        """)
+    List<TemperatureRecord> findByLocationAndPeriod(
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("locationId") UUID locationId
+    );
+
+    @Query("""
+        SELECT r FROM TemperatureRecord r
+        JOIN FETCH r.location loc
+        WHERE r.date BETWEEN :startDate AND :endDate
+          AND r.status = :status
+        ORDER BY r.date DESC, r.time DESC
+        """)
+    List<TemperatureRecord> findByStatusAndPeriod(
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate,
+        @Param("status") String status
+    );
+
+    @Query("""
+        SELECT r FROM TemperatureRecord r
+        JOIN FETCH r.location loc
+        WHERE r.date BETWEEN :startDate AND :endDate
+          AND loc.id = :locationId
+          AND r.status = :status
+        ORDER BY r.date DESC, r.time DESC
+        """)
+    List<TemperatureRecord> findByLocationAndStatusAndPeriod(
         @Param("startDate") LocalDate startDate,
         @Param("endDate") LocalDate endDate,
         @Param("locationId") UUID locationId,
