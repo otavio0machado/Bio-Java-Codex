@@ -148,6 +148,30 @@ export function TemperaturaTab() {
             </div>
           </div>
         </div>
+
+        {/* Ações Rápidas de Relatório */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleExportExcel}
+            loading={isExportingExcel}
+            title="Exportar dados do período em planilha"
+          >
+            <FileSpreadsheet className="mr-1.5 h-4 w-4 text-emerald-600" />
+            Exportar Excel
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleExportPdf}
+            loading={isExportingPdf}
+            title="Gerar Folha Mensal Oficial em PDF (ANVISA / PNCQ)"
+          >
+            <FileText className="mr-1.5 h-4 w-4" />
+            Folha Mensal PDF
+          </Button>
+        </div>
       </div>
 
       {/* Cards de Resumo / KPIs */}

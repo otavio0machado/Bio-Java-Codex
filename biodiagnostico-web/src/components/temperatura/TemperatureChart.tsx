@@ -119,7 +119,7 @@ export function TemperatureChart({ location, records, month, year }: Temperature
                     <div className="mt-2 space-y-1 text-neutral-700">
                       <p>Máxima: <strong className="text-rose-600">{d.tempMax}°C</strong></p>
                       <p>Mínima: <strong className="text-sky-600">{d.tempMin}°C</strong></p>
-                      {d.tempCurrent !== null && <p>Momento: <strong>{d.tempCurrent}°C</strong></p>}
+                      {d.tempCurrent !== null && <p>Ambiente: <strong>{d.tempCurrent}°C</strong></p>}
                       <p className="text-neutral-500">Resp: {d.responsible}</p>
                       <p className="pt-1">
                         <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${

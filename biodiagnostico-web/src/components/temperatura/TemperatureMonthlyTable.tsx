@@ -57,7 +57,7 @@ export function TemperatureMonthlyTable({
                 <th className="px-4 py-3.5">Equipamento</th>
                 <th className="px-3 py-3.5 text-right text-rose-700">Máx OUT</th>
                 <th className="px-3 py-3.5 text-right text-sky-700">Mín OUT</th>
-                <th className="px-3 py-3.5 text-right text-amber-800">Momento</th>
+                <th className="px-3 py-3.5 text-right text-amber-800">Temp. Ambiente</th>
                 <th className="px-3 py-3.5 text-right">UR (%)</th>
                 <th className="px-4 py-3.5 text-center">Status</th>
                 <th className="px-4 py-3.5">Responsável</th>

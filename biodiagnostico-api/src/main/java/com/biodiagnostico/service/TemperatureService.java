@@ -395,6 +395,56 @@ public class TemperatureService {
         );
     }
 
+    private static final Pattern TIME_REGEX = Pattern.compile("(?i)\\b(\\d{1,2})[:hH.](\\d{2})(?:[:.]\\d{2})?\\s*(AM|PM)?\\b");
+
+    public static String normalizeOcrTime(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        Matcher matcher = TIME_REGEX.matcher(raw.trim());
+        if (matcher.find()) {
+            try {
+                int hour = Integer.parseInt(matcher.group(1));
+                int minute = Integer.parseInt(matcher.group(2));
+                String ampm = matcher.group(3);
+
+                if (ampm != null) {
+                    if ("PM".equalsIgnoreCase(ampm) && hour < 12) {
+                        hour += 12;
+                    } else if ("AM".equalsIgnoreCase(ampm) && hour == 12) {
+                        hour = 0;
+                    }
+                }
+
+                if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                    return String.format("%02d:%02d", hour, minute);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    private String extractTimeFromExif(String base64Image) {
+        if (base64Image == null || base64Image.isBlank()) return null;
+        try {
+            String clean = base64Image.contains(",") ? base64Image.substring(base64Image.indexOf(",") + 1) : base64Image;
+            byte[] bytes = java.util.Base64.getDecoder().decode(clean);
+            int limit = Math.min(bytes.length, 8192);
+            String headerAscii = new String(bytes, 0, limit, java.nio.charset.StandardCharsets.ISO_8859_1);
+            Matcher m = Pattern.compile("\\b\\d{4}:\\d{2}:\\d{2} (\\d{2}):(\\d{2}):\\d{2}\\b").matcher(headerAscii);
+            if (m.find()) {
+                int hour = Integer.parseInt(m.group(1));
+                int minute = Integer.parseInt(m.group(2));
+                if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                    return String.format("%02d:%02d", hour, minute);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
     public TemperatureOcrResponse processThermometerPhoto(String imageBase64, String mimeType, UUID locationId) {
         return processThermometerPhoto(imageBase64, mimeType, null, null, locationId);
     }
@@ -431,7 +481,7 @@ public class TemperatureService {
         }
 
         String prompt = String.format("""
-            Você é um leitor de visão computacional de alta precisão especializado em termômetros digitais laboratoriais de máxima e mínima (ex: Metrins 340, Instrusul INS-1342, Incoterm).
+            Você é um leitor de visão computacional de alta precisão especializado em termômetros digitais laboratoriais de máxima e mínima (ex: Metrins 340, Instrusul INS-1342, Incoterm, HTC-1, HTC-2, Testo).
             Você receberá %d foto(s) do visor LCD de termômetro laboratorial.
 
             ESTRUTURA DO DISPLAY LCD DO TERMÔMETRO:
@@ -448,7 +498,7 @@ public class TemperatureService {
             - 'tempMin': É OBRIGATORIAMENTE o valor da LINHA DO MEIO ('OUT') da Foto 2 (modo MIN). Exemplo: 0.2
             - 'tempMaxIn': É OBRIGATORIAMENTE o valor da LINHA SUPERIOR ('IN') da Foto 1 (modo MAX). Exemplo: 19.9
             - 'tempMinIn': É OBRIGATORIAMENTE o valor da LINHA SUPERIOR ('IN') da Foto 2 (modo MIN). Exemplo: 19.6
-            - 'time': horário exibido no relógio digital (ex: '15:37').
+            - 'time': Horário exibido no relógio digital do display (geralmente no canto inferior esquerdo ou linha inferior, ex: '15:37', '08:15', '10:42', '09:05'). Se houver carimbo de data/hora impresso na foto, utilize-o caso o visor não possua relógio legível. Retorne estritamente em formato 24h 'HH:mm' (ex: '08:30', '14:15').
             - 'humidity': percentual de umidade na linha inferior ao lado de '%% RH' (ex: 98, 97, 60).
 
             Responda ESTRITAMENTE em formato JSON:
@@ -473,7 +523,20 @@ public class TemperatureService {
 
             JsonNode root = objectMapper.readTree(aiResult);
 
-            String time = root.path("time").isTextual() ? root.path("time").asText() : null;
+            String rawTime = root.path("time").isTextual() ? root.path("time").asText() : null;
+            String rawText = root.path("rawText").asText("");
+
+            String time = normalizeOcrTime(rawTime);
+            if (time == null) {
+                time = normalizeOcrTime(rawText);
+            }
+            if (time == null) {
+                time = extractTimeFromExif(imageBase64);
+            }
+            if (time == null && imageMinBase64 != null) {
+                time = extractTimeFromExif(imageMinBase64);
+            }
+
             BigDecimal tempMax = root.path("tempMax").isNumber() ? BigDecimal.valueOf(root.path("tempMax").asDouble()) : null;
             BigDecimal tempMin = root.path("tempMin").isNumber() ? BigDecimal.valueOf(root.path("tempMin").asDouble()) : null;
             BigDecimal tempMaxIn = root.path("tempMaxIn").isNumber() ? BigDecimal.valueOf(root.path("tempMaxIn").asDouble()) : null;
@@ -481,7 +544,7 @@ public class TemperatureService {
             BigDecimal humidity = root.path("humidity").isNumber() ? BigDecimal.valueOf(root.path("humidity").asDouble()) : null;
             Double confidence = root.path("confidence").isNumber() ? root.path("confidence").asDouble() : 0.95;
 
-            // Calcula Temperatura Momento a partir da média aritmética de (Max IN + Min IN) / 2
+            // Calcula Temperatura Ambiente a partir da média aritmética de (Max IN + Min IN) / 2
             BigDecimal tempCurrent = null;
             if (tempMaxIn != null && tempMinIn != null) {
                 tempCurrent = tempMaxIn.add(tempMinIn).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
@@ -490,7 +553,6 @@ public class TemperatureService {
             }
 
             String statusMsg = root.path("statusMessage").asText("Leitura processada com sucesso");
-            String rawText = root.path("rawText").asText("");
 
             return new TemperatureOcrResponse(
                 time,
@@ -507,8 +569,16 @@ public class TemperatureService {
             );
         } catch (Exception e) {
             log.warn("Falha no OCR de visão por IA, aplicando fallback heurístico: {}", e.getMessage());
+            String fallbackTime = extractTimeFromExif(imageBase64);
+            if (fallbackTime == null && imageMinBase64 != null) {
+                fallbackTime = extractTimeFromExif(imageMinBase64);
+            }
+            if (fallbackTime == null) {
+                fallbackTime = LocalTime.now().format(TIME_FMT);
+            }
+
             return new TemperatureOcrResponse(
-                LocalTime.now().format(TIME_FMT),
+                fallbackTime,
                 null,
                 null,
                 null,
@@ -547,6 +617,7 @@ public class TemperatureService {
         csv.append("Mês de Referência:;").append(ym.format(DateTimeFormatter.ofPattern("MM/yyyy"))).append("\n");
         if (location != null) {
             csv.append("Equipamento / Ambiente:;").append(location.getName()).append(" (").append(location.getCode()).append(")\n");
+            csv.append("Setor:;").append(location.getArea() != null ? location.getArea() : "Geral").append("\n");
             csv.append("Faixa Aceitável (°C):;").append(location.getMinTempTarget()).append(" a ").append(location.getMaxTempTarget()).append(" °C\n");
             if (location.getMinHumidityTarget() != null && location.getMaxHumidityTarget() != null) {
                 csv.append("Faixa Aceitável Umidade (%):;").append(location.getMinHumidityTarget()).append(" a ").append(location.getMaxHumidityTarget()).append(" %\n");
@@ -556,12 +627,15 @@ public class TemperatureService {
                 if (location.getCalibrationCertNumber() != null) {
                     csv.append(" | Cert: ").append(location.getCalibrationCertNumber());
                 }
+                if (location.getCalibrationDueDate() != null) {
+                    csv.append(" | Validade: ").append(location.getCalibrationDueDate().format(DATE_FMT));
+                }
                 csv.append("\n");
             }
         }
         csv.append("\n");
 
-        csv.append("Data;Hora;Equipamento;Máx OUT (°C);Mín OUT (°C);Temp. Momento (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
+        csv.append("Data;Hora;Equipamento;Máx OUT (°C);Mín OUT (°C);Temp. Ambiente (°C);Umidade (%);Status;Responsável;Ação Corretiva;Observações\n");
 
         for (TemperatureRecord r : records) {
             BigDecimal current = r.getTempCurrent();
@@ -607,35 +681,102 @@ public class TemperatureService {
             PdfWriter.getInstance(doc, out);
             doc.open();
 
-            Font titleFont = new Font(Font.HELVETICA, 14, Font.BOLD, new Color(20, 83, 45));
-            Font subTitleFont = new Font(Font.HELVETICA, 10, Font.NORMAL, Color.DARK_GRAY);
-            Font headerFont = new Font(Font.HELVETICA, 8, Font.BOLD, Color.WHITE);
-            Font cellFont = new Font(Font.HELVETICA, 8, Font.NORMAL, Color.BLACK);
-            Font cellAlertFont = new Font(Font.HELVETICA, 8, Font.BOLD, new Color(185, 28, 28));
+            // Fontes e Paleta Visual Harmoniosa
+            Font mainTitleFont = new Font(Font.HELVETICA, 13, Font.BOLD, new Color(20, 83, 45));
+            Font subTitleFont = new Font(Font.HELVETICA, 8, Font.NORMAL, Color.DARK_GRAY);
+            Font sectionTitleFont = new Font(Font.HELVETICA, 9, Font.BOLD, new Color(22, 101, 52));
+            Font headerCellFont = new Font(Font.HELVETICA, 7.5f, Font.BOLD, Color.WHITE);
+            Font cellFont = new Font(Font.HELVETICA, 7.5f, Font.NORMAL, Color.BLACK);
+            Font cellBoldFont = new Font(Font.HELVETICA, 7.5f, Font.BOLD, Color.BLACK);
+            Font cellAlertFont = new Font(Font.HELVETICA, 7.5f, Font.BOLD, new Color(185, 28, 28));
+            Font footerFont = new Font(Font.HELVETICA, 6.5f, Font.ITALIC, Color.GRAY);
 
-            Paragraph header = new Paragraph("BIODIAGNÓSTICO — CONTROLE DE TEMPERATURA E TERMOHIGROMETRIA", titleFont);
+            // 1. Cabeçalho Institucional
+            Paragraph header = new Paragraph("LABORATÓRIO BIODIAGNÓSTICO — CONTROLE DE TEMPERATURA E TERMOHIGROMETRIA", mainTitleFont);
             header.setAlignment(Element.ALIGN_CENTER);
             doc.add(header);
 
-            String locInfo = location != null
-                ? String.format("Equipamento: %s (%s) | Faixa Aceitável: %.1f°C a %.1f°C | Mês: %s",
-                    location.getName(), location.getCode(), location.getMinTempTarget(), location.getMaxTempTarget(), ym.format(DateTimeFormatter.ofPattern("MM/yyyy")))
-                : String.format("Todos os Equipamentos | Mês: %s", ym.format(DateTimeFormatter.ofPattern("MM/yyyy")));
-
-            Paragraph sub = new Paragraph(locInfo, subTitleFont);
+            Paragraph sub = new Paragraph("Folha de Registro Mensal da Cadeia de Frio e Ambientes Climatizados (ANVISA RDC 978/2025 / RDC 786/2023 / PNCQ)", subTitleFont);
             sub.setAlignment(Element.ALIGN_CENTER);
-            sub.setSpacingAfter(12);
+            sub.setSpacingAfter(8);
             doc.add(sub);
 
+            // 2. Quadro de Metadados do Equipamento e Período
+            PdfPTable metaTable = new PdfPTable(4);
+            metaTable.setWidthPercentage(100);
+            metaTable.setWidths(new float[]{25, 25, 25, 25});
+            metaTable.setSpacingAfter(8);
+
+            String equipLabel = location != null ? location.getName() + " (" + location.getCode() + ")" : "Todos os Equipamentos / Ambientes";
+            String setorLabel = location != null && location.getArea() != null ? location.getArea() : "Geral";
+            String faixaTempLabel = location != null ? String.format("%.1f°C a %.1f°C", location.getMinTempTarget(), location.getMaxTempTarget()) : "Variável";
+            String faixaHumLabel = location != null && location.getMinHumidityTarget() != null && location.getMaxHumidityTarget() != null
+                ? String.format("%.0f%% a %.0f%% UR", location.getMinHumidityTarget(), location.getMaxHumidityTarget())
+                : "Não aplicável";
+
+            String termoLabel = location != null && location.getThermometerCode() != null ? location.getThermometerCode() : "-";
+            String certLabel = location != null && location.getCalibrationCertNumber() != null ? location.getCalibrationCertNumber() : "-";
+            String valLabel = location != null && location.getCalibrationDueDate() != null ? location.getCalibrationDueDate().format(DATE_FMT) : "-";
+            String mesRefLabel = ym.format(DateTimeFormatter.ofPattern("MM/yyyy"));
+
+            addMetaCell(metaTable, "Equipamento / Local:", equipLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Setor / Área:", setorLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Faixa Térmica Aceitável:", faixaTempLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Faixa de Umidade:", faixaHumLabel, cellBoldFont, cellFont);
+
+            addMetaCell(metaTable, "Termômetro Vinculado:", termoLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Certificado Calibração:", certLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Validade Calibração:", valLabel, cellBoldFont, cellFont);
+            addMetaCell(metaTable, "Mês de Referência:", mesRefLabel, cellBoldFont, cellFont);
+
+            doc.add(metaTable);
+
+            // 3. Indicadores e Estatísticas de Conformidade (KPI Box)
+            int totalRecords = records.size();
+            long conformeCount = records.stream().filter(r -> "CONFORME".equalsIgnoreCase(r.getStatus())).count();
+            long naoConformeCount = totalRecords - conformeCount;
+            double taxaConformidade = totalRecords > 0 ? (conformeCount * 100.0) / totalRecords : 100.0;
+
+            BigDecimal minOutAbs = records.stream().map(TemperatureRecord::getTempMin).filter(java.util.Objects::nonNull).min(BigDecimal::compareTo).orElse(null);
+            BigDecimal maxOutAbs = records.stream().map(TemperatureRecord::getTempMax).filter(java.util.Objects::nonNull).max(BigDecimal::compareTo).orElse(null);
+
+            double avgCurrent = records.stream()
+                .map(r -> {
+                    if (r.getTempCurrent() != null) return r.getTempCurrent();
+                    if (r.getTempMaxIn() != null && r.getTempMinIn() != null) {
+                        return r.getTempMaxIn().add(r.getTempMinIn()).divide(BigDecimal.valueOf(2), 1, RoundingMode.HALF_UP);
+                    }
+                    return null;
+                })
+                .filter(java.util.Objects::nonNull)
+                .mapToDouble(BigDecimal::doubleValue)
+                .average()
+                .orElse(Double.NaN);
+
+            PdfPTable kpiTable = new PdfPTable(5);
+            kpiTable.setWidthPercentage(100);
+            kpiTable.setWidths(new float[]{20, 20, 20, 20, 20});
+            kpiTable.setSpacingAfter(8);
+
+            addKpiBox(kpiTable, "Total de Registros", String.valueOf(totalRecords), new Color(240, 253, 244));
+            addKpiBox(kpiTable, "Conformes / NC", conformeCount + " / " + naoConformeCount, naoConformeCount > 0 ? new Color(254, 242, 242) : new Color(240, 253, 244));
+            addKpiBox(kpiTable, "Taxa Conformidade", String.format("%.1f%%", taxaConformidade), taxaConformidade >= 95.0 ? new Color(240, 253, 244) : new Color(254, 242, 242));
+            addKpiBox(kpiTable, "Faixa Registrada (OUT)", (minOutAbs != null ? minOutAbs + "°C" : "-") + " a " + (maxOutAbs != null ? maxOutAbs + "°C" : "-"), new Color(248, 250, 252));
+            addKpiBox(kpiTable, "Média Temp. Ambiente", !Double.isNaN(avgCurrent) ? String.format("%.1f°C", avgCurrent) : "-", new Color(248, 250, 252));
+
+            doc.add(kpiTable);
+
+            // 4. Tabela Principal de Registros Diários
             PdfPTable table = new PdfPTable(9);
             table.setWidthPercentage(100);
-            table.setWidths(new float[]{10, 8, 22, 10, 10, 10, 8, 10, 12});
+            table.setWidths(new float[]{10, 8, 20, 10, 10, 12, 8, 10, 12});
 
-            String[] headers = {"Data", "Hora", "Equipamento", "Máx OUT", "Mín OUT", "Momento", "UR (%)", "Status", "Responsável"};
+            String[] headers = {"Data", "Hora", "Equipamento", "Máx OUT", "Mín OUT", "Temp. Ambiente", "UR (%)", "Status", "Responsável"};
             for (String h : headers) {
-                PdfPCell cell = new PdfPCell(new Phrase(h, headerFont));
+                PdfPCell cell = new PdfPCell(new Phrase(h, headerCellFont));
                 cell.setBackgroundColor(new Color(22, 101, 52));
                 cell.setHorizontalAlignment(Element.ALIGN_CENTER);
+                cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
                 cell.setPadding(4);
                 table.addCell(cell);
             }
@@ -651,45 +792,135 @@ public class TemperatureService {
 
                 PdfPCell cData = new PdfPCell(new Phrase(r.getDate().format(DATE_FMT), f));
                 cData.setHorizontalAlignment(Element.ALIGN_CENTER);
+                if (isAlert) cData.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cData);
 
                 PdfPCell cHora = new PdfPCell(new Phrase(r.getTime().format(TIME_FMT), f));
                 cHora.setHorizontalAlignment(Element.ALIGN_CENTER);
+                if (isAlert) cHora.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cHora);
 
-                table.addCell(new PdfPCell(new Phrase(r.getLocation() != null ? r.getLocation().getName() : "-", f)));
+                PdfPCell cLoc = new PdfPCell(new Phrase(r.getLocation() != null ? r.getLocation().getName() : "-", f));
+                if (isAlert) cLoc.setBackgroundColor(new Color(254, 242, 242));
+                table.addCell(cLoc);
 
                 PdfPCell cMaxOut = new PdfPCell(new Phrase(r.getTempMax() != null ? String.format("%.1f°C", r.getTempMax()) : "-", f));
                 cMaxOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                if (isAlert) cMaxOut.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cMaxOut);
 
                 PdfPCell cMinOut = new PdfPCell(new Phrase(r.getTempMin() != null ? String.format("%.1f°C", r.getTempMin()) : "-", f));
                 cMinOut.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                if (isAlert) cMinOut.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cMinOut);
 
                 PdfPCell cCur = new PdfPCell(new Phrase(current != null ? String.format("%.1f°C", current) : "-", f));
                 cCur.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                if (isAlert) cCur.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cCur);
 
                 PdfPCell cHum = new PdfPCell(new Phrase(r.getHumidity() != null ? String.format("%.0f%%", r.getHumidity()) : "-", f));
                 cHum.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                if (isAlert) cHum.setBackgroundColor(new Color(254, 242, 242));
                 table.addCell(cHum);
 
                 PdfPCell cStatus = new PdfPCell(new Phrase(r.getStatus(), f));
                 cStatus.setHorizontalAlignment(Element.ALIGN_CENTER);
-                if (isAlert) {
-                    cStatus.setBackgroundColor(new Color(254, 226, 226));
-                }
+                cStatus.setBackgroundColor(isAlert ? new Color(254, 226, 226) : new Color(240, 253, 244));
                 table.addCell(cStatus);
 
-                table.addCell(new PdfPCell(new Phrase(r.getResponsible(), f)));
+                PdfPCell cResp = new PdfPCell(new Phrase(r.getResponsible() != null ? r.getResponsible() : "-", f));
+                if (isAlert) cResp.setBackgroundColor(new Color(254, 242, 242));
+                table.addCell(cResp);
+            }
+
+            if (records.isEmpty()) {
+                PdfPCell emptyCell = new PdfPCell(new Phrase("Nenhum registro de temperatura encontrado no período selecionado.", cellFont));
+                emptyCell.setColspan(9);
+                emptyCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+                emptyCell.setPadding(10);
+                table.addCell(emptyCell);
             }
 
             doc.add(table);
 
+            // 5. Seção de Não Conformidades e Ações Corretivas
+            List<TemperatureRecord> nonCompliantRecords = records.stream()
+                .filter(r -> "NAO_CONFORME".equalsIgnoreCase(r.getStatus()) || (r.getActionTaken() != null && !r.getActionTaken().isBlank()))
+                .toList();
+
+            if (!nonCompliantRecords.isEmpty()) {
+                Paragraph ncHeader = new Paragraph("\nREGISTRO DE NÃO CONFORMIDADES E AÇÕES CORRETIVAS", sectionTitleFont);
+                ncHeader.setSpacingBefore(6);
+                ncHeader.setSpacingAfter(4);
+                doc.add(ncHeader);
+
+                PdfPTable ncTable = new PdfPTable(5);
+                ncTable.setWidthPercentage(100);
+                ncTable.setWidths(new float[]{12, 10, 20, 43, 15});
+
+                String[] ncHeaders = {"Data / Hora", "Status", "Equipamento", "Ação Corretiva Tomada / Justificativa", "Responsável"};
+                for (String h : ncHeaders) {
+                    PdfPCell cell = new PdfPCell(new Phrase(h, headerCellFont));
+                    cell.setBackgroundColor(new Color(153, 27, 27));
+                    cell.setHorizontalAlignment(Element.ALIGN_CENTER);
+                    cell.setPadding(3);
+                    ncTable.addCell(cell);
+                }
+
+                for (TemperatureRecord nc : nonCompliantRecords) {
+                    PdfPCell cDt = new PdfPCell(new Phrase(nc.getDate().format(DATE_FMT) + " " + nc.getTime().format(TIME_FMT), cellFont));
+                    cDt.setHorizontalAlignment(Element.ALIGN_CENTER);
+                    ncTable.addCell(cDt);
+
+                    PdfPCell cSt = new PdfPCell(new Phrase(nc.getStatus(), cellAlertFont));
+                    cSt.setHorizontalAlignment(Element.ALIGN_CENTER);
+                    ncTable.addCell(cSt);
+
+                    ncTable.addCell(new PdfPCell(new Phrase(nc.getLocation() != null ? nc.getLocation().getName() : "-", cellFont)));
+
+                    String actionText = nc.getActionTaken() != null && !nc.getActionTaken().isBlank()
+                        ? nc.getActionTaken()
+                        : (nc.getNotes() != null ? nc.getNotes() : "Sem descrição registrada.");
+                    ncTable.addCell(new PdfPCell(new Phrase(actionText, cellFont)));
+
+                    ncTable.addCell(new PdfPCell(new Phrase(nc.getResponsible() != null ? nc.getResponsible() : "-", cellFont)));
+                }
+
+                doc.add(ncTable);
+            }
+
+            // 6. Bloco de Assinaturas e Validação Técnica
+            Paragraph sigSpace = new Paragraph("\n", cellFont);
+            doc.add(sigSpace);
+
+            PdfPTable sigTable = new PdfPTable(2);
+            sigTable.setWidthPercentage(100);
+            sigTable.setWidths(new float[]{50, 50});
+            sigTable.setKeepTogether(true);
+
+            PdfPCell sig1 = new PdfPCell();
+            sig1.setBorder(0);
+            sig1.setHorizontalAlignment(Element.ALIGN_CENTER);
+            sig1.addElement(new Paragraph("____________________________________________", cellFont));
+            sig1.addElement(new Paragraph("Responsável Técnico / Farmacêutico (CRF / CRBM)", cellBoldFont));
+            sig1.addElement(new Paragraph("Data de Validação: ____/____/________", cellFont));
+
+            PdfPCell sig2 = new PdfPCell();
+            sig2.setBorder(0);
+            sig2.setHorizontalAlignment(Element.ALIGN_CENTER);
+            sig2.addElement(new Paragraph("____________________________________________", cellFont));
+            sig2.addElement(new Paragraph("Supervisão da Garantia da Qualidade (CQ)", cellBoldFont));
+            sig2.addElement(new Paragraph("Data de Visto: ____/____/________", cellFont));
+
+            sigTable.addCell(sig1);
+            sigTable.addCell(sig2);
+            doc.add(sigTable);
+
+            // 7. Rodapé Regulatório
             Paragraph footer = new Paragraph(
-                "\nDocumento emitido eletronicamente conforme ANVISA RDC 978/2025 e RDC 786/2023. Rastreabilidade e integridade asseguradas pelo Sistema Biodiagnóstico.",
-                new Font(Font.HELVETICA, 7, Font.ITALIC, Color.GRAY)
+                "\nDocumento emitido eletronicamente em " + LocalDate.now().format(DATE_FMT) + " conforme ANVISA RDC 978/2025 e RDC 786/2023. Rastreabilidade metrológica e integridade asseguradas pelo Sistema Biodiagnóstico.",
+                footerFont
             );
             footer.setAlignment(Element.ALIGN_CENTER);
             doc.add(footer);
@@ -700,5 +931,40 @@ public class TemperatureService {
             log.error("Erro ao gerar PDF de temperatura: {}", e.getMessage(), e);
             throw new BusinessException("Falha ao gerar relatório PDF de temperatura: " + e.getMessage());
         }
+    }
+
+    private void addMetaCell(PdfPTable table, String label, String value, Font boldFont, Font normalFont) {
+        PdfPCell cell = new PdfPCell();
+        cell.setPadding(3);
+        cell.setBorderColor(new Color(226, 232, 240));
+        cell.setBackgroundColor(new Color(248, 250, 252));
+
+        Phrase p = new Phrase();
+        p.add(new Phrase(label + " ", boldFont));
+        p.add(new Phrase(value, normalFont));
+        cell.addElement(p);
+
+        table.addCell(cell);
+    }
+
+    private void addKpiBox(PdfPTable table, String title, String value, Color bgColor) {
+        PdfPCell cell = new PdfPCell();
+        cell.setPadding(4);
+        cell.setBackgroundColor(bgColor);
+        cell.setBorderColor(new Color(203, 213, 225));
+        cell.setHorizontalAlignment(Element.ALIGN_CENTER);
+
+        Font tFont = new Font(Font.HELVETICA, 6.5f, Font.BOLD, new Color(71, 85, 105));
+        Font vFont = new Font(Font.HELVETICA, 9.5f, Font.BOLD, new Color(15, 23, 42));
+
+        Paragraph pTitle = new Paragraph(title, tFont);
+        pTitle.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(pTitle);
+
+        Paragraph pVal = new Paragraph(value, vFont);
+        pVal.setAlignment(Element.ALIGN_CENTER);
+        cell.addElement(pVal);
+
+        table.addCell(cell);
     }
 }

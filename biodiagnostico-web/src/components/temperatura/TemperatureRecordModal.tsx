@@ -299,7 +299,7 @@ export function TemperatureRecordModal({
 
           <div>
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-amber-900">Temp. Momento (°C) *</label>
+              <label className="block text-xs font-bold text-amber-900">Temperatura Ambiente (°C) *</label>
               {(tempMaxIn || tempMinIn) && (
                 <span className="text-[10px] text-amber-700 font-medium">
                   Média ({tempMaxIn || '-'} + {tempMinIn || '-'})/2

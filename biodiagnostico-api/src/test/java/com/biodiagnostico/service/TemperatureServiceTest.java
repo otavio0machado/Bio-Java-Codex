@@ -349,4 +349,100 @@ class TemperatureServiceTest {
         assertThat(result).hasSize(1);
         verify(recordRepository).findInPeriod(any(), any());
     }
+
+    @Test
+    @DisplayName("normalizeOcrTime deve normalizar horários em diferentes formatos (24h, 12h AM/PM, segundos, separadores)")
+    void normalizeOcrTime_formatosVariados() {
+        assertThat(TemperatureService.normalizeOcrTime("15:30")).isEqualTo("15:30");
+        assertThat(TemperatureService.normalizeOcrTime("08:05")).isEqualTo("08:05");
+        assertThat(TemperatureService.normalizeOcrTime("9:15")).isEqualTo("09:15");
+        assertThat(TemperatureService.normalizeOcrTime("03:45 PM")).isEqualTo("15:45");
+        assertThat(TemperatureService.normalizeOcrTime("9:20 am")).isEqualTo("09:20");
+        assertThat(TemperatureService.normalizeOcrTime("12:00 PM")).isEqualTo("12:00");
+        assertThat(TemperatureService.normalizeOcrTime("12:30 AM")).isEqualTo("00:30");
+        assertThat(TemperatureService.normalizeOcrTime("16h25")).isEqualTo("16:25");
+        assertThat(TemperatureService.normalizeOcrTime("14:35:10")).isEqualTo("14:35");
+        assertThat(TemperatureService.normalizeOcrTime("texto 10:42 no display")).isEqualTo("10:42");
+        assertThat(TemperatureService.normalizeOcrTime("")).isNull();
+        assertThat(TemperatureService.normalizeOcrTime(null)).isNull();
+        assertThat(TemperatureService.normalizeOcrTime("invalido")).isNull();
+    }
+
+    @Test
+    @DisplayName("exportToExcel deve gerar CSV com cabeçalho 'Temp. Ambiente (°C)'")
+    void exportToExcel_geraCsvComTempAmbiente() {
+        UUID locId = UUID.randomUUID();
+        TemperatureLocation loc = TemperatureLocation.builder()
+            .id(locId)
+            .name("Geladeira Bioquímica")
+            .code("GEL-01")
+            .minTempTarget(new BigDecimal("2.0"))
+            .maxTempTarget(new BigDecimal("8.0"))
+            .build();
+
+        TemperatureRecord rec = TemperatureRecord.builder()
+            .id(UUID.randomUUID())
+            .location(loc)
+            .date(LocalDate.of(2026, 8, 27))
+            .time(LocalTime.of(8, 30))
+            .tempMax(new BigDecimal("5.5"))
+            .tempMin(new BigDecimal("3.2"))
+            .tempCurrent(new BigDecimal("4.3"))
+            .status("CONFORME")
+            .responsible("Dr. Operador")
+            .build();
+
+        when(locationRepository.findById(locId)).thenReturn(Optional.of(loc));
+        when(recordRepository.findByLocationAndPeriod(any(), any(), eq(locId)))
+            .thenReturn(List.of(rec));
+
+        byte[] bytes = temperatureService.exportToExcel(locId, 8, 2026);
+        String csv = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(csv).contains("Temp. Ambiente (°C)");
+        assertThat(csv).contains("Geladeira Bioquímica");
+        assertThat(csv).contains("5,5");
+        assertThat(csv).contains("3,2");
+        assertThat(csv).contains("4,3");
+    }
+
+    @Test
+    @DisplayName("generateMonthlyPdfReport deve gerar documento PDF válido com cabeçalhos e indicadores")
+    void generateMonthlyPdfReport_geraPdfValido() {
+        UUID locId = UUID.randomUUID();
+        TemperatureLocation loc = TemperatureLocation.builder()
+            .id(locId)
+            .name("Estufa Microbiologia")
+            .code("EST-01")
+            .area("MICROBIOLOGIA")
+            .minTempTarget(new BigDecimal("35.0"))
+            .maxTempTarget(new BigDecimal("37.0"))
+            .thermometerCode("TERM-03")
+            .calibrationCertNumber("CAL-2026-99")
+            .calibrationDueDate(LocalDate.of(2027, 8, 1))
+            .build();
+
+        TemperatureRecord rec = TemperatureRecord.builder()
+            .id(UUID.randomUUID())
+            .location(loc)
+            .date(LocalDate.of(2026, 8, 27))
+            .time(LocalTime.of(9, 0))
+            .tempMax(new BigDecimal("36.5"))
+            .tempMin(new BigDecimal("35.8"))
+            .tempCurrent(new BigDecimal("36.1"))
+            .status("CONFORME")
+            .responsible("Dra. Farmacêutica")
+            .build();
+
+        when(locationRepository.findById(locId)).thenReturn(Optional.of(loc));
+        when(recordRepository.findByLocationAndPeriod(any(), any(), eq(locId)))
+            .thenReturn(List.of(rec));
+
+        byte[] pdfBytes = temperatureService.generateMonthlyPdfReport(locId, 8, 2026);
+
+        assertThat(pdfBytes).isNotNull().isNotEmpty();
+        // Verifica assinatura inicial PDF (%PDF-)
+        assertThat(new String(pdfBytes, 0, 5, java.nio.charset.StandardCharsets.ISO_8859_1))
+            .isEqualTo("%PDF-");
+    }
 }

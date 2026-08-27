@@ -142,7 +142,7 @@ describe('TemperaturaTab', () => {
     )
   }
 
-  it('renderiza título, KPIs e card de registro diário', () => {
+  it('renderiza título, KPIs, botões de exportação e card com Temperatura Ambiente e botões de câmera', () => {
     renderComponent()
 
     expect(
@@ -155,9 +155,23 @@ describe('TemperaturaTab', () => {
     expect(
       screen.getByText('Registro de Temperatura & Termohigrometria')
     ).toBeInTheDocument()
+
+    // Verifica que o termo Temperatura Ambiente está presente
+    expect(screen.getByText(/Temperatura Ambiente/i)).toBeInTheDocument()
+
+    // Verifica botões de Câmera e Anexar para ambos os slots
+    const cameraButtons = screen.getAllByRole('button', { name: /abrir câmera/i })
+    expect(cameraButtons.length).toBeGreaterThanOrEqual(2)
+
+    // Verifica botões de exportação rápida no cabeçalho
+    const pdfButtons = screen.getAllByRole('button', { name: /folha mensal pdf/i })
+    expect(pdfButtons.length).toBeGreaterThanOrEqual(1)
+
+    const excelButtons = screen.getAllByRole('button', { name: /exportar excel/i })
+    expect(excelButtons.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('permite alternar para a aba Histórico & Gráficos e exibe registros', () => {
+  it('permite alternar para a aba Histórico & Gráficos e exibe registros com Temp. Ambiente', () => {
     renderComponent()
 
     const mapaTab = screen.getByRole('button', { name: /histórico & gráficos/i })
@@ -166,6 +180,7 @@ describe('TemperaturaTab', () => {
     expect(screen.getByText('Curva de Controle Térmico — Geladeira 1 - Reagentes Bioquímica')).toBeInTheDocument()
     expect(screen.getByText('Dr. Farmacêutico')).toBeInTheDocument()
     expect(screen.getByText('Conforme')).toBeInTheDocument()
+    expect(screen.getByText('Temp. Ambiente')).toBeInTheDocument()
   })
 
   it('permite alternar para a aba Equipamentos & Calibração', () => {
@@ -180,3 +195,4 @@ describe('TemperaturaTab', () => {
     expect(screen.getByText('Novo Equipamento')).toBeInTheDocument()
   })
 })
+

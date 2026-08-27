@@ -3,6 +3,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronDown,
+  FolderOpen,
   Loader2,
   RefreshCw,
   Thermometer,
@@ -18,6 +19,7 @@ import {
 import type { TemperatureRecordRequest } from '../../types/temperature'
 import { Button, Card, Combobox, type ComboboxOption, Input, Select, StatusBadge, TextArea, useToast } from '../ui'
 import { todayLocal } from '../../utils/date'
+import { CameraCaptureModal } from './CameraCaptureModal'
 import { TemperatureLocationModal } from './TemperatureLocationModal'
 
 export function TemperatureCaptureCard() {
@@ -30,6 +32,9 @@ export function TemperatureCaptureCard() {
   // Inputs ocultos para Foto 1 (Máxima) e Foto 2 (Mínima)
   const fileInputMaxRef = useRef<HTMLInputElement>(null)
   const fileInputMinRef = useRef<HTMLInputElement>(null)
+
+  // Estado do Modal de Câmera
+  const [cameraModalSlot, setCameraModalSlot] = useState<'MAX' | 'MIN' | null>(null)
 
   const [selectedLocationId, setSelectedLocationId] = useState<string>('')
   const [isNewLocationModalOpen, setIsNewLocationModalOpen] = useState<boolean>(false)
@@ -49,7 +54,7 @@ export function TemperatureCaptureCard() {
   const [tempMaxIn, setTempMaxIn] = useState<string>('')
   const [tempMinIn, setTempMinIn] = useState<string>('')
 
-  // Temperatura Momento (Calculada como média (Max IN + Min IN)/2 ou editável)
+  // Temperatura Ambiente (Calculada como média (Max IN + Min IN)/2 ou editável)
   const [tempCurrent, setTempCurrent] = useState<string>('')
 
   const [humidity, setHumidity] = useState<string>('')
@@ -57,7 +62,7 @@ export function TemperatureCaptureCard() {
   const [actionTaken, setActionTaken] = useState<string>('')
   const [notes, setNotes] = useState<string>('')
 
-  // Efeito para recalcular Temp. Momento automaticamente quando Max IN e Min IN forem informados
+  // Efeito para recalcular Temp. Ambiente automaticamente quando Max IN e Min IN forem informados
   const handleMaxInChange = (val: string) => {
     setTempMaxIn(val)
     const nMaxIn = parseFloat(val.replace(',', '.'))
@@ -193,6 +198,21 @@ export function TemperatureCaptureCard() {
     reader.readAsDataURL(file)
   }
 
+  // Handler de captura direta por câmera
+  const handleCameraCapture = (base64: string, mimeType: string, filename: string) => {
+    if (cameraModalSlot === 'MAX') {
+      setMaxImage(base64)
+      setMaxMimeType(mimeType)
+      setMaxFilename(filename)
+      triggerAiOcr(base64, mimeType, minImage, minMimeType)
+    } else if (cameraModalSlot === 'MIN') {
+      setMinImage(base64)
+      setMinMimeType(mimeType)
+      setMinFilename(filename)
+      triggerAiOcr(maxImage, maxMimeType, base64, mimeType)
+    }
+  }
+
   const triggerAiOcr = (
     imgMax: string | null,
     mimeMax: string,
@@ -213,13 +233,16 @@ export function TemperatureCaptureCard() {
       {
         onSuccess: (data) => {
           setOcrApplied(true)
-          if (data.time) setTime(data.time)
+          if (data.time) {
+            const cleanTime = data.time.trim().substring(0, 5)
+            setTime(cleanTime)
+          }
           if (data.tempMax !== null && data.tempMax !== undefined) setTempMax(String(data.tempMax))
           if (data.tempMin !== null && data.tempMin !== undefined) setTempMin(String(data.tempMin))
           if (data.tempMaxIn !== null && data.tempMaxIn !== undefined) setTempMaxIn(String(data.tempMaxIn))
           if (data.tempMinIn !== null && data.tempMinIn !== undefined) setTempMinIn(String(data.tempMinIn))
 
-          // Calcula Temp. Momento = (Max IN + Min IN) / 2
+          // Calcula Temperatura Ambiente = (Max IN + Min IN) / 2
           if (data.tempMaxIn !== null && data.tempMaxIn !== undefined && data.tempMinIn !== null && data.tempMinIn !== undefined) {
             setTempCurrent(((data.tempMaxIn + data.tempMinIn) / 2).toFixed(1))
           } else if (data.tempCurrent !== null && data.tempCurrent !== undefined) {
@@ -318,7 +341,7 @@ export function TemperatureCaptureCard() {
             </h2>
           </div>
           <p className="mt-1 text-sm text-neutral-500">
-            Fotografe o visor do termômetro para leitura automática ou digite os valores da rotina.
+            Tire foto do visor com a câmera do dispositivo ou anexe uma imagem para leitura automática.
           </p>
         </div>
 
@@ -380,29 +403,46 @@ export function TemperatureCaptureCard() {
                         alt="Visor Máxima"
                         className="h-36 w-full object-contain"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setCameraModalSlot('MAX')}
+                        className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-neutral-900/80 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-xs hover:bg-neutral-900"
+                      >
+                        <Camera className="h-3 w-3" />
+                        Tirar outra
+                      </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => fileInputMaxRef.current?.click()}
-                      className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 hover:bg-emerald-50/40 hover:border-emerald-300 transition-all p-3 text-center cursor-pointer group"
-                    >
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-xs text-neutral-500 group-hover:text-emerald-700 group-hover:scale-105 transition-all">
-                        <Camera className="h-4 w-4" />
+                    <div className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-2.5 text-center">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCameraModalSlot('MAX')}
+                          className="flex flex-col items-center justify-center rounded-xl bg-emerald-700 px-3 py-2 text-white shadow-xs hover:bg-emerald-800 transition-all cursor-pointer"
+                        >
+                          <Camera className="h-4 w-4" />
+                          <span className="mt-1 text-[11px] font-bold">Abrir Câmera</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputMaxRef.current?.click()}
+                          className="flex flex-col items-center justify-center rounded-xl border border-neutral-200 bg-white px-2.5 py-2 text-neutral-700 shadow-xs hover:bg-neutral-50 transition-all cursor-pointer"
+                        >
+                          <FolderOpen className="h-4 w-4 text-neutral-500" />
+                          <span className="mt-1 text-[11px] font-semibold">Anexar</span>
+                        </button>
                       </div>
-                      <span className="mt-2 text-xs font-semibold text-neutral-700 group-hover:text-emerald-800">
-                        Anexar Foto MAX
+                      <span className="text-[10px] text-neutral-400 mt-2">
+                        Linha OUT central (MÁX)
                       </span>
-                      <span className="text-[10px] text-neutral-400 mt-0.5">
-                        Linha OUT central
-                      </span>
-                    </button>
+                    </div>
                   )}
 
                   <input
                     ref={fileInputMaxRef}
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     className="hidden"
                     onChange={handleMaxFileChange}
                   />
@@ -436,29 +476,46 @@ export function TemperatureCaptureCard() {
                         alt="Visor Mínima"
                         className="h-36 w-full object-contain"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setCameraModalSlot('MIN')}
+                        className="absolute bottom-2 right-2 flex items-center gap-1 rounded-lg bg-neutral-900/80 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-xs hover:bg-neutral-900"
+                      >
+                        <Camera className="h-3 w-3" />
+                        Tirar outra
+                      </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => fileInputMinRef.current?.click()}
-                      className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 hover:bg-sky-50/40 hover:border-sky-300 transition-all p-3 text-center cursor-pointer group"
-                    >
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white shadow-xs text-neutral-500 group-hover:text-sky-700 group-hover:scale-105 transition-all">
-                        <Camera className="h-4 w-4" />
+                    <div className="mt-2.5 flex h-36 flex-col items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-2.5 text-center">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setCameraModalSlot('MIN')}
+                          className="flex flex-col items-center justify-center rounded-xl bg-sky-700 px-3 py-2 text-white shadow-xs hover:bg-sky-800 transition-all cursor-pointer"
+                        >
+                          <Camera className="h-4 w-4" />
+                          <span className="mt-1 text-[11px] font-bold">Abrir Câmera</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputMinRef.current?.click()}
+                          className="flex flex-col items-center justify-center rounded-xl border border-neutral-200 bg-white px-2.5 py-2 text-neutral-700 shadow-xs hover:bg-neutral-50 transition-all cursor-pointer"
+                        >
+                          <FolderOpen className="h-4 w-4 text-neutral-500" />
+                          <span className="mt-1 text-[11px] font-semibold">Anexar</span>
+                        </button>
                       </div>
-                      <span className="mt-2 text-xs font-semibold text-neutral-700 group-hover:text-sky-800">
-                        Anexar Foto MIN
+                      <span className="text-[10px] text-neutral-400 mt-2">
+                        Linha OUT central (MÍN)
                       </span>
-                      <span className="text-[10px] text-neutral-400 mt-0.5">
-                        Linha OUT central
-                      </span>
-                    </button>
+                    </div>
                   )}
 
                   <input
                     ref={fileInputMinRef}
                     type="file"
                     accept="image/*"
+                    capture="environment"
                     className="hidden"
                     onChange={handleMinFileChange}
                   />
@@ -572,7 +629,7 @@ export function TemperatureCaptureCard() {
               <div>
                 <div className="flex items-center justify-between">
                   <label className="block text-sm font-bold text-amber-900">
-                    Temp. Momento (°C) *
+                    Temperatura Ambiente (°C) *
                   </label>
                   {(tempMaxIn || tempMinIn) && (
                     <span className="text-xs text-amber-700 font-medium">
@@ -735,6 +792,16 @@ export function TemperatureCaptureCard() {
           setSelectedLocationId(created.id)
         }}
       />
+
+      {/* Modal de Captura de Foto por Câmera WebRTC */}
+      <CameraCaptureModal
+        isOpen={cameraModalSlot !== null}
+        slotType={cameraModalSlot || 'MAX'}
+        title={`Capturar Foto do Visor em ${cameraModalSlot === 'MAX' ? 'MÁXIMA (OUT)' : 'MÍNIMA (OUT)'}`}
+        onClose={() => setCameraModalSlot(null)}
+        onCapture={handleCameraCapture}
+      />
     </Card>
   )
 }
+
