@@ -156,12 +156,12 @@ describe('TemperaturaTab', () => {
       screen.getByText('Registro de Temperatura & Termohigrometria')
     ).toBeInTheDocument()
 
-    // Verifica que o termo Temperatura Ambiente está presente
-    expect(screen.getByText(/Temperatura Ambiente/i)).toBeInTheDocument()
-
-    // Verifica botões de Câmera e Anexar para ambos os slots
-    const cameraButtons = screen.getAllByRole('button', { name: /abrir câmera/i })
+    // Verifica botões de Tirar Foto (Câmera Nativa) e Galeria para ambos os slots
+    const cameraButtons = screen.getAllByRole('button', { name: /tirar foto/i })
     expect(cameraButtons.length).toBeGreaterThanOrEqual(2)
+
+    const galleryButtons = screen.getAllByRole('button', { name: /galeria/i })
+    expect(galleryButtons.length).toBeGreaterThanOrEqual(2)
 
     // Verifica botões de exportação rápida no cabeçalho
     const pdfButtons = screen.getAllByRole('button', { name: /folha mensal pdf/i })
