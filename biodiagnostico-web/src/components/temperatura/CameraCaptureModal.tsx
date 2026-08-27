@@ -6,7 +6,6 @@ import {
   FolderOpen,
   Loader2,
   RefreshCw,
-  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Modal, useToast } from '../ui'
@@ -192,7 +191,7 @@ export function CameraCaptureModal({
       isOpen={isOpen}
       onClose={handleClose}
       title={title}
-      size="xl"
+      size="lg"
     >
       <div className="space-y-4">
         {/* Banner com instruções e indicação do modo */}
@@ -299,7 +298,7 @@ export function CameraCaptureModal({
           <div className="flex items-center gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => fileFallbackInputRef.current?.click()}
             >
@@ -310,7 +309,7 @@ export function CameraCaptureModal({
             {!capturedPhoto && !cameraError && hasMultipleCameras && (
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={handleToggleCamera}
                 title="Trocar Câmera"
@@ -326,7 +325,7 @@ export function CameraCaptureModal({
               <>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="md"
                   onClick={handleRetake}
                 >
@@ -347,7 +346,7 @@ export function CameraCaptureModal({
               <>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="md"
                   onClick={handleClose}
                 >
@@ -371,3 +370,4 @@ export function CameraCaptureModal({
     </Modal>
   )
 }
+
