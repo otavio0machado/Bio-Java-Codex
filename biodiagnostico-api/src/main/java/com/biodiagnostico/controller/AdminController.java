@@ -59,7 +59,20 @@ public class AdminController {
         @Valid @RequestBody AdminUpdateUserRequest request,
         Authentication authentication
     ) {
-        UUID requestingUserId = (UUID) authentication.getDetails();
+        UUID requestingUserId = null;
+        if (authentication != null) {
+            if (authentication.getDetails() instanceof UUID uuid) {
+                requestingUserId = uuid;
+            } else if (authentication.getDetails() instanceof String str) {
+                try {
+                    requestingUserId = UUID.fromString(str);
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+            if (requestingUserId == null && authentication.getName() != null) {
+                requestingUserId = adminService.findUserIdByUsername(authentication.getName()).orElse(null);
+            }
+        }
         return ResponseEntity.ok(adminService.updateUser(id, request, requestingUserId));
     }
 

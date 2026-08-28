@@ -100,6 +100,17 @@ public class User {
         return permissions != null ? PermissionCatalog.expandImpliedPermissions(permissions) : Set.of();
     }
 
+    public void setPermissions(Set<Permission> newPermissions) {
+        if (this.permissions == null) {
+            this.permissions = new HashSet<>();
+        } else {
+            this.permissions.clear();
+        }
+        if (newPermissions != null) {
+            this.permissions.addAll(newPermissions);
+        }
+    }
+
     public boolean hasPermission(Permission permission) {
         if (permission == null) {
             return false;

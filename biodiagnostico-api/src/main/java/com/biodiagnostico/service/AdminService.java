@@ -52,6 +52,13 @@ public class AdminService {
         return PermissionCatalog.getCatalogResponse();
     }
 
+    public java.util.Optional<UUID> findUserIdByUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return userRepository.findByUsername(username.trim().toLowerCase()).map(User::getId);
+    }
+
     @Transactional
     public UserResponse createUser(AdminUserRequest request) {
         String normalizedUsername = request.username().trim().toLowerCase();
