@@ -104,7 +104,7 @@ export function Navbar() {
             <img src={logoBio} alt="Biodiagnóstico" className="h-9 xl:h-10 w-auto" />
           </button>
 
-          <nav className="hidden items-center gap-0.5 min-[1150px]:gap-1.5 xl:gap-2.5 2xl:gap-3.5 lg:flex">
+          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 min-[1150px]:gap-1 xl:gap-1.5 2xl:gap-2 min-[1536px]:flex">
             {navItems.map((item, index) => {
               const isOnQc = location.pathname.startsWith('/qc')
               const isActive = item.area
@@ -122,7 +122,7 @@ export function Navbar() {
                     to={item.href}
                     onClick={closeMenus}
                     className={cn(
-                      'border-b-2 py-5 px-1.5 min-[1150px]:px-2 xl:px-2.5 text-xs xl:text-[13px] 2xl:text-sm font-medium whitespace-nowrap transition-colors duration-150',
+                      'border-b-2 py-5 px-1 min-[1150px]:px-1.5 xl:px-2 2xl:px-2 text-xs xl:text-[13px] 2xl:text-[13px] font-medium whitespace-nowrap transition-colors duration-150',
                       isActive
                         ? 'border-green-800 text-green-900 font-semibold'
                         : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900',
@@ -135,7 +135,7 @@ export function Navbar() {
             })}
           </nav>
 
-          <div className="relative hidden shrink-0 items-center gap-3 lg:flex ml-2 xl:ml-6" ref={dropdownRef}>
+          <div className="relative hidden shrink-0 items-center gap-3 min-[1536px]:flex ml-2 xl:ml-4" ref={dropdownRef}>
             <button
               type="button"
               className="flex items-center gap-2.5 rounded-full border border-neutral-200 bg-white p-1 pr-2.5 transition hover:border-neutral-300 hover:bg-neutral-50 shadow-sm"
@@ -192,7 +192,7 @@ export function Navbar() {
           <Button
             variant="ghost"
             size="sm"
-            className="lg:hidden"
+            className="min-[1536px]:hidden"
             onClick={() => setMobilePath(location.pathname)}
             aria-label="Abrir menu"
           >
@@ -202,7 +202,7 @@ export function Navbar() {
       </header>
 
       {isMobileOpen ? (
-        <div className="fixed inset-0 z-[55] bg-black/40 lg:hidden" onClick={closeMenus}>
+        <div className="fixed inset-0 z-[55] bg-black/40 min-[1536px]:hidden" onClick={closeMenus}>
           <aside
             className="ml-auto flex h-full w-72 flex-col bg-white p-5 shadow-2xl overflow-y-auto"
             onClick={(event) => event.stopPropagation()}
