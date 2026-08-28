@@ -28,10 +28,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         this(jwtTokenProvider, accessTokenBlacklistService, null);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public JwtAuthFilter(
         JwtTokenProvider jwtTokenProvider,
         AccessTokenBlacklistService accessTokenBlacklistService,
-        com.biodiagnostico.repository.UserRepository userRepository
+        @org.springframework.context.annotation.Lazy com.biodiagnostico.repository.UserRepository userRepository
     ) {
         this.jwtTokenProvider = jwtTokenProvider;
         this.accessTokenBlacklistService = accessTokenBlacklistService;
