@@ -219,12 +219,13 @@ function UserCard({
   onResetPassword: () => void
 }) {
   const RoleIcon = ROLE_ICONS[user.role] ?? Shield
-  const initials = user.name
+  const initials = (user.name || 'U')
     .split(' ')
+    .filter(Boolean)
     .map((p) => p[0])
     .join('')
     .slice(0, 2)
-    .toUpperCase()
+    .toUpperCase() || 'U'
 
   const effectivePerms = useMemo(() => Array.from(getEffectivePermissions(user)), [user])
 
@@ -314,6 +315,37 @@ function UserCard({
       </div>
     </Card>
   )
+}
+
+function normalizeModuleCatalog(rawModules?: any[]): ModuleGroup[] {
+  if (!rawModules || !Array.isArray(rawModules) || rawModules.length === 0) {
+    return LOCAL_PERMISSION_CATALOG.modules
+  }
+  return rawModules.map((m) => {
+    const moduleId = String(m.moduleId || m.module || '').toUpperCase()
+    const moduleName = String(m.moduleName || m.label || moduleId)
+    const description = String(m.description || '')
+    const permissions = Array.isArray(m.permissions)
+      ? m.permissions.map((p: any) => ({
+          name: String(p.name || p.code || ''),
+          label: String(p.label || p.name || p.code || ''),
+          description: String(p.description || ''),
+          module: String(p.module || moduleId),
+          action: String(p.action || p.actionType || 'VIEW'),
+          impliedPermissions: Array.isArray(p.impliedPermissions)
+            ? p.impliedPermissions
+            : Array.isArray(p.implies)
+            ? p.implies
+            : [],
+        }))
+      : []
+    return {
+      moduleId,
+      moduleName,
+      description,
+      permissions,
+    }
+  })
 }
 
 /* ─── Permission Matrix Selector ─── */
@@ -436,7 +468,7 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
         <span className="font-medium text-sky-900">
           {activeModules.length === 0
             ? 'Nenhum (Acesso Bloqueado)'
-            : `${activeModules.map((m) => m.moduleName.split(' ')[0]).join(', ')} (${currentSet.size} permissões)`}
+            : `${activeModules.map((m) => String(m.moduleName || m.moduleId || '').split(' ')[0]).filter(Boolean).join(', ')} (${currentSet.size} permissões)`}
         </span>
       </div>
 
@@ -590,7 +622,7 @@ function CreateUserModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
   const { toast } = useToast()
   const createUser = useCreateUser()
   const { data: catalogData } = usePermissionsCatalog()
-  const catalog = catalogData?.modules ?? LOCAL_PERMISSION_CATALOG.modules
+  const catalog = useMemo(() => normalizeModuleCatalog(catalogData?.modules), [catalogData])
 
   const [username, setUsername] = useState('')
   const [name, setName] = useState('')
@@ -773,7 +805,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
   const { toast } = useToast()
   const updateUser = useUpdateUser()
   const { data: catalogData } = usePermissionsCatalog()
-  const catalog = catalogData?.modules ?? LOCAL_PERMISSION_CATALOG.modules
+  const catalog = useMemo(() => normalizeModuleCatalog(catalogData?.modules), [catalogData])
 
   const [name, setName] = useState(user.name)
   const [role, setRole] = useState<Role>(user.role)
@@ -842,7 +874,7 @@ function EditUserModal({ user, onClose }: { user: User; onClose: () => void }) {
         {/* User Identity Banner */}
         <div className="flex items-center gap-4 rounded-2xl bg-neutral-50 p-4 border border-neutral-200">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-800 text-sm font-bold text-white">
-            {user.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+            {(user.name || 'U').split(' ').filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase() || 'U'}
           </div>
           <div>
             <div className="font-bold text-neutral-900">{user.name}</div>
