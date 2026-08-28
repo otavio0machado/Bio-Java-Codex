@@ -358,6 +358,13 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
     onChange(Array.from(next))
   }
 
+  const selectOnlyModule = (module: ModuleGroup) => {
+    const modulePermNames = module.permissions.map((p) => p.name)
+    const next = new Set<string>(modulePermNames)
+    next.add('DASHBOARD_VIEW')
+    onChange(Array.from(next))
+  }
+
   const selectAll = () => {
     const all = catalog.flatMap((m) => m.permissions.map((p) => p.name))
     onChange(all)
@@ -367,9 +374,11 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
     onChange([])
   }
 
-  const applyPresetQc = () => {
-    const next = new Set<string>(['DASHBOARD_VIEW', 'QC_VIEW', 'QC_WRITE', 'QC_AREAS_WRITE', 'REPORTS_VIEW', 'REPORTS_DOWNLOAD'])
-    onChange(Array.from(next))
+  const applySingleModulePreset = (moduleId: string) => {
+    const targetModule = catalog.find((m) => m.moduleId === moduleId)
+    if (targetModule) {
+      selectOnlyModule(targetModule)
+    }
   }
 
   const applyPresetFullOperations = () => {
@@ -393,44 +402,91 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
     onChange(Array.from(next))
   }
 
+  // Identifica quais módulos estão ativos
+  const activeModules = catalog.filter((m) =>
+    m.permissions.some((p) => currentSet.has(p.name))
+  )
+
   return (
     <div className="space-y-4 rounded-2xl border border-sky-200 bg-sky-50/50 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h4 className="text-sm font-bold text-sky-950">Matriz de Permissões Granulares</h4>
+          <h4 className="text-sm font-bold text-sky-950">Matriz de Permissões por Módulo</h4>
           <p className="text-xs text-sky-800">
-            Selecione as permissões específicas que este funcionário terá acesso
+            Selecione um ou mais módulos que este funcionário poderá acessar
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="ghost" size="sm" className="h-7 text-xs text-sky-800 hover:bg-sky-100" onClick={selectAll}>
             <CheckCheck className="mr-1 h-3.5 w-3.5" />
-            Todas
+            Todos os Módulos
           </Button>
           <Button variant="ghost" size="sm" className="h-7 text-xs text-sky-800 hover:bg-sky-100" onClick={clearAll}>
             <RotateCcw className="mr-1 h-3.5 w-3.5" />
-            Limpar
+            Desmarcar Tudo
           </Button>
         </div>
       </div>
 
-      {/* Presets */}
-      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-sky-200/70">
-        <span className="text-[11px] font-semibold text-sky-800 mr-1">Atalhos rápidos:</span>
-        <button
-          type="button"
-          onClick={applyPresetQc}
-          className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 shadow-xs border border-sky-200 hover:bg-sky-50"
-        >
-          Operador CQ + Laudos
-        </button>
-        <button
-          type="button"
-          onClick={applyPresetFullOperations}
-          className="rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-sky-700 shadow-xs border border-sky-200 hover:bg-sky-50"
-        >
-          Operação Geral (Sem Exclusão)
-        </button>
+      {/* Resumo do que está ativo */}
+      <div className="flex items-center justify-between rounded-xl bg-white px-3 py-2 border border-sky-200/80 shadow-xs text-xs">
+        <span className="font-semibold text-neutral-700">
+          Módulos Liberados:
+        </span>
+        <span className="font-medium text-sky-900">
+          {activeModules.length === 0
+            ? 'Nenhum (Acesso Bloqueado)'
+            : `${activeModules.map((m) => m.moduleName.split(' ')[0]).join(', ')} (${currentSet.size} permissões)`}
+        </span>
+      </div>
+
+      {/* Presets de Módulo Único */}
+      <div className="space-y-1.5 pt-1 border-t border-sky-200/70">
+        <span className="text-[11px] font-semibold text-sky-800">Atalhos rápidos para módulo único:</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => applySingleModulePreset('TEMPERATURE')}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-sky-700 shadow-xs border border-sky-300 hover:bg-sky-100 transition"
+          >
+            🌡️ Só Temperatura
+          </button>
+          <button
+            type="button"
+            onClick={() => applySingleModulePreset('REAGENTS')}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-sky-700 shadow-xs border border-sky-300 hover:bg-sky-100 transition"
+          >
+            🧪 Só Reagentes
+          </button>
+          <button
+            type="button"
+            onClick={() => applySingleModulePreset('MAINTENANCE')}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-sky-700 shadow-xs border border-sky-300 hover:bg-sky-100 transition"
+          >
+            🔧 Só Manutenção
+          </button>
+          <button
+            type="button"
+            onClick={() => applySingleModulePreset('QC')}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-sky-700 shadow-xs border border-sky-300 hover:bg-sky-100 transition"
+          >
+            🔬 Só CQ (PROIN)
+          </button>
+          <button
+            type="button"
+            onClick={() => applySingleModulePreset('REPORTS')}
+            className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-sky-700 shadow-xs border border-sky-300 hover:bg-sky-100 transition"
+          >
+            📄 Só Relatórios
+          </button>
+          <button
+            type="button"
+            onClick={applyPresetFullOperations}
+            className="rounded-lg bg-sky-800 text-white px-2.5 py-1 text-xs font-semibold shadow-xs hover:bg-sky-900 transition"
+          >
+            ⚡ Operação Completa
+          </button>
+        </div>
       </div>
 
       {/* Module Groups */}
@@ -439,15 +495,20 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
           const ModuleIcon = MODULE_ICONS[module.moduleId] ?? Shield
           const modulePermNames = module.permissions.map((p) => p.name)
           const allModuleSelected = modulePermNames.every((p) => currentSet.has(p))
+          const someModuleSelected = modulePermNames.some((p) => currentSet.has(p))
 
           return (
             <div
               key={module.moduleId}
-              className="rounded-xl border border-neutral-200 bg-white p-3 shadow-xs transition hover:border-neutral-300"
+              className={`rounded-xl border p-3 shadow-xs transition ${
+                someModuleSelected
+                  ? 'border-green-300 bg-white ring-1 ring-green-600/20'
+                  : 'border-neutral-200 bg-neutral-50/50 hover:bg-white'
+              }`}
             >
-              <div className="flex items-center justify-between border-b border-neutral-100 pb-2 mb-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-neutral-100 pb-2 mb-2.5 gap-2">
                 <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-green-100/70 p-1.5 text-green-800">
+                  <div className={`rounded-lg p-1.5 ${someModuleSelected ? 'bg-green-100 text-green-800' : 'bg-neutral-200 text-neutral-600'}`}>
                     <ModuleIcon className="h-4 w-4" />
                   </div>
                   <div>
@@ -457,13 +518,27 @@ function PermissionSelector({ selectedPermissions, onChange, catalog }: Permissi
                     </span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => toggleModule(module)}
-                  className="text-xs font-semibold text-green-800 hover:text-green-950 px-2 py-0.5 rounded-md hover:bg-green-50"
-                >
-                  {allModuleSelected ? 'Desmarcar Módulo' : 'Marcar Módulo'}
-                </button>
+                <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => selectOnlyModule(module)}
+                    className="text-[11px] font-semibold text-sky-800 hover:text-sky-950 px-2 py-0.5 rounded-md hover:bg-sky-100 border border-sky-200"
+                    title="Desmarca todos os outros e deixa apenas este módulo liberado"
+                  >
+                    Marcar só este
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleModule(module)}
+                    className={`text-xs font-semibold px-2 py-0.5 rounded-md transition ${
+                      allModuleSelected
+                        ? 'text-red-700 hover:bg-red-50'
+                        : 'text-green-800 hover:bg-green-50'
+                    }`}
+                  >
+                    {allModuleSelected ? 'Desmarcar Módulo' : 'Marcar Módulo'}
+                  </button>
+                </div>
               </div>
 
               <div className="grid gap-2 sm:grid-cols-2">
