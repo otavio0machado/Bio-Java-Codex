@@ -72,13 +72,13 @@ public class ReportV2Controller {
     // ---------- Catalogo ----------
 
     @GetMapping("/catalog")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<List<ReportDefinitionResponse>> catalog(Authentication auth) {
         return ResponseEntity.ok(service.listCatalog(auth));
     }
 
     @GetMapping("/catalog/{code}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<ReportDefinitionResponse> definition(
         @PathVariable ReportCode code, Authentication auth
     ) {
@@ -88,7 +88,7 @@ public class ReportV2Controller {
     // ---------- Fluxo A: /generate ----------
 
     @PostMapping("/generate")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_GENERATE') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<ReportExecutionResponse> generate(
         @Valid @RequestBody GenerateReportV2Request request,
         Authentication auth
@@ -101,7 +101,7 @@ public class ReportV2Controller {
     // ---------- Fluxo B: /preview ----------
 
     @PostMapping("/preview")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('REPORTS_GENERATE') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<PreviewResponse> preview(
         @Valid @RequestBody PreviewReportV2Request request,
         Authentication auth
@@ -138,7 +138,7 @@ public class ReportV2Controller {
     // ---------- Listagem / download ----------
 
     @GetMapping("/executions")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<Page<ReportExecutionResponse>> list(
         @RequestParam(required = false) ReportCode code,
         @RequestParam(required = false) String status,
@@ -154,13 +154,13 @@ public class ReportV2Controller {
     }
 
     @GetMapping("/executions/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<ReportExecutionResponse> getExecution(@PathVariable UUID id, Authentication auth) {
         return ResponseEntity.ok(service.getExecution(id, auth));
     }
 
     @GetMapping("/executions/{id}/download")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<byte[]> download(
         @PathVariable UUID id,
         Authentication auth,
@@ -212,7 +212,7 @@ public class ReportV2Controller {
      * {@code SELECT DISTINCT equipment FROM maintenance_records}. Cache de 5 min.
      */
     @GetMapping("/suggestions/equipment")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     @org.springframework.cache.annotation.Cacheable(cacheNames = "reportsV2.suggestions.equipment")
     public ResponseEntity<Map<String, List<String>>> suggestEquipments() {
         return ResponseEntity.ok(Map.of("items", service.suggestEquipments()));

@@ -72,7 +72,7 @@ public class ReportServiceV2 {
 
     private static final Logger LOG = LoggerFactory.getLogger(ReportServiceV2.class);
     private static final ZoneId DEFAULT_ZONE = ZoneId.of("America/Sao_Paulo");
-    private static final String REPORT_DOWNLOAD_AUTHORITY = Permission.DOWNLOAD.name();
+    private static final String REPORT_DOWNLOAD_AUTHORITY = Permission.REPORTS_DOWNLOAD.name();
 
     private final ReportDefinitionRegistry definitionRegistry;
     private final ReportGeneratorRegistry generatorRegistry;
@@ -819,7 +819,12 @@ public class ReportServiceV2 {
         if (roles.contains("ADMIN") || roles.contains("VIGILANCIA_SANITARIA")) {
             return true;
         }
-        return roles.contains("FUNCIONARIO") && hasAuthority(auth, REPORT_DOWNLOAD_AUTHORITY);
+        return roles.contains("FUNCIONARIO") && (
+            hasAuthority(auth, Permission.REPORTS_DOWNLOAD.name())
+            || hasAuthority(auth, Permission.REPORTS_GENERATE.name())
+            || hasAuthority(auth, Permission.REPORTS_VIEW.name())
+            || hasAuthority(auth, "DOWNLOAD")
+        );
     }
 
     private void requireReportAccess(Authentication auth, Set<String> roles, String action) {

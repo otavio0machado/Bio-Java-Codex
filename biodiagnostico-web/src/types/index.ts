@@ -1,4 +1,44 @@
 export type Role = 'ADMIN' | 'FUNCIONARIO' | 'VIGILANCIA_SANITARIA' | 'VISUALIZADOR'
+
+export type Permission =
+  | 'DASHBOARD_VIEW'
+  | 'QC_VIEW'
+  | 'QC_WRITE'
+  | 'QC_AREAS_WRITE'
+  | 'QC_IMPORT'
+  | 'QC_EXPORT'
+  | 'REAGENTS_VIEW'
+  | 'REAGENTS_WRITE'
+  | 'REAGENTS_DELETE'
+  | 'MAINTENANCE_VIEW'
+  | 'MAINTENANCE_WRITE'
+  | 'TEMPERATURE_VIEW'
+  | 'TEMPERATURE_WRITE'
+  | 'REPORTS_VIEW'
+  | 'REPORTS_GENERATE'
+  | 'REPORTS_DOWNLOAD'
+
+export interface PermissionMetadata {
+  name: string
+  label: string
+  description: string
+  module: string
+  action: string
+  impliedPermissions: string[]
+}
+
+export interface ModuleGroup {
+  moduleId: string
+  moduleName: string
+  description: string
+  permissions: PermissionMetadata[]
+}
+
+export interface PermissionCatalogResponse {
+  modules: ModuleGroup[]
+  allPermissions: PermissionMetadata[]
+}
+
 export type QcStatus = 'APROVADO' | 'REPROVADO' | 'ALERTA'
 export type ViolationSeverity = 'WARNING' | 'REJECTION'
 export type LabArea =

@@ -20,13 +20,18 @@ class JwtTokenProviderTest {
             .id(UUID.randomUUID())
             .username("ana")
             .role(Role.FUNCIONARIO)
-            .permissions(Set.of(Permission.QC_WRITE, Permission.IMPORT))
+            .permissions(Set.of(Permission.QC_WRITE, Permission.QC_IMPORT))
             .build();
 
         String token = provider.generateAccessToken(user);
         JwtTokenProvider.TokenDetails details = provider.validateAccessToken(token);
 
         assertThat(details.role()).isEqualTo("FUNCIONARIO");
-        assertThat(details.permissions()).containsExactly("IMPORT", "QC_WRITE");
+        assertThat(details.permissions()).contains(
+            "QC_WRITE",
+            "QC_IMPORT",
+            "QC_VIEW",
+            "DASHBOARD_VIEW"
+        );
     }
 }

@@ -1,9 +1,20 @@
-import type { AdminResetPasswordRequest, AdminUpdateUserRequest, AdminUserRequest, User } from '../types'
+import type {
+  AdminResetPasswordRequest,
+  AdminUpdateUserRequest,
+  AdminUserRequest,
+  PermissionCatalogResponse,
+  User,
+} from '../types'
 import { api } from './api'
 
 export const adminService = {
   async getUsers(): Promise<User[]> {
     const { data } = await api.get<User[]>('/admin/users')
+    return data
+  },
+
+  async getPermissionsCatalog(): Promise<PermissionCatalogResponse> {
+    const { data } = await api.get<PermissionCatalogResponse>('/admin/permissions')
     return data
   },
 
@@ -21,3 +32,4 @@ export const adminService = {
     await api.put(`/admin/users/${id}/password`, request)
   },
 }
+

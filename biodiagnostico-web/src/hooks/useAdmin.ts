@@ -41,3 +41,12 @@ export function useAuditLogs(userId?: string) {
     refetchInterval: 30000,
   })
 }
+
+export function usePermissionsCatalog() {
+  return useQuery({
+    queryKey: ['admin', 'permissions-catalog'],
+    queryFn: adminService.getPermissionsCatalog,
+    staleTime: 1000 * 60 * 30, // 30 minutos de cache
+  })
+}
+

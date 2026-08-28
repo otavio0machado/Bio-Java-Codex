@@ -30,6 +30,7 @@ public class QcExamController {
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<QcExam>> getExams(@RequestParam(required = false) String area) {
         return ResponseEntity.ok(qcExamService.getExams(area));
     }

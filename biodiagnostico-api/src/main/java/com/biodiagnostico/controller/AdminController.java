@@ -43,6 +43,11 @@ public class AdminController {
         return ResponseEntity.ok(adminService.listUsers());
     }
 
+    @GetMapping("/permissions")
+    public ResponseEntity<com.biodiagnostico.dto.response.PermissionCatalogResponse> getPermissionsCatalog() {
+        return ResponseEntity.ok(adminService.getPermissionsCatalog());
+    }
+
     @PostMapping("/users")
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody AdminUserRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createUser(request));

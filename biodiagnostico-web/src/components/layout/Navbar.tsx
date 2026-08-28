@@ -17,28 +17,30 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../ui'
 import { cn } from '../../utils/cn'
-import { ROLE_LABELS } from '../../lib/permissions'
+import { ROLE_LABELS, canViewModule } from '../../lib/permissions'
 import logoBio from '../../assets/logobio.png'
 
-const areaNavItems = [
-  { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker },
-  { label: 'Coagulação', href: '/qc?area=coagulacao', area: 'coagulacao', icon: Beaker },
-  { label: 'Hematologia', href: '/qc?area=hematologia', area: 'hematologia', icon: Beaker },
-  { label: 'Imunologia', href: '/qc?area=imunologia', area: 'imunologia', icon: Beaker },
-  { label: 'Parasitologia', href: '/qc?area=parasitologia', area: 'parasitologia', icon: Beaker },
-  { label: 'Microbiologia', href: '/qc?area=microbiologia', area: 'microbiologia', icon: Beaker },
-  { label: 'Uroanálise', href: '/qc?area=uroanalise', area: 'uroanalise', icon: Beaker },
+type NavModule = 'DASHBOARD' | 'QC' | 'REAGENTS' | 'MAINTENANCE' | 'TEMPERATURE' | 'REPORTS'
+
+const areaNavItems: { label: string; href: string; area: string | null; icon: any; module: NavModule }[] = [
+  { label: 'Bioquímica', href: '/qc?area=bioquimica', area: 'bioquimica', icon: Beaker, module: 'QC' },
+  { label: 'Coagulação', href: '/qc?area=coagulacao', area: 'coagulacao', icon: Beaker, module: 'QC' },
+  { label: 'Hematologia', href: '/qc?area=hematologia', area: 'hematologia', icon: Beaker, module: 'QC' },
+  { label: 'Imunologia', href: '/qc?area=imunologia', area: 'imunologia', icon: Beaker, module: 'QC' },
+  { label: 'Parasitologia', href: '/qc?area=parasitologia', area: 'parasitologia', icon: Beaker, module: 'QC' },
+  { label: 'Microbiologia', href: '/qc?area=microbiologia', area: 'microbiologia', icon: Beaker, module: 'QC' },
+  { label: 'Uroanálise', href: '/qc?area=uroanalise', area: 'uroanalise', icon: Beaker, module: 'QC' },
 ]
 
-const managementNavItems = [
-  { label: 'Reagentes', href: '/reagentes', area: null, icon: FlaskConical },
-  { label: 'Manutenção', href: '/manutencao', area: null, icon: Wrench },
-  { label: 'Temperatura', href: '/temperatura', area: null, icon: Thermometer },
-  { label: 'Relatórios', href: '/relatorios', area: null, icon: FileText },
+const managementNavItems: { label: string; href: string; area: string | null; icon: any; module: NavModule }[] = [
+  { label: 'Reagentes', href: '/reagentes', area: null, icon: FlaskConical, module: 'REAGENTS' },
+  { label: 'Manutenção', href: '/manutencao', area: null, icon: Wrench, module: 'MAINTENANCE' },
+  { label: 'Temperatura', href: '/temperatura', area: null, icon: Thermometer, module: 'TEMPERATURE' },
+  { label: 'Relatórios', href: '/relatorios', area: null, icon: FileText, module: 'REPORTS' },
 ]
 
-const baseNavItems = [
-  { label: 'Dashboard', href: '/dashboard', area: null, icon: LayoutDashboard },
+const baseNavItems: { label: string; href: string; area: string | null; icon: any; module: NavModule }[] = [
+  { label: 'Dashboard', href: '/dashboard', area: null, icon: LayoutDashboard, module: 'DASHBOARD' },
   ...managementNavItems,
   ...areaNavItems,
 ]
@@ -52,7 +54,7 @@ export function Navbar() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const isDropdownOpen = dropdownPath === location.pathname
   const isMobileOpen = mobilePath === location.pathname
-  const navItems = baseNavItems
+  const navItems = baseNavItems.filter((item) => canViewModule(user, item.module))
   const adminMenuItems = user?.role === 'ADMIN'
     ? [
         { label: 'Usuários', href: '/admin', icon: Users },
@@ -155,7 +157,7 @@ export function Navbar() {
               <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl border border-neutral-200 bg-white p-3 shadow-elevated z-50">
                 <div className="px-3 py-2">
                   <div className="font-semibold text-neutral-900">{user?.name}</div>
-                  <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
+                  <div className="text-sm text-neutral-500">{user?.role ? ROLE_LABELS[user.role] : user?.role}</div>
                 </div>
                 {adminMenuItems.length > 0 ? (
                   <>
@@ -266,7 +268,7 @@ export function Navbar() {
 
             <div className="mt-auto pt-4 rounded-2xl bg-neutral-50 p-4">
               <div className="font-semibold text-neutral-900">{user?.name}</div>
-              <div className="text-sm text-neutral-500">{ROLE_LABELS[user?.role ?? ''] ?? user?.role}</div>
+              <div className="text-sm text-neutral-500">{user?.role ? ROLE_LABELS[user.role] : user?.role}</div>
               <Button variant="danger" className="mt-4 w-full" onClick={handleLogout}>
                 Sair
               </Button>

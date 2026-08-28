@@ -34,6 +34,7 @@ public class AreaQcController {
     }
 
     @GetMapping("/parameters")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<AreaQcParameterResponse>> getParameters(
         @PathVariable String area,
         @RequestParam(required = false) String analito
@@ -42,7 +43,7 @@ public class AreaQcController {
     }
 
     @PostMapping("/parameters")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcParameterResponse> createParameter(
         @PathVariable String area,
         @Valid @RequestBody AreaQcParameterRequest request
@@ -51,7 +52,7 @@ public class AreaQcController {
     }
 
     @PutMapping("/parameters/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcParameterResponse> updateParameter(
         @PathVariable String area,
         @PathVariable UUID id,
@@ -61,13 +62,14 @@ public class AreaQcController {
     }
 
     @DeleteMapping("/parameters/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteParameter(@PathVariable String area, @PathVariable UUID id) {
         areaQcService.deleteParameter(area, id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/measurements")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<AreaQcMeasurementResponse>> getMeasurements(
         @PathVariable String area,
         @RequestParam(required = false) String analito,
@@ -78,7 +80,7 @@ public class AreaQcController {
     }
 
     @PostMapping("/measurements")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<AreaQcMeasurementResponse> createMeasurement(
         @PathVariable String area,
         @Valid @RequestBody AreaQcMeasurementRequest request

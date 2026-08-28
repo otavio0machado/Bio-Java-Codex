@@ -30,7 +30,7 @@ public class ReportController {
     }
 
     @GetMapping("/qc-pdf")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_GENERATE') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<byte[]> generateQcPdf(
         @RequestParam(required = false) String area,
         @RequestParam(required = false) String periodType,
@@ -67,7 +67,7 @@ public class ReportController {
     }
 
     @GetMapping("/reagents-pdf")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_GENERATE') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<byte[]> generateReagentsPdf(Authentication authentication) {
         long start = System.currentTimeMillis();
         try {
@@ -96,7 +96,7 @@ public class ReportController {
      * para mostrar quem gerou, quando, tamanho e eventual falha.
      */
     @GetMapping("/history")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('DOWNLOAD')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REPORTS_VIEW') or hasAuthority('DOWNLOAD')")
     public ResponseEntity<List<ReportRunResponse>> history(
         @RequestParam(required = false, defaultValue = "20") int limit
     ) {

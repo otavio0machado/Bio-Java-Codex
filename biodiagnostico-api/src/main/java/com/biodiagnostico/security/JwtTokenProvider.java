@@ -67,7 +67,9 @@ public class JwtTokenProvider {
             .issuer(issuer)
             .claim("username", user.getUsername())
             .claim("role", user.getRole().name())
-            .claim("permissions", user.getPermissions().stream().map(Enum::name).sorted().toList())
+            .claim("permissions", user.getEffectivePermissions() == null
+                ? java.util.List.of()
+                : user.getEffectivePermissions().stream().map(Enum::name).sorted().toList())
             .claim("token_type", TokenType.ACCESS.name())
             .id(tokenId.toString())
             .issuedAt(Date.from(now))

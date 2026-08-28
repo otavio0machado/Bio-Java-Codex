@@ -54,6 +54,7 @@ public class QcRecordController {
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<QcRecordResponse>> getRecords(
         @RequestParam(required = false) String area,
         @RequestParam(required = false) String examName,
@@ -64,6 +65,7 @@ public class QcRecordController {
     }
 
     @GetMapping("/page")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<QcRecordPageResponse> getRecordsPage(
         @RequestParam(required = false) String area,
         @RequestParam(required = false) String examName,
@@ -107,7 +109,7 @@ public class QcRecordController {
      * Modo ATOMIC: comportamento legado — qualquer falha aborta o lote inteiro.
      */
     @PostMapping("/batch-v2")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('IMPORT')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_IMPORT') or hasAuthority('IMPORT')")
     public ResponseEntity<BatchImportResult> createRecordsBatchV2(
         @RequestBody List<QcRecordRequest> requests,
         @RequestParam(required = false, defaultValue = "partial") String mode,
@@ -120,7 +122,7 @@ public class QcRecordController {
     }
 
     @GetMapping("/import-history")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('IMPORT')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasAuthority('QC_IMPORT') or hasAuthority('IMPORT') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<ImportRunResponse>> importHistory(
         @RequestParam(required = false, defaultValue = "20") int limit
     ) {
@@ -128,6 +130,7 @@ public class QcRecordController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<QcRecordResponse> getRecord(@PathVariable UUID id) {
         return ResponseEntity.ok(qcService.getRecord(id));
     }
@@ -149,11 +152,13 @@ public class QcRecordController {
     }
 
     @GetMapping("/statistics")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<Map<String, Object>> getStatistics() {
         return ResponseEntity.ok(qcService.getStatisticsToday());
     }
 
     @GetMapping("/levey-jennings")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<LeveyJenningsResponse>> getLeveyJenningsData(
         @RequestParam String examName,
         @RequestParam String level,
@@ -164,6 +169,7 @@ public class QcRecordController {
     }
 
     @GetMapping("/{id}/post-calibration")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<PostCalibrationRecord> getPostCalibration(@PathVariable UUID id) {
         return postCalibrationService.getByQcRecord(id)
             .map(ResponseEntity::ok)

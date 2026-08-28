@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { AppLayout } from './components/layout/AppLayout'
 import { PrivateRoute } from './components/layout/PrivateRoute'
 import { RoleRoute } from './components/layout/RoleRoute'
+import { PermissionRoute } from './components/layout/PermissionRoute'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })))
 const LoginPage = lazy(() => import('./pages/LoginPage').then((module) => ({ default: module.LoginPage })))
@@ -82,7 +83,9 @@ export default function App() {
             path="/dashboard"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <DashboardPage />
+                <PermissionRoute module="DASHBOARD">
+                  <DashboardPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -90,7 +93,9 @@ export default function App() {
             path="/qc"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <ProinPage />
+                <PermissionRoute module="QC">
+                  <ProinPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -98,7 +103,9 @@ export default function App() {
             path="/reagentes"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <ReagentesPage />
+                <PermissionRoute module="REAGENTS">
+                  <ReagentesPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -106,7 +113,9 @@ export default function App() {
             path="/manutencao"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <ManutencaoPage />
+                <PermissionRoute module="MAINTENANCE">
+                  <ManutencaoPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -114,7 +123,9 @@ export default function App() {
             path="/temperatura"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <TemperaturaPage />
+                <PermissionRoute module="TEMPERATURE">
+                  <TemperaturaPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -122,7 +133,9 @@ export default function App() {
             path="/relatorios"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <RelatoriosPage />
+                <PermissionRoute module="REPORTS">
+                  <RelatoriosPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -130,7 +143,9 @@ export default function App() {
             path="/relatorios/legado"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <RelatoriosPage />
+                <PermissionRoute module="REPORTS">
+                  <RelatoriosPage />
+                </PermissionRoute>
               </Suspense>
             }
           />
@@ -138,7 +153,9 @@ export default function App() {
             path="/relatorios/:code"
             element={
               <Suspense fallback={<RouteFallback />}>
-                <ReportStudio />
+                <PermissionRoute module="REPORTS">
+                  <ReportStudio />
+                </PermissionRoute>
               </Suspense>
             }
           />

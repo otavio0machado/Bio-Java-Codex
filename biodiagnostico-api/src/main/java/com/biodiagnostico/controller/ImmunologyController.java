@@ -34,6 +34,7 @@ public class ImmunologyController {
     }
 
     @GetMapping("/control-sets")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<ImmunologyControlSetResponse>> getControlSets(
         @RequestParam(required = false) String analito,
         @RequestParam(defaultValue = "false") boolean includeInactive
@@ -44,7 +45,7 @@ public class ImmunologyController {
     }
 
     @PostMapping("/control-sets")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<ImmunologyControlSetResponse> createControlSet(
         @Valid @RequestBody ImmunologyControlSetRequest request
     ) {
@@ -52,7 +53,7 @@ public class ImmunologyController {
     }
 
     @PutMapping("/control-sets/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<ImmunologyControlSetResponse> updateControlSet(
         @PathVariable UUID id,
         @Valid @RequestBody ImmunologyControlSetRequest request
@@ -61,13 +62,14 @@ public class ImmunologyController {
     }
 
     @DeleteMapping("/control-sets/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deactivateControlSet(@PathVariable UUID id) {
         immunologyQcService.deactivateControlSet(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/runs")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<ImmunologyRunResponse>> getRuns(
         @RequestParam(required = false) String analito,
         @RequestParam(required = false) UUID controlSetId,
@@ -78,13 +80,13 @@ public class ImmunologyController {
     }
 
     @PostMapping("/runs")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<ImmunologyRunResponse> createRun(@Valid @RequestBody ImmunologyRunRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(immunologyQcService.createRun(request));
     }
 
     @DeleteMapping("/runs/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteRun(@PathVariable UUID id) {
         immunologyQcService.deleteRun(id);
         return ResponseEntity.noContent().build();

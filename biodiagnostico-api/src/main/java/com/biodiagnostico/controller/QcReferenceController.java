@@ -31,6 +31,7 @@ public class QcReferenceController {
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<QcReferenceResponse>> getReferences(
         @RequestParam(required = false) UUID examId,
         @RequestParam(required = false) String area,
@@ -44,6 +45,7 @@ public class QcReferenceController {
     }
 
     @GetMapping("/last")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<QcReferenceResponse> getLastReference(
         @RequestParam UUID examId,
         @RequestParam(defaultValue = "Normal") String level

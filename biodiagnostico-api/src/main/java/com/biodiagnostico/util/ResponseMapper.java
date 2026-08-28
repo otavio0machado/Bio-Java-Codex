@@ -49,9 +49,9 @@ public final class ResponseMapper {
             user.getName(),
             user.getRole().name(),
             user.getIsActive(),
-            user.getPermissions() == null
+            user.getEffectivePermissions() == null
                 ? java.util.List.of()
-                : user.getPermissions().stream().map(Enum::name).sorted().toList()
+                : user.getEffectivePermissions().stream().map(Enum::name).sorted().toList()
         );
     }
 

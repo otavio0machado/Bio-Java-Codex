@@ -31,6 +31,7 @@ public class MaintenanceController {
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('MAINTENANCE_VIEW')")
     public ResponseEntity<List<MaintenanceResponse>> getRecords(@RequestParam(required = false) String equipment) {
         List<MaintenanceResponse> responses = maintenanceService.getRecords(equipment)
             .stream()
@@ -63,6 +64,7 @@ public class MaintenanceController {
     }
 
     @GetMapping("/pending")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('MAINTENANCE_VIEW')")
     public ResponseEntity<List<MaintenanceResponse>> getPendingMaintenances() {
         List<MaintenanceResponse> responses = maintenanceService.getPendingMaintenances()
             .stream()

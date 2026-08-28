@@ -47,6 +47,7 @@ public class TemperatureController {
     // ========================================================================
 
     @GetMapping("/locations")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<List<TemperatureLocationResponse>> getLocations(
         @RequestParam(required = false) String area,
         @RequestParam(required = false) Boolean active
@@ -59,13 +60,14 @@ public class TemperatureController {
     }
 
     @GetMapping("/locations/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<TemperatureLocationResponse> getLocationById(@PathVariable UUID id) {
         TemperatureLocation loc = temperatureService.getLocationById(id);
         return ResponseEntity.ok(ResponseMapper.toTemperatureLocationResponse(loc));
     }
 
     @PostMapping("/locations")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE') or hasAuthority('MAINTENANCE_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE')")
     public ResponseEntity<TemperatureLocationResponse> createLocation(
         @Valid @RequestBody TemperatureLocationRequest request
     ) {
@@ -75,7 +77,7 @@ public class TemperatureController {
     }
 
     @PutMapping("/locations/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE') or hasAuthority('MAINTENANCE_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE')")
     public ResponseEntity<TemperatureLocationResponse> updateLocation(
         @PathVariable UUID id,
         @Valid @RequestBody TemperatureLocationRequest request
@@ -96,6 +98,7 @@ public class TemperatureController {
     // ========================================================================
 
     @GetMapping("/records")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<List<TemperatureRecordResponse>> getRecords(
         @RequestParam(required = false) UUID locationId,
         @RequestParam(required = false) Integer month,
@@ -112,13 +115,14 @@ public class TemperatureController {
     }
 
     @GetMapping("/records/{id}")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<TemperatureRecordResponse> getRecordById(@PathVariable UUID id) {
         TemperatureRecord record = temperatureService.getRecordById(id);
         return ResponseEntity.ok(ResponseMapper.toTemperatureRecordResponse(record));
     }
 
     @PostMapping("/records")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE') or hasAuthority('QC_WRITE') or hasAuthority('MAINTENANCE_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE')")
     public ResponseEntity<TemperatureRecordResponse> createRecord(
         @Valid @RequestBody TemperatureRecordRequest request,
         Principal principal
@@ -130,7 +134,7 @@ public class TemperatureController {
     }
 
     @PutMapping("/records/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE') or hasAuthority('QC_WRITE') or hasAuthority('MAINTENANCE_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE')")
     public ResponseEntity<TemperatureRecordResponse> updateRecord(
         @PathVariable UUID id,
         @Valid @RequestBody TemperatureRecordRequest request,
@@ -153,7 +157,7 @@ public class TemperatureController {
     // ========================================================================
 
     @PostMapping("/ocr")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE') or hasAuthority('QC_WRITE') or hasAuthority('MAINTENANCE_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('TEMPERATURE_WRITE')")
     public ResponseEntity<TemperatureOcrResponse> processPhoto(@Valid @RequestBody TemperatureOcrRequest request) {
         TemperatureOcrResponse response = temperatureService.processThermometerPhoto(
             request.imageBase64(),
@@ -166,11 +170,13 @@ public class TemperatureController {
     }
 
     @GetMapping("/summary")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<TemperatureSummaryResponse> getSummary() {
         return ResponseEntity.ok(temperatureService.getSummary());
     }
 
     @GetMapping("/export/excel")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<byte[]> exportExcel(
         @RequestParam(required = false) UUID locationId,
         @RequestParam(defaultValue = "8") int month,
@@ -186,6 +192,7 @@ public class TemperatureController {
     }
 
     @GetMapping("/export/pdf")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD') or hasAuthority('TEMPERATURE_VIEW')")
     public ResponseEntity<byte[]> exportPdf(
         @RequestParam(required = false) UUID locationId,
         @RequestParam(defaultValue = "8") int month,

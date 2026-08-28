@@ -37,6 +37,7 @@ public class ReagentController {
     }
 
     @GetMapping
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<List<ReagentLotResponse>> getLots(
         @RequestParam(required = false) String category,
         @RequestParam(required = false) String status
@@ -45,25 +46,25 @@ public class ReagentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> createLot(@Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(ResponseMapper.toReagentLotResponse(reagentService.createLot(request)));
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> updateLot(@PathVariable UUID id, @Valid @RequestBody ReagentLotRequest request) {
         return ResponseEntity.ok(ResponseMapper.toReagentLotResponse(reagentService.updateLot(id, request)));
     }
 
     /**
-     * Hard delete v3 — ADMIN-only com confirmacao por digitacao do {@code lotNumber}.
+     * Hard delete v3 — ADMIN ou REAGENTS_DELETE com confirmacao por digitacao do {@code lotNumber}.
      * Cascade {@code stock_movements} via JPA. Audit
      * {@code REAGENT_LOT_DELETED} com snapshot enumerativo (audit ressalva 1.2).
      */
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_DELETE')")
     public ResponseEntity<Void> deleteLot(
         @PathVariable UUID id,
         @Valid @RequestBody DeleteReagentLotRequest request
@@ -73,11 +74,11 @@ public class ReagentController {
     }
 
     /**
-     * Arquiva lote (status=inativo). ADMIN ou FUNCIONARIO. Body
+     * Arquiva lote (status=inativo). ADMIN ou FUNCIONARIO com REAGENTS_WRITE / REAGENT_WRITE. Body
      * {@code { archivedAt, archivedBy }}. Audit {@code REAGENT_LOT_ARCHIVED}.
      */
     @PostMapping("/{id}/archive")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> archiveLot(
         @PathVariable UUID id,
         @Valid @RequestBody ArchiveReagentLotRequest request
@@ -92,7 +93,7 @@ public class ReagentController {
      * Audit {@code REAGENT_LOT_UNARCHIVED}.
      */
     @PostMapping("/{id}/unarchive")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<ReagentLotResponse> unarchiveLot(
         @PathVariable UUID id,
         @RequestBody(required = false) UnarchiveReagentLotRequest request
@@ -103,6 +104,7 @@ public class ReagentController {
     }
 
     @GetMapping("/{id}/movements")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<List<StockMovementResponse>> getMovements(@PathVariable UUID id) {
         return ResponseEntity.ok(
             reagentService.getMovements(id).stream()
@@ -112,7 +114,7 @@ public class ReagentController {
     }
 
     @PostMapping("/{id}/movements")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<StockMovementResponse> createMovement(
         @PathVariable UUID id,
         @Valid @RequestBody StockMovementRequest request
@@ -122,13 +124,14 @@ public class ReagentController {
     }
 
     @DeleteMapping("/movements/{movId}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENT_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('REAGENTS_WRITE') or hasAuthority('REAGENT_WRITE')")
     public ResponseEntity<Void> deleteMovement(@PathVariable UUID movId) {
         reagentService.deleteMovement(movId);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/by-lot-number")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<List<ReagentLotResponse>> getByLotNumber(@RequestParam String lotNumber) {
         return ResponseEntity.ok(
             reagentService.getByLotNumber(lotNumber).stream()
@@ -138,11 +141,13 @@ public class ReagentController {
     }
 
     @GetMapping("/expiring")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<List<ReagentLotResponse>> getExpiringLots(@RequestParam(defaultValue = "30") int days) {
         return ResponseEntity.ok(reagentService.getExpiringLots(days).stream().map(ResponseMapper::toReagentLotResponse).toList());
     }
 
     @GetMapping("/labels")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<List<ReagentLabelSummary>> getLabelSummaries() {
         return ResponseEntity.ok(reagentService.getLabelSummaries());
     }
@@ -153,6 +158,7 @@ public class ReagentController {
      * Em Uso,Total,Status,Localizacao,Temperatura,Arquivado em,Arquivado por}.
      */
     @GetMapping("/export/csv")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasAuthority('REPORTS_DOWNLOAD') or hasAuthority('DOWNLOAD') or hasAuthority('REAGENTS_VIEW')")
     public ResponseEntity<byte[]> exportCsv(
         @RequestParam(required = false) String category,
         @RequestParam(required = false) String status

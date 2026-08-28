@@ -35,12 +35,13 @@ public class HematologyController {
     }
 
     @GetMapping("/parameters")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<HematologyParameterResponse>> getParameters(@RequestParam(required = false) String analito) {
         return ResponseEntity.ok(hematologyQcService.getParameters(analito));
     }
 
     @PostMapping("/parameters")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyParameterResponse> createParameter(
         @Valid @RequestBody HematologyParameterRequest request
     ) {
@@ -48,7 +49,7 @@ public class HematologyController {
     }
 
     @PutMapping("/parameters/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyParameterResponse> updateParameter(
         @PathVariable UUID id,
         @Valid @RequestBody HematologyParameterRequest request
@@ -57,19 +58,20 @@ public class HematologyController {
     }
 
     @DeleteMapping("/parameters/{id}")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<Void> deleteParameter(@PathVariable UUID id) {
         hematologyQcService.deleteParameter(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/measurements")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<HematologyMeasurementResponse>> getMeasurements(@RequestParam(required = false) UUID parameterId) {
         return ResponseEntity.ok(hematologyQcService.getMeasurements(parameterId));
     }
 
     @PostMapping("/measurements")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyMeasurementResponse> createMeasurement(
         @Valid @RequestBody HematologyMeasurementRequest request
     ) {
@@ -77,6 +79,7 @@ public class HematologyController {
     }
 
     @GetMapping("/bio-records")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('FUNCIONARIO') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('QC_VIEW')")
     public ResponseEntity<List<HematologyBioRecordResponse>> getBioRecords() {
         return ResponseEntity.ok(
             hematologyQcService.getBioRecords().stream()
@@ -86,7 +89,7 @@ public class HematologyController {
     }
 
     @PostMapping("/bio-records")
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_WRITE')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('QC_AREAS_WRITE') or hasAuthority('QC_WRITE')")
     public ResponseEntity<HematologyBioRecordResponse> createBioRecord(
         @Valid @RequestBody HematologyBioRequest request
     ) {

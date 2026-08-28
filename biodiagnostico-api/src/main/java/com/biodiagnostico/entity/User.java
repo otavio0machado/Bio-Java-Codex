@@ -1,5 +1,6 @@
 package com.biodiagnostico.entity;
 
+import com.biodiagnostico.service.PermissionCatalog;
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
@@ -71,7 +72,41 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    public Set<Permission> getEffectivePermissions() {
+        if (role == Role.ADMIN) {
+            return PermissionCatalog.getAllPermissions();
+        }
+        if (role == Role.VIGILANCIA_SANITARIA) {
+            return Set.of(
+                Permission.DASHBOARD_VIEW,
+                Permission.QC_VIEW,
+                Permission.REAGENTS_VIEW,
+                Permission.MAINTENANCE_VIEW,
+                Permission.TEMPERATURE_VIEW,
+                Permission.REPORTS_VIEW,
+                Permission.REPORTS_DOWNLOAD
+            );
+        }
+        if (role == Role.VISUALIZADOR) {
+            return Set.of(
+                Permission.DASHBOARD_VIEW,
+                Permission.QC_VIEW,
+                Permission.REAGENTS_VIEW,
+                Permission.MAINTENANCE_VIEW,
+                Permission.TEMPERATURE_VIEW,
+                Permission.REPORTS_VIEW
+            );
+        }
+        return permissions != null ? PermissionCatalog.expandImpliedPermissions(permissions) : Set.of();
+    }
+
     public boolean hasPermission(Permission permission) {
-        return role == Role.ADMIN || permissions.contains(permission);
+        if (permission == null) {
+            return false;
+        }
+        if (role == Role.ADMIN) {
+            return true;
+        }
+        return getEffectivePermissions().contains(permission);
     }
 }

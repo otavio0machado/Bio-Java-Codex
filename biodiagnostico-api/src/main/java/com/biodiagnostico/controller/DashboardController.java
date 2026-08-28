@@ -22,16 +22,19 @@ public class DashboardController {
     }
 
     @GetMapping("/kpis")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('DASHBOARD_VIEW')")
     public ResponseEntity<DashboardKpiResponse> getKpis(@RequestParam(required = false) String area) {
         return ResponseEntity.ok(dashboardService.getKpis(area));
     }
 
     @GetMapping("/alerts")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('DASHBOARD_VIEW')")
     public ResponseEntity<DashboardAlertsResponse> getAlerts() {
         return ResponseEntity.ok(dashboardService.getAlerts());
     }
 
     @GetMapping("/recent-records")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN') or hasRole('VIGILANCIA_SANITARIA') or hasRole('VISUALIZADOR') or hasAuthority('DASHBOARD_VIEW')")
     public ResponseEntity<List<QcRecordResponse>> getRecentRecords(
         @RequestParam(required = false) String area,
         @RequestParam(defaultValue = "10") int limit
