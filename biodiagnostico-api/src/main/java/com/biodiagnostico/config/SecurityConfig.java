@@ -51,7 +51,7 @@ public class SecurityConfig {
                 )
             )
             .authorizeHttpRequests(authorize -> authorize
-                .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll()
                 .requestMatchers(
                     "/api/auth/login",
                     "/api/auth/refresh",

@@ -1,7 +1,7 @@
 spring:
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: ${HIBERNATE_DDL_AUTO:none}
     # Mantido habilitado: os recursos de IA montam o contexto de CQ percorrendo a
     # colecao LAZY QcRecord.violations (AiService.buildQcContext) fora da transacao
     # de leitura. Com open-in-view=false isso lanca LazyInitializationException e
