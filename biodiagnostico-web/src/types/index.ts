@@ -58,6 +58,9 @@ export interface User {
   role: Role
   isActive: boolean
   permissions: string[]
+  createdAt?: string | null
+  lastLoginAt?: string | null
+  mustChangePassword?: boolean
 }
 
 export interface AuthResponse {
@@ -104,18 +107,27 @@ export interface AdminUserRequest {
   role: string
   email?: string
   permissions?: string[]
+  mustChangePassword?: boolean
 }
 
 export interface AdminUpdateUserRequest {
+  username?: string
   name?: string
   role?: string
   isActive?: boolean
   email?: string
   permissions?: string[]
+  mustChangePassword?: boolean
 }
 
 export interface AdminResetPasswordRequest {
   newPassword: string
+  mustChangePassword?: boolean
+}
+
+export interface AdminDeleteUserResponse {
+  status: 'DELETED' | 'DEACTIVATED'
+  message: string
 }
 
 export interface WestgardViolation {
@@ -953,6 +965,159 @@ export interface ImmunologyRun {
   notes?: string | null
   createdAt: string
   results: ImmunologyRunResult[]
+}
+
+export interface UroStripControlSet {
+  id: string
+  controlLotNumber: string
+  manufacturer: string
+  validUntil: string
+  expectedPhMin?: number | null
+  expectedPhMax?: number | null
+  expectedDensityMin?: number | null
+  expectedDensityMax?: number | null
+  expectedProteins: string
+  expectedGlucose: string
+  expectedKetones: string
+  expectedBlood: string
+  expectedUrobilinogen: string
+  expectedNitrite: string
+  expectedBilirubin: string
+  expectedLeukocytes: string
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UroStripControlSetRequest {
+  controlLotNumber: string
+  manufacturer: string
+  validUntil: string
+  expectedPhMin?: number | null
+  expectedPhMax?: number | null
+  expectedDensityMin?: number | null
+  expectedDensityMax?: number | null
+  expectedProteins?: string
+  expectedGlucose?: string
+  expectedKetones?: string
+  expectedBlood?: string
+  expectedUrobilinogen?: string
+  expectedNitrite?: string
+  expectedBilirubin?: string
+  expectedLeukocytes?: string
+}
+
+export interface UroStripRun {
+  id: string
+  controlSetId: string
+  dataMedicao: string
+  controlLotSnapshot: string
+  controlValidUntilSnapshot: string
+  reagentLotId?: string | null
+  reagentLabelSnapshot?: string | null
+  reagentManufacturerSnapshot?: string | null
+  reagentLotNumberSnapshot?: string | null
+  reagentValidUntilSnapshot?: string | null
+  measuredPh?: number | null
+  statusPh: 'APROVADO' | 'REPROVADO'
+  measuredDensity?: number | null
+  statusDensity: 'APROVADO' | 'REPROVADO'
+  measuredProteins: string
+  statusProteins: 'APROVADO' | 'REPROVADO'
+  measuredGlucose: string
+  statusGlucose: 'APROVADO' | 'REPROVADO'
+  measuredKetones: string
+  statusKetones: 'APROVADO' | 'REPROVADO'
+  measuredBlood: string
+  statusBlood: 'APROVADO' | 'REPROVADO'
+  measuredUrobilinogen: string
+  statusUrobilinogen: 'APROVADO' | 'REPROVADO'
+  measuredNitrite: string
+  statusNitrite: 'APROVADO' | 'REPROVADO'
+  statusGeral: 'APROVADO' | 'REPROVADO'
+  correctiveAction?: string | null
+  analyst?: string | null
+  notes?: string | null
+  createdAt: string
+}
+
+export interface UroStripRunRequest {
+  controlSetId: string
+  dataMedicao: string
+  reagentLotId?: string | null
+  measuredPh?: number | null
+  measuredDensity?: number | null
+  measuredProteins?: string
+  measuredGlucose?: string
+  measuredKetones?: string
+  measuredBlood?: string
+  measuredUrobilinogen?: string
+  measuredNitrite?: string
+  correctiveAction?: string | null
+  analyst?: string | null
+  notes?: string | null
+}
+
+export interface UroSedimentRun {
+  id: string
+  dataMedicao: string
+  patientCode: string
+  analyst1Id?: string | null
+  analyst1Name: string
+  analyst2Id?: string | null
+  analyst2Name: string
+  leukocytesA1: number
+  leukocytesA2: number
+  leukocytesCv: number
+  statusLeukocytes: 'APROVADO' | 'REPROVADO'
+  erythrocytesA1: number
+  erythrocytesA2: number
+  erythrocytesCv: number
+  statusErythrocytes: 'APROVADO' | 'REPROVADO'
+  bacteriaA1: string
+  bacteriaA2: string
+  statusBacteria: 'APROVADO' | 'REPROVADO'
+  epithelialCellsA1: string
+  epithelialCellsA2: string
+  statusEpithelialCells: 'APROVADO' | 'REPROVADO'
+  mucusThreadsA1: string
+  mucusThreadsA2: string
+  statusMucusThreads: 'APROVADO' | 'REPROVADO'
+  crystalsA1: string
+  crystalsA2: string
+  statusCrystals: 'APROVADO' | 'REPROVADO'
+  othersA1: string
+  othersA2: string
+  statusOthers: 'APROVADO' | 'REPROVADO'
+  statusGeral: 'APROVADO' | 'REPROVADO'
+  correctiveAction?: string | null
+  notes?: string | null
+  createdAt: string
+}
+
+export interface UroSedimentRunRequest {
+  dataMedicao: string
+  patientCode: string
+  analyst1Id?: string | null
+  analyst1Name?: string | null
+  analyst2Id?: string | null
+  analyst2Name?: string | null
+  leukocytesA1: number
+  leukocytesA2: number
+  erythrocytesA1: number
+  erythrocytesA2: number
+  bacteriaA1: string
+  bacteriaA2: string
+  epithelialCellsA1: string
+  epithelialCellsA2: string
+  mucusThreadsA1: string
+  mucusThreadsA2: string
+  crystalsA1: string
+  crystalsA2: string
+  othersA1: string
+  othersA2: string
+  correctiveAction?: string | null
+  notes?: string | null
 }
 
 export * from './temperature'
