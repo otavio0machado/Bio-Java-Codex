@@ -1,13 +1,27 @@
-import { KeyRound, Pencil, Shield } from 'lucide-react'
+import {
+  Activity,
+  Clock,
+  Eye,
+  KeyRound,
+  LogOut,
+  Pencil,
+  Shield,
+  Trash2,
+} from 'lucide-react'
 import { Button, Card } from '../ui'
 import { ROLE_COLORS, ROLE_ICONS, getUserActiveModules } from './UserTable'
 import { ROLE_LABELS } from '../../lib/permissions'
+import { formatDateTime } from './adminHelpers'
 import type { User } from '../../types'
 
 interface UserCardsGridProps {
   users: User[]
   onEdit: (user: User) => void
   onResetPassword: (user: User) => void
+  onViewDetails?: (user: User) => void
+  onViewAudit?: (user: User) => void
+  onRevokeSessions?: (user: User) => void
+  onDelete?: (user: User) => void
   currentUserId?: string
 }
 
@@ -15,19 +29,24 @@ export function UserCardsGrid({
   users,
   onEdit,
   onResetPassword,
+  onViewDetails,
+  onViewAudit,
+  onRevokeSessions,
+  onDelete,
   currentUserId,
 }: UserCardsGridProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {users.map((user) => {
         const RoleIcon = ROLE_ICONS[user.role] ?? Shield
-        const initials = (user.name || 'U')
-          .split(' ')
-          .filter(Boolean)
-          .map((p) => p[0])
-          .join('')
-          .slice(0, 2)
-          .toUpperCase() || 'U'
+        const initials =
+          (user.name || 'U')
+            .split(' ')
+            .filter(Boolean)
+            .map((p) => p[0])
+            .join('')
+            .slice(0, 2)
+            .toUpperCase() || 'U'
 
         const activeModules = getUserActiveModules(user)
         const isSelf = currentUserId === user.id
@@ -65,6 +84,11 @@ export function UserCardsGrid({
                         Inativo
                       </span>
                     )}
+                    {user.mustChangePassword && (
+                      <span className="shrink-0 rounded-full bg-amber-50 px-1.5 py-0.2 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                        Troca pendente
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-neutral-500">@{user.username}</p>
                   {user.email && (
@@ -75,8 +99,8 @@ export function UserCardsGrid({
                 </div>
               </div>
 
-              {/* Role Badge */}
-              <div className="flex items-center gap-2">
+              {/* Role Badge e Último Acesso */}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${
                     ROLE_COLORS[user.role] ?? 'bg-neutral-100 text-neutral-600 border-neutral-200'
@@ -85,6 +109,11 @@ export function UserCardsGrid({
                   <RoleIcon className="h-3.5 w-3.5" />
                   {ROLE_LABELS[user.role] ?? user.role}
                 </span>
+
+                <div className="flex items-center gap-1 text-[11px] text-neutral-500">
+                  <Clock className="h-3 w-3 text-neutral-400" />
+                  <span>{formatDateTime(user.lastLoginAt)}</span>
+                </div>
               </div>
 
               {/* Módulos Liberados */}
@@ -99,7 +128,7 @@ export function UserCardsGrid({
                     </span>
                   ) : activeModules.length === 0 ? (
                     <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700 border border-red-200">
-                      Nenhum Módulo (Acesso Bloqueado)
+                      Nenhum Módulo (Bloqueado)
                     </span>
                   ) : (
                     activeModules.map((mod) => (
@@ -116,25 +145,70 @@ export function UserCardsGrid({
             </div>
 
             {/* Ações */}
-            <div className="flex gap-2 border-t border-neutral-100 pt-3">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="flex-1"
-                onClick={() => onEdit(user)}
-              >
-                <Pencil className="mr-1.5 h-3.5 w-3.5 text-neutral-600" />
-                Editar
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="flex-1"
-                onClick={() => onResetPassword(user)}
-              >
-                <KeyRound className="mr-1.5 h-3.5 w-3.5 text-neutral-600" />
-                Senha
-              </Button>
+            <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-neutral-100 pt-3">
+              <div className="flex items-center gap-1">
+                {onViewDetails && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onViewDetails(user)}
+                    title="Ficha completa do usuário"
+                  >
+                    <Eye className="h-3.5 w-3.5 text-neutral-600" />
+                  </Button>
+                )}
+                {onViewAudit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onViewAudit(user)}
+                    title="Ver histórico de auditoria"
+                  >
+                    <Activity className="h-3.5 w-3.5 text-violet-600" />
+                  </Button>
+                )}
+                {onRevokeSessions && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onRevokeSessions(user)}
+                    title="Desconectar todas as sessões"
+                  >
+                    <LogOut className="h-3.5 w-3.5 text-amber-600" />
+                  </Button>
+                )}
+                {onDelete && !isSelf && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onDelete(user)}
+                    title="Excluir ou inativar usuário"
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onResetPassword(user)}
+                  title="Redefinir senha de acesso"
+                >
+                  <KeyRound className="mr-1 h-3.5 w-3.5 text-neutral-600" />
+                  Senha
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onEdit(user)}
+                >
+                  <Pencil className="mr-1 h-3.5 w-3.5 text-neutral-600" />
+                  Editar
+                </Button>
+              </div>
             </div>
           </Card>
         )

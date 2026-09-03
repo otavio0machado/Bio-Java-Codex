@@ -1,5 +1,6 @@
 package com.biodiagnostico.dto.response;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,6 +11,9 @@ public record UserResponse(
     String name,
     String role,
     Boolean isActive,
-    List<String> permissions
+    List<String> permissions,
+    Instant createdAt,
+    Instant lastLoginAt,
+    Boolean mustChangePassword
 ) {
 }

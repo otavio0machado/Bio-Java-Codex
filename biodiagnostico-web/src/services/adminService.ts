@@ -31,5 +31,14 @@ export const adminService = {
   async resetPassword(id: string, request: AdminResetPasswordRequest): Promise<void> {
     await api.put(`/admin/users/${id}/password`, request)
   },
+
+  async revokeUserSessions(id: string): Promise<void> {
+    await api.post(`/admin/users/${id}/revoke-sessions`)
+  },
+
+  async deleteUser(id: string): Promise<import('../types').AdminDeleteUserResponse> {
+    const { data } = await api.delete<import('../types').AdminDeleteUserResponse>(`/admin/users/${id}`)
+    return data
+  },
 }
 

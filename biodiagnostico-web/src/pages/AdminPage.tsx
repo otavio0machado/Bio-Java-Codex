@@ -1,20 +1,29 @@
 import { useMemo, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
   ShieldCheck,
+  Trash2,
   UserPlus,
   Users,
 } from 'lucide-react'
-import { Button, useToast } from '../components/ui'
+import { Button, Modal, useToast } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
-import { usePermissionsCatalog, useUpdateUser, useUsers } from '../hooks/useAdmin'
+import {
+  useDeleteUser,
+  usePermissionsCatalog,
+  useRevokeUserSessions,
+  useUpdateUser,
+  useUsers,
+} from '../hooks/useAdmin'
 import { AuditLogsTab } from '../components/admin/AuditLogsTab'
 import { CreateUserModal } from '../components/admin/CreateUserModal'
 import { EditUserModal } from '../components/admin/EditUserModal'
 import { PermissionMatrixTab } from '../components/admin/PermissionMatrixTab'
 import { ResetPasswordModal } from '../components/admin/ResetPasswordModal'
+import { UserDetailsModal } from '../components/admin/UserDetailsModal'
 import { UserManagementTab } from '../components/admin/UserManagementTab'
-import { normalizeModuleCatalog } from '../components/admin/adminHelpers'
+import { extractErrorMessage, normalizeModuleCatalog } from '../components/admin/adminHelpers'
 import type { User } from '../types'
 
 type AdminTab = 'usuarios' | 'auditoria' | 'matriz'
@@ -24,6 +33,8 @@ export function AdminPage() {
   const { toast } = useToast()
   const { data: users = [], isLoading } = useUsers()
   const updateUser = useUpdateUser()
+  const deleteUser = useDeleteUser()
+  const revokeSessions = useRevokeUserSessions()
   const { data: catalogData } = usePermissionsCatalog()
   const catalog = useMemo(() => normalizeModuleCatalog(catalogData?.modules), [catalogData])
 
@@ -31,6 +42,9 @@ export function AdminPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [resetUser, setResetUser] = useState<User | null>(null)
+  const [selectedUserDetails, setSelectedUserDetails] = useState<User | null>(null)
+  const [userToDelete, setUserToDelete] = useState<User | null>(null)
+  const [auditPreselectedUserId, setAuditPreselectedUserId] = useState<string | undefined>(undefined)
 
   const handleToggleActive = async (targetUser: User) => {
     if (targetUser.id === currentUser?.id) {
@@ -50,6 +64,35 @@ export function AdminPage() {
       )
     } catch {
       toast.error('Erro ao alterar status do usuário.')
+    }
+  }
+
+  const handleRevokeSessions = async (targetUser: User) => {
+    try {
+      await revokeSessions.mutateAsync(targetUser.id)
+      toast.success(`Todas as sessões ativas de "${targetUser.name}" foram revogadas com sucesso!`)
+    } catch (err) {
+      toast.error(extractErrorMessage(err, 'Erro ao revogar sessões do usuário.'))
+    }
+  }
+
+  const handleViewAudit = (targetUser: User) => {
+    setAuditPreselectedUserId(targetUser.id)
+    setActiveTab('auditoria')
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!userToDelete) return
+    try {
+      const res = await deleteUser.mutateAsync(userToDelete.id)
+      if (res.status === 'DEACTIVATED') {
+        toast.info(res.message)
+      } else {
+        toast.success(res.message)
+      }
+      setUserToDelete(null)
+    } catch (err) {
+      toast.error(extractErrorMessage(err, 'Erro ao excluir usuário.'))
     }
   }
 
@@ -92,7 +135,10 @@ export function AdminPage() {
 
           <button
             type="button"
-            onClick={() => setActiveTab('auditoria')}
+            onClick={() => {
+              setAuditPreselectedUserId(undefined)
+              setActiveTab('auditoria')
+            }}
             className={`flex items-center gap-2 border-b-2 py-3 px-1 text-sm font-semibold transition-colors ${
               activeTab === 'auditoria'
                 ? 'border-emerald-700 text-emerald-800'
@@ -127,16 +173,23 @@ export function AdminPage() {
           onEditUser={(u) => setEditUser(u)}
           onResetPassword={(u) => setResetUser(u)}
           onToggleActive={handleToggleActive}
+          onViewDetails={(u) => setSelectedUserDetails(u)}
+          onViewAudit={handleViewAudit}
+          onRevokeSessions={handleRevokeSessions}
+          onDelete={(u) => setUserToDelete(u)}
           currentUserId={currentUser?.id}
         />
       )}
 
-      {activeTab === 'auditoria' && <AuditLogsTab users={users} />}
+      {activeTab === 'auditoria' && (
+        <AuditLogsTab users={users} initialUserId={auditPreselectedUserId} />
+      )}
 
       {activeTab === 'matriz' && <PermissionMatrixTab catalog={catalog} />}
 
       {/* Modais */}
       <CreateUserModal isOpen={createOpen} onClose={() => setCreateOpen(false)} />
+
       {editUser && (
         <EditUserModal
           user={editUser}
@@ -144,8 +197,66 @@ export function AdminPage() {
           currentUserId={currentUser?.id}
         />
       )}
+
       {resetUser && (
         <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} />
+      )}
+
+      {selectedUserDetails && (
+        <UserDetailsModal
+          user={selectedUserDetails}
+          onClose={() => setSelectedUserDetails(null)}
+          onEdit={(u) => setEditUser(u)}
+          onResetPassword={(u) => setResetUser(u)}
+          onViewAudit={handleViewAudit}
+          onRevokeSessions={handleRevokeSessions}
+          onDelete={(u) => setUserToDelete(u)}
+          currentUserId={currentUser?.id}
+        />
+      )}
+
+      {/* Modal de Confirmação de Exclusão com Conformidade RDC 786 */}
+      {userToDelete && (
+        <Modal
+          isOpen
+          onClose={() => setUserToDelete(null)}
+          title="Confirmar Exclusão de Usuário"
+          footer={
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setUserToDelete(null)}>
+                Cancelar
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleConfirmDelete}
+                loading={deleteUser.isPending}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                Confirmar Exclusão
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-2xl bg-amber-50 p-4 text-sm text-amber-900 border border-amber-200/80">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+              <div>
+                <p className="font-semibold">
+                  Deseja excluir o usuário {userToDelete.name} (@{userToDelete.username})?
+                </p>
+                <p className="mt-2 text-xs text-amber-800 leading-relaxed">
+                  <strong>Conformidade Regulatória (RDC 786 / PNCQ):</strong>
+                  <br />
+                  Se este usuário possuir qualquer registro no laboratório (laudos, medições de CQ,
+                  registros de temperatura ou trilhas de auditoria), o sistema irá
+                  <strong> inativar a conta e desconectar sessões</strong> imediatamente para preservar a
+                  rastreabilidade legal. A exclusão permanente só ocorrerá caso a conta não tenha nenhum
+                  vínculo histórico.
+                </p>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

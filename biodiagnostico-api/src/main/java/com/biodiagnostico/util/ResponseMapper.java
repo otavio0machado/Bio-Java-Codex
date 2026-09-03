@@ -51,7 +51,10 @@ public final class ResponseMapper {
             user.getIsActive(),
             user.getEffectivePermissions() == null
                 ? java.util.List.of()
-                : user.getEffectivePermissions().stream().map(Enum::name).sorted().toList()
+                : user.getEffectivePermissions().stream().map(Enum::name).sorted().toList(),
+            user.getCreatedAt(),
+            user.getLastLoginAt(),
+            Boolean.TRUE.equals(user.getMustChangePassword())
         );
     }
 

@@ -20,6 +20,12 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     boolean existsByEmail(String email);
 
+    boolean existsByEmailIgnoreCase(String email);
+
+    boolean existsByEmailIgnoreCaseAndIdNot(String email, UUID id);
+
+    boolean existsByUsernameIgnoreCaseAndIdNot(String username, UUID id);
+
     /**
      * Lista usuarios elegiveis a serem "responsavel" por um movimento ou arquivamento
      * (refator v3 — combobox).

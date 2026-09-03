@@ -275,7 +275,7 @@ class AuthControllerTest {
     }
 
     private UserResponse userResponse() {
-        return new UserResponse(UUID.randomUUID(), "novo", "novo@bio.com", "Novo", "ADMIN", true, List.of());
+        return new UserResponse(UUID.randomUUID(), "novo", "novo@bio.com", "Novo", "ADMIN", true, List.of(), java.time.Instant.now(), null, false);
     }
 
     private static com.biodiagnostico.security.JwtTokenProvider tokenProvider() {

@@ -1,8 +1,17 @@
 import { useState } from 'react'
-import { Eye, EyeOff, KeyRound, ShieldAlert, UserX, X } from 'lucide-react'
+import {
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
+  ShieldAlert,
+  Sparkles,
+  UserX,
+  X,
+} from 'lucide-react'
 import { Button, Input, Modal, useToast } from '../ui'
 import { useResetPassword } from '../../hooks/useAdmin'
-import { extractErrorMessage } from './adminHelpers'
+import { extractErrorMessage, generateSecurePassword } from './adminHelpers'
 import type { User } from '../../types'
 
 interface ResetPasswordModalProps {
@@ -15,7 +24,21 @@ export function ResetPasswordModal({ user, onClose }: ResetPasswordModalProps) {
   const resetPassword = useResetPassword()
   const [newPassword, setNewPassword] = useState('')
   const [showPw, setShowPw] = useState(false)
+  const [mustChangePassword, setMustChangePassword] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const handleGeneratePassword = () => {
+    const generated = generateSecurePassword()
+    setNewPassword(generated)
+    setShowPw(true)
+    toast.info('Senha segura gerada com sucesso!')
+  }
+
+  const handleCopyPassword = () => {
+    if (!newPassword) return
+    navigator.clipboard.writeText(newPassword)
+    toast.success('Senha copiada para a área de transferência!')
+  }
 
   const handleSubmit = async () => {
     if (resetPassword.isPending) return
@@ -28,7 +51,10 @@ export function ResetPasswordModal({ user, onClose }: ResetPasswordModalProps) {
     }
 
     try {
-      await resetPassword.mutateAsync({ id: user.id, request: { newPassword } })
+      await resetPassword.mutateAsync({
+        id: user.id,
+        request: { newPassword, mustChangePassword },
+      })
       toast.success(`Senha do usuário "${user.name}" redefinida com sucesso!`)
       setNewPassword('')
       onClose()
@@ -92,23 +118,56 @@ export function ResetPasswordModal({ user, onClose }: ResetPasswordModalProps) {
           </span>
         </div>
 
-        {/* Campo de Senha */}
-        <div className="relative">
-          <Input
-            label="Nova Senha *"
-            type={showPw ? 'text' : 'password'}
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            placeholder="Digite a nova senha (mínimo 4 dígitos)"
-          />
-          <button
-            type="button"
-            className="absolute right-3 top-[2.65rem] rounded-full p-1 text-neutral-400 transition hover:text-neutral-700"
-            onClick={() => setShowPw(!showPw)}
-            tabIndex={-1}
-          >
-            {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
+        {/* Campo de Senha com Gerador e Cópia */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-semibold text-neutral-700">Nova Senha *</label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleGeneratePassword}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 transition"
+              >
+                <Sparkles className="h-3 w-3 text-emerald-600" />
+                Gerar Senha
+              </button>
+              {newPassword ? (
+                <button
+                  type="button"
+                  onClick={handleCopyPassword}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 transition"
+                >
+                  <Copy className="h-3 w-3 text-neutral-500" />
+                  Copiar
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="relative">
+            <Input
+              type={showPw ? 'text' : 'password'}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Digite a nova senha (mínimo 4 dígitos)"
+            />
+            <button
+              type="button"
+              className="absolute right-3 top-2.5 rounded-full p-1 text-neutral-400 transition hover:text-neutral-700"
+              onClick={() => setShowPw(!showPw)}
+              tabIndex={-1}
+            >
+              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-xs text-neutral-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={mustChangePassword}
+              onChange={(e) => setMustChangePassword(e.target.checked)}
+              className="h-4 w-4 rounded border-neutral-300 text-emerald-800 focus:ring-emerald-700"
+            />
+            <span>Exigir alteração de senha no próximo acesso</span>
+          </label>
         </div>
       </div>
     </Modal>

@@ -16,6 +16,9 @@ const ACTION_LABELS: Record<string, string> = {
   USER_CREATED: 'Criou novo usuário',
   USER_UPDATED: 'Atualizou usuário',
   PASSWORD_RESET: 'Redefiniu senha',
+  USER_DEACTIVATED: 'Desativou usuário (auditoria preservada)',
+  USER_DELETED: 'Excluiu usuário permanentemente',
+  SESSIONS_REVOKED: 'Revogou sessões ativas',
 }
 
 const ACTION_COLORS: Record<string, string> = {
@@ -27,6 +30,9 @@ const ACTION_COLORS: Record<string, string> = {
   USER_CREATED: 'bg-violet-50 text-violet-700 border-violet-200',
   USER_UPDATED: 'bg-amber-50 text-amber-700 border-amber-200',
   PASSWORD_RESET: 'bg-red-50 text-red-700 border-red-200',
+  USER_DEACTIVATED: 'bg-orange-50 text-orange-700 border-orange-200',
+  USER_DELETED: 'bg-red-50 text-red-700 border-red-200',
+  SESSIONS_REVOKED: 'bg-amber-50 text-amber-700 border-amber-200',
 }
 
 function formatLogDate(iso: string) {
@@ -46,8 +52,13 @@ function formatLogDate(iso: string) {
   }
 }
 
-export function AuditLogsTab({ users }: { users: User[] }) {
-  const [filterUser, setFilterUser] = useState<string>('')
+interface AuditLogsTabProps {
+  users: User[]
+  initialUserId?: string
+}
+
+export function AuditLogsTab({ users, initialUserId }: AuditLogsTabProps) {
+  const [filterUser, setFilterUser] = useState<string>(initialUserId || '')
   const { data: logs = [], isLoading } = useAuditLogs(filterUser || undefined)
 
   const auditSummary = useAuditSummary()

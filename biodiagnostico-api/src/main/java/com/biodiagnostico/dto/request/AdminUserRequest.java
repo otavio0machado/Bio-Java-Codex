@@ -15,6 +15,7 @@ public record AdminUserRequest(
     @Pattern(regexp = "^(ADMIN|FUNCIONARIO|VIGILANCIA_SANITARIA|VISUALIZADOR)$", message = "Role inválida")
     String role,
     @Size(max = 120) String email,
-    Set<String> permissions
+    Set<String> permissions,
+    Boolean mustChangePassword
 ) {
 }

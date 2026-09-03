@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import {
+  Copy,
   Eye,
   EyeOff,
   Shield,
   ShieldAlert,
+  Sparkles,
   UserPlus,
   X,
 } from 'lucide-react'
@@ -12,7 +14,11 @@ import { useCreateUser, usePermissionsCatalog } from '../../hooks/useAdmin'
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from '../../lib/permissions'
 import { ModulePermissionSelector } from './ModulePermissionSelector'
 import { ROLE_ICONS } from './UserTable'
-import { extractErrorMessage, normalizeModuleCatalog } from './adminHelpers'
+import {
+  extractErrorMessage,
+  generateSecurePassword,
+  normalizeModuleCatalog,
+} from './adminHelpers'
 import type { Role } from '../../types'
 
 const ROLES: Role[] = ['ADMIN', 'FUNCIONARIO', 'VIGILANCIA_SANITARIA', 'VISUALIZADOR']
@@ -35,6 +41,7 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
   const [email, setEmail] = useState('')
   const [permissions, setPermissions] = useState<string[]>([])
   const [showPw, setShowPw] = useState(false)
+  const [mustChangePassword, setMustChangePassword] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const resetForm = () => {
@@ -45,7 +52,21 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
     setEmail('')
     setPermissions([])
     setShowPw(false)
+    setMustChangePassword(true)
     setErrorMessage(null)
+  }
+
+  const handleGeneratePassword = () => {
+    const generated = generateSecurePassword()
+    setPassword(generated)
+    setShowPw(true)
+    toast.info('Senha segura gerada com sucesso!')
+  }
+
+  const handleCopyPassword = () => {
+    if (!password) return
+    navigator.clipboard.writeText(password)
+    toast.success('Senha copiada para a área de transferência!')
   }
 
   const handleSubmit = async () => {
@@ -72,6 +93,7 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
         role,
         email: email.trim() || undefined,
         permissions: role === 'FUNCIONARIO' ? permissions : undefined,
+        mustChangePassword,
       })
       toast.success(`Usuário "${name.trim()}" criado com sucesso!`)
       resetForm()
@@ -148,22 +170,55 @@ export function CreateUserModal({ isOpen, onClose }: CreateUserModalProps) {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="relative">
-            <Input
-              label="Senha Inicial *"
-              type={showPw ? 'text' : 'password'}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Mínimo 4 caracteres"
-            />
-            <button
-              type="button"
-              className="absolute right-3 top-[2.65rem] rounded-full p-1 text-neutral-400 transition hover:text-neutral-700"
-              onClick={() => setShowPw(!showPw)}
-              tabIndex={-1}
-            >
-              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-semibold text-neutral-700">Senha Inicial *</label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleGeneratePassword}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 transition"
+                >
+                  <Sparkles className="h-3 w-3 text-emerald-600" />
+                  Gerar Senha
+                </button>
+                {password ? (
+                  <button
+                    type="button"
+                    onClick={handleCopyPassword}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-neutral-600 hover:text-neutral-900 transition"
+                  >
+                    <Copy className="h-3 w-3 text-neutral-500" />
+                    Copiar
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="relative">
+              <Input
+                type={showPw ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Mínimo 4 caracteres"
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-2.5 rounded-full p-1 text-neutral-400 transition hover:text-neutral-700"
+                onClick={() => setShowPw(!showPw)}
+                tabIndex={-1}
+              >
+                {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <label className="mt-2 flex items-center gap-2 text-xs text-neutral-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={mustChangePassword}
+                onChange={(e) => setMustChangePassword(e.target.checked)}
+                className="h-4 w-4 rounded border-neutral-300 text-emerald-800 focus:ring-emerald-700"
+              />
+              <span>Exigir alteração de senha no primeiro acesso</span>
+            </label>
           </div>
 
           <Input

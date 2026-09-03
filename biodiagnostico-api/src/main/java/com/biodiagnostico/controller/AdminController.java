@@ -73,7 +73,7 @@ public class AdminController {
                 requestingUserId = adminService.findUserIdByUsername(authentication.getName()).orElse(null);
             }
         }
-        return ResponseEntity.ok(adminService.updateUser(id, request, requestingUserId));
+        return ResponseEntity.ok(adminService.updateUser(id, request, extractRequestingUserId(authentication)));
     }
 
     @PutMapping("/users/{id}/password")
@@ -83,6 +83,38 @@ public class AdminController {
     ) {
         adminService.resetPassword(id, request);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/users/{id}/revoke-sessions")
+    public ResponseEntity<Void> revokeSessions(@PathVariable UUID id) {
+        adminService.revokeUserSessionsAndAudit(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @org.springframework.web.bind.annotation.DeleteMapping("/users/{id}")
+    public ResponseEntity<Map<String, Object>> deleteUser(
+        @PathVariable UUID id,
+        Authentication authentication
+    ) {
+        Map<String, Object> result = adminService.deleteUser(id, extractRequestingUserId(authentication));
+        return ResponseEntity.ok(result);
+    }
+
+    private UUID extractRequestingUserId(Authentication authentication) {
+        if (authentication == null) return null;
+        if (authentication.getDetails() instanceof UUID uuid) {
+            return uuid;
+        }
+        if (authentication.getDetails() instanceof String str) {
+            try {
+                return UUID.fromString(str);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (authentication.getName() != null) {
+            return adminService.findUserIdByUsername(authentication.getName()).orElse(null);
+        }
+        return null;
     }
 
     @GetMapping("/audit-logs")

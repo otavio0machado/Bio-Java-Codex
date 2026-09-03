@@ -46,7 +46,8 @@ class AdminServiceTest {
             userRepository,
             passwordEncoder,
             auditService,
-            refreshTokenSessionRepository
+            refreshTokenSessionRepository,
+            auditLogRepository
         );
     }
 
@@ -59,10 +60,12 @@ class AdminServiceTest {
             "Carlos Silva",
             "FUNCIONARIO",
             "carlos@biodiagnostico.com",
-            Set.of("QC_WRITE")
+            Set.of("QC_WRITE"),
+            false
         );
 
         when(userRepository.existsByUsername("carlos.silva")).thenReturn(false);
+        when(userRepository.existsByEmailIgnoreCase("carlos@biodiagnostico.com")).thenReturn(false);
         when(passwordEncoder.encode("senha123")).thenReturn("encoded_hash");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
             User u = invocation.getArgument(0);
@@ -74,6 +77,7 @@ class AdminServiceTest {
                 .role(u.getRole())
                 .permissions(u.getPermissions())
                 .isActive(u.getIsActive())
+                .mustChangePassword(u.getMustChangePassword())
                 .build();
         });
 
@@ -89,6 +93,27 @@ class AdminServiceTest {
     }
 
     @Test
+    @DisplayName("Não deve permitir criar usuário com email já existente")
+    void shouldFailWhenEmailAlreadyExists() {
+        AdminUserRequest request = new AdminUserRequest(
+            "novo.user",
+            "senha123",
+            "Novo User",
+            "FUNCIONARIO",
+            "duplicado@biodiagnostico.com",
+            Set.of("QC_VIEW"),
+            false
+        );
+
+        when(userRepository.existsByUsername("novo.user")).thenReturn(false);
+        when(userRepository.existsByEmailIgnoreCase("duplicado@biodiagnostico.com")).thenReturn(true);
+
+        assertThatThrownBy(() -> adminService.createUser(request))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Já existe um usuário com este e-mail");
+    }
+
+    @Test
     @DisplayName("Ao criar ADMIN, deve ignorar permissões passadas e persistir conjunto vazio (permissões são inerentes ao role)")
     void shouldIgnorePermissionsWhenCreatingAdmin() {
         AdminUserRequest request = new AdminUserRequest(
@@ -97,10 +122,12 @@ class AdminServiceTest {
             "Admin Master",
             "ADMIN",
             "admin@biodiagnostico.com",
-            Set.of("QC_WRITE", "TEMPERATURE_WRITE")
+            Set.of("QC_WRITE", "TEMPERATURE_WRITE"),
+            false
         );
 
         when(userRepository.existsByUsername("admin.master")).thenReturn(false);
+        when(userRepository.existsByEmailIgnoreCase("admin@biodiagnostico.com")).thenReturn(false);
         when(passwordEncoder.encode("senha123")).thenReturn("encoded_hash");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> {
             User u = invocation.getArgument(0);
@@ -118,7 +145,6 @@ class AdminServiceTest {
         UserResponse response = adminService.createUser(request);
 
         assertThat(response.role()).isEqualTo("ADMIN");
-        // Effective permissions for ADMIN include all 16 permissions
         assertThat(response.permissions()).hasSize(16);
     }
 
@@ -154,7 +180,9 @@ class AdminServiceTest {
         AdminUpdateUserRequest updateRequest = new AdminUpdateUserRequest(
             null,
             null,
+            null,
             false,
+            null,
             null,
             null
         );
@@ -162,6 +190,35 @@ class AdminServiceTest {
         adminService.updateUser(userId, updateRequest, requestingAdminId);
 
         assertThat(user.getIsActive()).isFalse();
+        assertThat(session.getRevokedAt()).isNotNull();
+        verify(refreshTokenSessionRepository).save(session);
+    }
+
+    @Test
+    @DisplayName("Deve revogar sessões avulsas com registro de auditoria")
+    void shouldRevokeUserSessionsAndAudit() {
+        UUID userId = UUID.randomUUID();
+        User user = User.builder()
+            .id(userId)
+            .username("marcos")
+            .isActive(true)
+            .build();
+
+        RefreshTokenSession session = RefreshTokenSession.builder()
+            .id(UUID.randomUUID())
+            .user(user)
+            .tokenId(UUID.randomUUID())
+            .familyId(UUID.randomUUID())
+            .tokenHash("hash456")
+            .expiresAt(java.time.Instant.now().plusSeconds(3600))
+            .build();
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(refreshTokenSessionRepository.findByUser_IdAndRevokedAtIsNull(userId))
+            .thenReturn(List.of(session));
+
+        adminService.revokeUserSessionsAndAudit(userId);
+
         assertThat(session.getRevokedAt()).isNotNull();
         verify(refreshTokenSessionRepository).save(session);
     }
@@ -182,7 +239,9 @@ class AdminServiceTest {
         AdminUpdateUserRequest updateRequest = new AdminUpdateUserRequest(
             null,
             null,
+            null,
             false,
+            null,
             null,
             null
         );
@@ -190,5 +249,59 @@ class AdminServiceTest {
         assertThatThrownBy(() -> adminService.updateUser(adminId, updateRequest, adminId))
             .isInstanceOf(BusinessException.class)
             .hasMessageContaining("Não é possível desativar o próprio usuário");
+    }
+
+    @Test
+    @DisplayName("Ao excluir usuário sem histórico de auditoria, deve realizar exclusão física")
+    void shouldDeleteUserWithNoHistory() {
+        UUID userId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+
+        User user = User.builder()
+            .id(userId)
+            .username("teste")
+            .role(Role.FUNCIONARIO)
+            .build();
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(auditLogRepository.existsByUser_Id(userId)).thenReturn(false);
+
+        java.util.Map<String, Object> result = adminService.deleteUser(userId, adminId);
+
+        assertThat(result.get("status")).isEqualTo("DELETED");
+        verify(userRepository).delete(user);
+    }
+
+    @Test
+    @DisplayName("Ao excluir usuário que possui histórico de auditoria, deve inativar para preservar rastreabilidade")
+    void shouldDeactivateUserWhenHasHistory() {
+        UUID userId = UUID.randomUUID();
+        UUID adminId = UUID.randomUUID();
+
+        User user = User.builder()
+            .id(userId)
+            .username("auditoria.user")
+            .role(Role.FUNCIONARIO)
+            .isActive(true)
+            .build();
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+        when(auditLogRepository.existsByUser_Id(userId)).thenReturn(true);
+
+        java.util.Map<String, Object> result = adminService.deleteUser(userId, adminId);
+
+        assertThat(result.get("status")).isEqualTo("DEACTIVATED");
+        assertThat(user.getIsActive()).isFalse();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    @DisplayName("Não deve permitir que o administrador exclua o próprio usuário")
+    void shouldBlockSelfDeletion() {
+        UUID adminId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> adminService.deleteUser(adminId, adminId))
+            .isInstanceOf(BusinessException.class)
+            .hasMessageContaining("Não é possível excluir o próprio usuário administrador");
     }
 }

@@ -34,6 +34,20 @@ export function useResetPassword() {
   })
 }
 
+export function useRevokeUserSessions() {
+  return useMutation({
+    mutationFn: (id: string) => adminService.revokeUserSessions(id),
+  })
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => adminService.deleteUser(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  })
+}
+
 export function useAuditLogs(userId?: string) {
   return useQuery({
     queryKey: ['admin', 'audit-logs', userId ?? 'all'],

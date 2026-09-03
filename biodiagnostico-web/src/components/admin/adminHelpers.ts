@@ -51,3 +51,94 @@ export function normalizeModuleCatalog(rawModules?: any[]): ModuleGroup[] {
     }
   })
 }
+
+export function generateSecurePassword(): string {
+  const charsUpper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+  const charsLower = 'abcdefghjkmnpqrstuvwxyz'
+  const charsDigits = '23456789'
+  const charsSpecial = '!@#$%&*'
+
+  const getRandom = (chars: string) => chars[Math.floor(Math.random() * chars.length)]
+
+  const part1 = 'Bio#'
+  const part2 = getRandom(charsDigits) + getRandom(charsDigits) + getRandom(charsDigits)
+  const part3 = getRandom(charsSpecial) + getRandom(charsUpper) + getRandom(charsLower)
+
+  return `${part1}${part2}${part3}`
+}
+
+export function formatDateTime(iso?: string | null): string {
+  if (!iso) return 'Nunca acessou'
+  try {
+    const date = new Date(iso)
+    if (isNaN(date.getTime())) return String(iso)
+    return (
+      date.toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) +
+      ' às ' +
+      date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    )
+  } catch {
+    return String(iso)
+  }
+}
+
+export function exportUsersToCsv(users: import('../../types').User[]): void {
+  const headers = [
+    'Nome Completo',
+    'Login de Acesso',
+    'Email Institucional',
+    'Perfil de Acesso (Role)',
+    'Status',
+    'Módulos Autorizados',
+    'Troca de Senha Obrigatória',
+    'Último Acesso',
+    'Data de Cadastro',
+  ]
+
+  const rows = users.map((u) => {
+    let modulos = 'Acesso Total'
+    if (u.role === 'FUNCIONARIO') {
+      const perms = u.permissions || []
+      const mods: string[] = []
+      if (perms.some((p) => p.startsWith('TEMPERATURE_'))) mods.push('Temperatura')
+      if (perms.some((p) => p.startsWith('REAGENTS_'))) mods.push('Reagentes')
+      if (perms.some((p) => p.startsWith('QC_'))) mods.push('CQ PROIN')
+      if (perms.some((p) => p.startsWith('MAINTENANCE_'))) mods.push('Manutenção')
+      if (perms.some((p) => p.startsWith('REPORTS_'))) mods.push('Relatórios')
+      modulos = mods.length === 5 ? 'Todos os Módulos' : mods.length === 0 ? 'Nenhum' : mods.join('; ')
+    } else if (u.role === 'VIGILANCIA_SANITARIA') {
+      modulos = 'Auditoria Geral (Leitura)'
+    } else if (u.role === 'VISUALIZADOR') {
+      modulos = 'Consulta Geral'
+    }
+
+    return [
+      `"${(u.name || '').replace(/"/g, '""')}"`,
+      `"${(u.username || '').replace(/"/g, '""')}"`,
+      `"${(u.email || '').replace(/"/g, '""')}"`,
+      `"${u.role}"`,
+      `"${u.isActive ? 'Ativo' : 'Inativo'}"`,
+      `"${modulos}"`,
+      `"${u.mustChangePassword ? 'Sim' : 'Não'}"`,
+      `"${formatDateTime(u.lastLoginAt)}"`,
+      `"${formatDateTime(u.createdAt)}"`,
+    ].join(',')
+  })
+
+  const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute(
+    'download',
+    `biodiagnostico_relacao_usuarios_${new Date().toISOString().slice(0, 10)}.csv`
+  )
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}

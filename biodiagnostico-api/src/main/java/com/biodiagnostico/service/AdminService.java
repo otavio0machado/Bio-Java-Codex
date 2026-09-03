@@ -29,17 +29,20 @@ public class AdminService {
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
     private final RefreshTokenSessionRepository refreshTokenSessionRepository;
+    private final com.biodiagnostico.repository.AuditLogRepository auditLogRepository;
 
     public AdminService(
         UserRepository userRepository,
         PasswordEncoder passwordEncoder,
         AuditService auditService,
-        RefreshTokenSessionRepository refreshTokenSessionRepository
+        RefreshTokenSessionRepository refreshTokenSessionRepository,
+        com.biodiagnostico.repository.AuditLogRepository auditLogRepository
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditService = auditService;
         this.refreshTokenSessionRepository = refreshTokenSessionRepository;
+        this.auditLogRepository = auditLogRepository;
     }
 
     public List<UserResponse> listUsers() {
@@ -66,6 +69,13 @@ public class AdminService {
             throw new BusinessException("Já existe um usuário com este nome de usuário");
         }
 
+        if (request.email() != null && !request.email().trim().isEmpty()) {
+            String email = request.email().trim();
+            if (userRepository.existsByEmailIgnoreCase(email)) {
+                throw new BusinessException("Já existe um usuário com este e-mail");
+            }
+        }
+
         Role role = AuthService.parseRole(request.role());
         Set<Permission> permissions = role == Role.FUNCIONARIO
             ? parsePermissions(request.permissions())
@@ -79,6 +89,7 @@ public class AdminService {
             .role(role)
             .permissions(permissions)
             .isActive(Boolean.TRUE)
+            .mustChangePassword(Boolean.TRUE.equals(request.mustChangePassword()))
             .build();
 
         User saved = userRepository.save(user);
@@ -96,17 +107,36 @@ public class AdminService {
             throw new BusinessException("Não é possível desativar o próprio usuário");
         }
 
+        if (request.username() != null && !request.username().trim().isEmpty()) {
+            String newUsername = request.username().trim().toLowerCase();
+            if (!newUsername.equals(user.getUsername())) {
+                if (userRepository.existsByUsernameIgnoreCaseAndIdNot(newUsername, id)) {
+                    throw new BusinessException("Já existe um usuário com este login");
+                }
+                user.setUsername(newUsername);
+            }
+        }
+
         if (request.name() != null && !request.name().trim().isEmpty()) {
             user.setName(request.name().trim());
         }
         if (request.email() != null) {
-            user.setEmail(request.email().trim().isEmpty() ? null : request.email().trim());
+            String newEmail = request.email().trim().isEmpty() ? null : request.email().trim();
+            if (newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail())) {
+                if (userRepository.existsByEmailIgnoreCaseAndIdNot(newEmail, id)) {
+                    throw new BusinessException("Já existe um usuário com este e-mail");
+                }
+            }
+            user.setEmail(newEmail);
         }
         if (request.isActive() != null) {
             user.setIsActive(request.isActive());
             if (!request.isActive()) {
                 revokeUserSessions(id);
             }
+        }
+        if (request.mustChangePassword() != null) {
+            user.setMustChangePassword(request.mustChangePassword());
         }
         if (request.role() != null) {
             Role newRole = AuthService.parseRole(request.role());
@@ -134,9 +164,53 @@ public class AdminService {
         User user = userRepository.findById(id)
             .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado"));
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        if (request.mustChangePassword() != null) {
+            user.setMustChangePassword(request.mustChangePassword());
+        }
         userRepository.save(user);
         revokeUserSessions(id);
         auditService.log("RESETAR_SENHA", "User", id, java.util.Map.of("username", user.getUsername()));
+    }
+
+    @Transactional
+    public void revokeUserSessionsAndAudit(UUID userId) {
+        User user = userRepository.findById(userId)
+            .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado"));
+        revokeUserSessions(userId);
+        auditService.log("REVOGAR_SESSOES", "User", userId, java.util.Map.of("username", user.getUsername()));
+    }
+
+    @Transactional
+    public java.util.Map<String, Object> deleteUser(UUID id, UUID requestingUserId) {
+        if (id.equals(requestingUserId)) {
+            throw new BusinessException("Não é possível excluir o próprio usuário administrador");
+        }
+        User user = userRepository.findById(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Usuário não encontrado"));
+
+        boolean hasAuditHistory = auditLogRepository.existsByUser_Id(id);
+
+        if (hasAuditHistory) {
+            user.setIsActive(false);
+            userRepository.save(user);
+            revokeUserSessions(id);
+            auditService.log("DESATIVAR_USUARIO", "User", id, java.util.Map.of(
+                "username", user.getUsername(),
+                "motivo", "Inativado via solicitação de exclusão (preservando histórico regulatório)"
+            ));
+            return java.util.Map.of(
+                "status", "DEACTIVATED",
+                "message", "O usuário possui histórico regulatório no laboratório. Para manter a rastreabilidade legal, a conta foi inativada e as sessões foram encerradas."
+            );
+        } else {
+            revokeUserSessions(id);
+            userRepository.delete(user);
+            auditService.log("EXCLUIR_USUARIO", "User", id, java.util.Map.of("username", user.getUsername()));
+            return java.util.Map.of(
+                "status", "DELETED",
+                "message", "Usuário excluído com sucesso."
+            );
+        }
     }
 
     private void revokeUserSessions(UUID userId) {

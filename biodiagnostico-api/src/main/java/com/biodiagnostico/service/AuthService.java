@@ -70,6 +70,9 @@ public class AuthService {
             throw new BusinessException("Credenciais inválidas");
         }
 
+        user.setLastLoginAt(Instant.now());
+        userRepository.save(user);
+
         auditService.log("LOGIN", "User", user.getId(), Map.of("username", user.getUsername()));
         return issueSession(user, null, null);
     }
