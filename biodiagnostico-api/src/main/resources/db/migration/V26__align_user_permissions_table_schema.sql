@@ -30,8 +30,22 @@ END $$;
 -- 4. Garante que qualquer registro inconsistente seja limpo antes de setar NOT NULL
 DELETE FROM user_permissions WHERE permission IS NULL;
 
--- 5. Define a coluna 'permission' como NOT NULL
+-- 5. Deduplica registros redundantes caso existam antes de criar a chave primária
+DELETE FROM user_permissions a USING user_permissions b
+WHERE a.ctid < b.ctid
+  AND a.user_id = b.user_id
+  AND a.permission = b.permission;
+
+-- 6. Define a coluna 'permission' como NOT NULL
 ALTER TABLE user_permissions ALTER COLUMN permission SET NOT NULL;
 
--- 6. Define a chave primária oficial (user_id, permission)
-ALTER TABLE user_permissions ADD CONSTRAINT user_permissions_pkey PRIMARY KEY (user_id, permission);
+-- 7. Define a chave primária oficial (user_id, permission) de forma idempotente
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'user_permissions_pkey'
+    ) THEN
+        ALTER TABLE user_permissions ADD CONSTRAINT user_permissions_pkey PRIMARY KEY (user_id, permission);
+    END IF;
+END $$;
+
