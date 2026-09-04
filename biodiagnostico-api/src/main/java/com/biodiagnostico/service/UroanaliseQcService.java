@@ -84,7 +84,7 @@ public class UroanaliseQcService {
             .expectedGlucose(defaultIfBlank(request.expectedGlucose(), "NEGATIVO"))
             .expectedKetones(defaultIfBlank(request.expectedKetones(), "NEGATIVO"))
             .expectedBlood(defaultIfBlank(request.expectedBlood(), "NEGATIVO"))
-            .expectedUrobilinogen(defaultIfBlank(request.expectedUrobilinogen(), "NORMAL"))
+            .expectedUrobilinogen(defaultIfBlank(request.expectedUrobilinogen(), "NEGATIVO"))
             .expectedNitrite(defaultIfBlank(request.expectedNitrite(), "NEGATIVO"))
             .expectedBilirubin(defaultIfBlank(request.expectedBilirubin(), "NEGATIVO"))
             .expectedLeukocytes(defaultIfBlank(request.expectedLeukocytes(), "NEGATIVO"))
@@ -111,7 +111,7 @@ public class UroanaliseQcService {
         controlSet.setExpectedGlucose(defaultIfBlank(request.expectedGlucose(), "NEGATIVO"));
         controlSet.setExpectedKetones(defaultIfBlank(request.expectedKetones(), "NEGATIVO"));
         controlSet.setExpectedBlood(defaultIfBlank(request.expectedBlood(), "NEGATIVO"));
-        controlSet.setExpectedUrobilinogen(defaultIfBlank(request.expectedUrobilinogen(), "NORMAL"));
+        controlSet.setExpectedUrobilinogen(defaultIfBlank(request.expectedUrobilinogen(), "NEGATIVO"));
         controlSet.setExpectedNitrite(defaultIfBlank(request.expectedNitrite(), "NEGATIVO"));
         controlSet.setExpectedBilirubin(defaultIfBlank(request.expectedBilirubin(), "NEGATIVO"));
         controlSet.setExpectedLeukocytes(defaultIfBlank(request.expectedLeukocytes(), "NEGATIVO"));
@@ -267,12 +267,18 @@ public class UroanaliseQcService {
             throw new BusinessException("Nome do Analista 2 é obrigatório.");
         }
 
-        // Cálculos estatísticos de CV para contagens microscópicas
-        double leukocytesCv = calculateCv(request.leukocytesA1(), request.leukocytesA2());
-        String statusLeukocytes = leukocytesCv <= MAX_CV_SEDIMENT ? STATUS_APROVADO : STATUS_REPROVADO;
+        // Cálculos estatísticos de CV para contagens microscópicas (com tolerância e CV customizáveis)
+        double maxTolerance = (request.maxCv() != null && request.maxCv() > 0) ? request.maxCv() : MAX_CV_SEDIMENT;
 
-        double erythrocytesCv = calculateCv(request.erythrocytesA1(), request.erythrocytesA2());
-        String statusErythrocytes = erythrocytesCv <= MAX_CV_SEDIMENT ? STATUS_APROVADO : STATUS_REPROVADO;
+        double leukocytesCv = (request.leukocytesCv() != null && request.leukocytesCv() >= 0)
+            ? request.leukocytesCv()
+            : calculateCv(request.leukocytesA1(), request.leukocytesA2());
+        String statusLeukocytes = leukocytesCv <= maxTolerance ? STATUS_APROVADO : STATUS_REPROVADO;
+
+        double erythrocytesCv = (request.erythrocytesCv() != null && request.erythrocytesCv() >= 0)
+            ? request.erythrocytesCv()
+            : calculateCv(request.erythrocytesA1(), request.erythrocytesA2());
+        String statusErythrocytes = erythrocytesCv <= maxTolerance ? STATUS_APROVADO : STATUS_REPROVADO;
 
         // Concordância categórica
         String statusBacteria = evaluateCategoricalMatch(request.bacteriaA1(), request.bacteriaA2());

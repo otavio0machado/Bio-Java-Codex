@@ -1118,6 +1118,9 @@ export interface UroSedimentRunRequest {
   othersA2: string
   correctiveAction?: string | null
   notes?: string | null
+  maxCv?: number
+  leukocytesCv?: number
+  erythrocytesCv?: number
 }
 
 export * from './temperature'

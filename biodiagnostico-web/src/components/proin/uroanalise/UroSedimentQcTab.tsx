@@ -32,27 +32,32 @@ export function UroSedimentQcTab() {
   const canManageQc = canWriteQc(user)
 
   const [dataMedicao, setDataMedicao] = useState(todayLocal())
-  const [patientCode, setPatientCode] = useState('11111111')
+  const [patientCode, setPatientCode] = useState('')
   const [analyst1Id, setAnalyst1Id] = useState('')
   const [analyst1Name, setAnalyst1Name] = useState('')
   const [analyst2Id, setAnalyst2Id] = useState('')
   const [analyst2Name, setAnalyst2Name] = useState('')
 
-  // Leucócitos e Hemácias (CV 20%)
-  const [leukocytesA1, setLeukocytesA1] = useState<number>(4)
-  const [leukocytesA2, setLeukocytesA2] = useState<number>(3)
-  const [erythrocytesA1, setErythrocytesA1] = useState<number>(2)
-  const [erythrocytesA2, setErythrocytesA2] = useState<number>(2)
+  // Leucócitos e Hemácias (CV e Tolerância customizáveis na tela)
+  const [leukocytesA1, setLeukocytesA1] = useState<string>('')
+  const [leukocytesA2, setLeukocytesA2] = useState<string>('')
+  const [leukocytesTolerance, setLeukocytesTolerance] = useState<number>(20)
+  const [customLeukocytesCv, setCustomLeukocytesCv] = useState<string>('')
 
-  // Categóricos
-  const [bacteriaA1, setBacteriaA1] = useState('DISCRETA')
-  const [bacteriaA2, setBacteriaA2] = useState('MODERADA')
+  const [erythrocytesA1, setErythrocytesA1] = useState<string>('')
+  const [erythrocytesA2, setErythrocytesA2] = useState<string>('')
+  const [erythrocytesTolerance, setErythrocytesTolerance] = useState<number>(20)
+  const [customErythrocytesCv, setCustomErythrocytesCv] = useState<string>('')
 
-  const [epithelialCellsA1, setEpithelialCellsA1] = useState('PRESENTE')
+  // Categóricos (toolbox select idêntico a bactérias)
+  const [bacteriaA1, setBacteriaA1] = useState('ESCASSA')
+  const [bacteriaA2, setBacteriaA2] = useState('ESCASSA')
+
+  const [epithelialCellsA1, setEpithelialCellsA1] = useState('AUSENTE')
   const [epithelialCellsA2, setEpithelialCellsA2] = useState('AUSENTE')
 
-  const [mucusThreadsA1, setMucusThreadsA1] = useState('PRESENTE')
-  const [mucusThreadsA2, setMucusThreadsA2] = useState('PRESENTE')
+  const [mucusThreadsA1, setMucusThreadsA1] = useState('AUSENTE')
+  const [mucusThreadsA2, setMucusThreadsA2] = useState('AUSENTE')
 
   const [crystalsA1, setCrystalsA1] = useState('AUSENTE')
   const [crystalsA2, setCrystalsA2] = useState('AUSENTE')
@@ -67,18 +72,44 @@ export function UroSedimentQcTab() {
   const createSedimentRun = useCreateUroSedimentRun()
 
   // Cálculo de CV em tempo real
-  const calcCv = (a1: number, a2: number) => {
+  const calcCv = (a1Str: string, a2Str: string): number | null => {
+    if (a1Str.trim() === '' || a2Str.trim() === '') return null
+    const a1 = parseFloat(a1Str)
+    const a2 = parseFloat(a2Str)
+    if (isNaN(a1) || isNaN(a2)) return null
     const mean = (a1 + a2) / 2
     if (mean === 0) return 0
     const sd = Math.abs(a1 - a2) / Math.sqrt(2)
-    return Math.round((sd / mean) * 100 * 100) / 100
+    return Math.round((sd / mean) * 100 * 10) / 10
   }
 
-  const leukocytesCv = useMemo(() => calcCv(leukocytesA1, leukocytesA2), [leukocytesA1, leukocytesA2])
-  const statusLeukocytes = useMemo(() => (leukocytesCv <= 20.0 ? 'APROVADO' : 'REPROVADO'), [leukocytesCv])
+  const calculatedLeukocytesCv = useMemo(() => calcCv(leukocytesA1, leukocytesA2), [leukocytesA1, leukocytesA2])
+  const effectiveLeukocytesCv = useMemo(() => {
+    if (customLeukocytesCv.trim() !== '') {
+      const parsed = parseFloat(customLeukocytesCv)
+      return isNaN(parsed) ? null : parsed
+    }
+    return calculatedLeukocytesCv
+  }, [customLeukocytesCv, calculatedLeukocytesCv])
 
-  const erythrocytesCv = useMemo(() => calcCv(erythrocytesA1, erythrocytesA2), [erythrocytesA1, erythrocytesA2])
-  const statusErythrocytes = useMemo(() => (erythrocytesCv <= 20.0 ? 'APROVADO' : 'REPROVADO'), [erythrocytesCv])
+  const statusLeukocytes = useMemo(() => {
+    if (effectiveLeukocytesCv == null) return 'PENDENTE'
+    return effectiveLeukocytesCv <= leukocytesTolerance ? 'APROVADO' : 'REPROVADO'
+  }, [effectiveLeukocytesCv, leukocytesTolerance])
+
+  const calculatedErythrocytesCv = useMemo(() => calcCv(erythrocytesA1, erythrocytesA2), [erythrocytesA1, erythrocytesA2])
+  const effectiveErythrocytesCv = useMemo(() => {
+    if (customErythrocytesCv.trim() !== '') {
+      const parsed = parseFloat(customErythrocytesCv)
+      return isNaN(parsed) ? null : parsed
+    }
+    return calculatedErythrocytesCv
+  }, [customErythrocytesCv, calculatedErythrocytesCv])
+
+  const statusErythrocytes = useMemo(() => {
+    if (effectiveErythrocytesCv == null) return 'PENDENTE'
+    return effectiveErythrocytesCv <= erythrocytesTolerance ? 'APROVADO' : 'REPROVADO'
+  }, [effectiveErythrocytesCv, erythrocytesTolerance])
 
   const statusBacteria = useMemo(
     () => (bacteriaA1.toUpperCase() === bacteriaA2.toUpperCase() ? 'APROVADO' : 'REPROVADO'),
@@ -104,6 +135,8 @@ export function UroSedimentQcTab() {
     () => (othersA1.toUpperCase() === othersA2.toUpperCase() ? 'APROVADO' : 'REPROVADO'),
     [othersA1, othersA2]
   )
+
+  const isPending = statusLeukocytes === 'PENDENTE' || statusErythrocytes === 'PENDENTE'
 
   const isGlobalApproved = useMemo(() => {
     return (
@@ -154,6 +187,21 @@ export function UroSedimentQcTab() {
       return
     }
 
+    if (leukocytesA1.trim() === '' || leukocytesA2.trim() === '' || erythrocytesA1.trim() === '' || erythrocytesA2.trim() === '') {
+      toast.warning('Preencha as contagens de leucócitos e hemácias para ambos os analistas.')
+      return
+    }
+
+    const parsedLA1 = parseFloat(leukocytesA1)
+    const parsedLA2 = parseFloat(leukocytesA2)
+    const parsedEA1 = parseFloat(erythrocytesA1)
+    const parsedEA2 = parseFloat(erythrocytesA2)
+
+    if (isNaN(parsedLA1) || isNaN(parsedLA2) || isNaN(parsedEA1) || isNaN(parsedEA2)) {
+      toast.warning('Contagens de leucócitos e hemácias devem ser numéricas.')
+      return
+    }
+
     if (!isGlobalApproved && !correctiveAction.trim()) {
       toast.error('Ação corretiva é obrigatória para ensaios inter-observador com divergência!')
       return
@@ -166,10 +214,13 @@ export function UroSedimentQcTab() {
       analyst1Name: a1Name,
       analyst2Id: analyst2Id || undefined,
       analyst2Name: a2Name,
-      leukocytesA1,
-      leukocytesA2,
-      erythrocytesA1,
-      erythrocytesA2,
+      leukocytesA1: parsedLA1,
+      leukocytesA2: parsedLA2,
+      erythrocytesA1: parsedEA1,
+      erythrocytesA2: parsedEA2,
+      maxCv: Math.max(leukocytesTolerance, erythrocytesTolerance),
+      leukocytesCv: effectiveLeukocytesCv != null ? effectiveLeukocytesCv : undefined,
+      erythrocytesCv: effectiveErythrocytesCv != null ? effectiveErythrocytesCv : undefined,
       bacteriaA1,
       bacteriaA2,
       epithelialCellsA1,
@@ -324,16 +375,20 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4">
                       <span className="font-semibold text-neutral-900">Leucócitos</span>
-                      <span className="ml-2 text-xs text-neutral-500 font-mono">(Tolerância: CV ≤ 20%)</span>
+                      <span className="ml-2 text-xs text-neutral-500 font-mono">
+                        (Tolerância: CV ≤ {leukocytesTolerance}%)
+                      </span>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <input
                         type="number"
                         step="0.5"
                         min="0"
+                        placeholder="--"
+                        aria-label="Leucócitos Analista 1"
                         className="w-24 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
                         value={leukocytesA1}
-                        onChange={(e) => setLeukocytesA1(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setLeukocytesA1(e.target.value)}
                       />
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -341,13 +396,44 @@ export function UroSedimentQcTab() {
                         type="number"
                         step="0.5"
                         min="0"
+                        placeholder="--"
+                        aria-label="Leucócitos Analista 2"
                         className="w-24 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
                         value={leukocytesA2}
-                        onChange={(e) => setLeukocytesA2(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setLeukocytesA2(e.target.value)}
                       />
                     </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-neutral-700">
-                      CV: {leukocytesCv.toFixed(1)}%
+                    <td className="py-3 px-4 text-center">
+                      <div className="inline-flex flex-col items-center gap-1.5">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-semibold text-neutral-500">CV:</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            aria-label="CV Leucócitos"
+                            placeholder={calculatedLeukocytesCv != null ? calculatedLeukocytesCv.toFixed(1) : '--'}
+                            value={customLeukocytesCv}
+                            onChange={(e) => setCustomLeukocytesCv(e.target.value)}
+                            className="w-20 text-center rounded-xl border border-neutral-200 bg-white px-2 py-1 text-xs font-mono font-bold text-neutral-900 focus:border-green-800 focus:outline-none shadow-2xs"
+                          />
+                          <span className="text-xs font-semibold text-neutral-500">%</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[11px] text-neutral-500">
+                          <span>Limite: ≤</span>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            max="100"
+                            aria-label="Tolerância Leucócitos"
+                            value={leukocytesTolerance}
+                            onChange={(e) => setLeukocytesTolerance(parseFloat(e.target.value) || 20)}
+                            className="w-12 text-center rounded-lg border border-neutral-200 bg-white px-1 py-0.5 text-xs font-mono font-semibold text-neutral-700 focus:border-green-800 focus:outline-none shadow-2xs"
+                          />
+                          <span>%</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusLeukocytes} />
@@ -358,16 +444,20 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4">
                       <span className="font-semibold text-neutral-900">Hemácias</span>
-                      <span className="ml-2 text-xs text-neutral-500 font-mono">(Tolerância: CV ≤ 20%)</span>
+                      <span className="ml-2 text-xs text-neutral-500 font-mono">
+                        (Tolerância: CV ≤ {erythrocytesTolerance}%)
+                      </span>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <input
                         type="number"
                         step="0.5"
                         min="0"
+                        placeholder="--"
+                        aria-label="Hemácias Analista 1"
                         className="w-24 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
                         value={erythrocytesA1}
-                        onChange={(e) => setErythrocytesA1(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setErythrocytesA1(e.target.value)}
                       />
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -375,13 +465,44 @@ export function UroSedimentQcTab() {
                         type="number"
                         step="0.5"
                         min="0"
+                        placeholder="--"
+                        aria-label="Hemácias Analista 2"
                         className="w-24 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
                         value={erythrocytesA2}
-                        onChange={(e) => setErythrocytesA2(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setErythrocytesA2(e.target.value)}
                       />
                     </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-neutral-700">
-                      CV: {erythrocytesCv.toFixed(1)}%
+                    <td className="py-3 px-4 text-center">
+                      <div className="inline-flex flex-col items-center gap-1.5">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-semibold text-neutral-500">CV:</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            aria-label="CV Hemácias"
+                            placeholder={calculatedErythrocytesCv != null ? calculatedErythrocytesCv.toFixed(1) : '--'}
+                            value={customErythrocytesCv}
+                            onChange={(e) => setCustomErythrocytesCv(e.target.value)}
+                            className="w-20 text-center rounded-xl border border-neutral-200 bg-white px-2 py-1 text-xs font-mono font-bold text-neutral-900 focus:border-green-800 focus:outline-none shadow-2xs"
+                          />
+                          <span className="text-xs font-semibold text-neutral-500">%</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-[11px] text-neutral-500">
+                          <span>Limite: ≤</span>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            max="100"
+                            aria-label="Tolerância Hemácias"
+                            value={erythrocytesTolerance}
+                            onChange={(e) => setErythrocytesTolerance(parseFloat(e.target.value) || 20)}
+                            className="w-12 text-center rounded-lg border border-neutral-200 bg-white px-1 py-0.5 text-xs font-mono font-semibold text-neutral-700 focus:border-green-800 focus:outline-none shadow-2xs"
+                          />
+                          <span>%</span>
+                        </div>
+                      </div>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusErythrocytes} />
@@ -393,7 +514,8 @@ export function UroSedimentQcTab() {
                     <td className="py-3 px-4 font-semibold text-neutral-900">Bactérias</td>
                     <td className="py-3 px-4 text-center">
                       <select
-                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
+                        aria-label="Bactérias Analista 1"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
                         value={bacteriaA1}
                         onChange={(e) => setBacteriaA1(e.target.value)}
                       >
@@ -404,7 +526,8 @@ export function UroSedimentQcTab() {
                     </td>
                     <td className="py-3 px-4 text-center">
                       <select
-                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
+                        aria-label="Bactérias Analista 2"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
                         value={bacteriaA2}
                         onChange={(e) => setBacteriaA2(e.target.value)}
                       >
@@ -425,42 +548,28 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4 font-semibold text-neutral-900">Células Epiteliais</td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Células Epiteliais Analista 1"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={epithelialCellsA1}
+                        onChange={(e) => setEpithelialCellsA1(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setEpithelialCellsA1(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              epithelialCellsA1 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Células Epiteliais Analista 2"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={epithelialCellsA2}
+                        onChange={(e) => setEpithelialCellsA2(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setEpithelialCellsA2(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              epithelialCellsA2 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center text-xs font-medium text-neutral-600">
                       {statusEpithelialCells === 'APROVADO' ? 'Idêntico' : 'Divergente'}
@@ -474,42 +583,28 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4 font-semibold text-neutral-900">Filamento de Muco</td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Filamento de Muco Analista 1"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={mucusThreadsA1}
+                        onChange={(e) => setMucusThreadsA1(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMucusThreadsA1(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              mucusThreadsA1 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Filamento de Muco Analista 2"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={mucusThreadsA2}
+                        onChange={(e) => setMucusThreadsA2(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMucusThreadsA2(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              mucusThreadsA2 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center text-xs font-medium text-neutral-600">
                       {statusMucusThreads === 'APROVADO' ? 'Idêntico' : 'Divergente'}
@@ -523,42 +618,28 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4 font-semibold text-neutral-900">Cristais</td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Cristais Analista 1"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={crystalsA1}
+                        onChange={(e) => setCrystalsA1(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setCrystalsA1(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              crystalsA1 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Cristais Analista 2"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={crystalsA2}
+                        onChange={(e) => setCrystalsA2(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setCrystalsA2(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              crystalsA2 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center text-xs font-medium text-neutral-600">
                       {statusCrystals === 'APROVADO' ? 'Idêntico' : 'Divergente'}
@@ -572,42 +653,28 @@ export function UroSedimentQcTab() {
                   <tr className="hover:bg-neutral-50/60 transition">
                     <td className="py-3 px-4 font-semibold text-neutral-900">Outros (Cilindros / Leveduras)</td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Outros Analista 1"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={othersA1}
+                        onChange={(e) => setOthersA1(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setOthersA1(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              othersA1 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Outros Analista 2"
+                        className="rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-xs font-semibold text-neutral-900 focus:border-green-800 focus:outline-none cursor-pointer"
+                        value={othersA2}
+                        onChange={(e) => setOthersA2(e.target.value)}
+                      >
                         {BINARY_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setOthersA2(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              othersA2 === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
-                            {opt}
-                          </button>
+                          <option key={opt} value={opt}>{opt}</option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center text-xs font-medium text-neutral-600">
                       {statusOthers === 'APROVADO' ? 'Idêntico' : 'Divergente'}
@@ -625,40 +692,50 @@ export function UroSedimentQcTab() {
           <div
             className={cn(
               'rounded-2xl border p-4 flex items-center justify-between transition-all',
-              isGlobalApproved
+              isPending
+                ? 'border-amber-200 bg-amber-50/80 text-amber-900'
+                : isGlobalApproved
                 ? 'border-green-200 bg-green-50/80 text-green-900'
                 : 'border-red-200 bg-red-50/80 text-red-900'
             )}
           >
             <div className="flex items-center gap-3">
-              {isGlobalApproved ? (
+              {isPending ? (
+                <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0" />
+              ) : isGlobalApproved ? (
                 <CheckCircle2 className="h-6 w-6 text-green-700 flex-shrink-0" />
               ) : (
                 <ShieldAlert className="h-6 w-6 text-red-600 flex-shrink-0" />
               )}
               <div>
                 <h4 className="font-bold text-base">
-                  {isGlobalApproved ? 'SEDIMENTO APROVADO' : 'SEDIMENTO COM DIVERGÊNCIA (REPROVADO)'}
+                  {isPending
+                    ? 'AGUARDANDO LEITURAS DO SEDIMENTO'
+                    : isGlobalApproved
+                    ? 'SEDIMENTO APROVADO'
+                    : 'SEDIMENTO COM DIVERGÊNCIA (REPROVADO)'}
                 </h4>
                 <p className="text-sm opacity-90">
-                  {isGlobalApproved
-                    ? 'Todas as contagens apresentaram CV ≤ 20% e os elementos microscópicos coincidiram entre os dois analistas.'
-                    : 'Houve divergência nas leituras microscópicas ou o CV ultrapassou o limite aceitável de 20%. Exige ação corretiva.'}
+                  {isPending
+                    ? 'Informe as contagens de leucócitos e hemácias para calcular a variação de CV e avaliar a concordância.'
+                    : isGlobalApproved
+                    ? 'Todas as contagens apresentaram CV dentro do limite tolerado e os elementos microscópicos coincidiram.'
+                    : 'Houve divergência nas leituras microscópicas ou o CV ultrapassou o limite tolerado. Exige ação corretiva.'}
                 </p>
               </div>
             </div>
-            <StatusBadge status={isGlobalApproved ? 'APROVADO' : 'REPROVADO'} />
+            <StatusBadge status={isPending ? 'PENDENTE' : isGlobalApproved ? 'APROVADO' : 'REPROVADO'} />
           </div>
 
           {/* Campo de Ação Corretiva se Reprovado */}
-          {!isGlobalApproved && (
+          {!isPending && !isGlobalApproved && (
             <div className="rounded-2xl border border-red-200 bg-red-50/50 p-4 space-y-3">
               <div className="flex items-center gap-2 text-red-800">
                 <AlertTriangle className="h-5 w-5" />
                 <h4 className="font-bold text-sm">Ação Corretiva Obrigatória (Sedimento com Divergência)</h4>
               </div>
               <p className="text-xs text-red-700">
-                Houve divergência entre os analistas ou a contagem excedeu 20% de variação. Registre a conduta corretiva realizada.
+                Houve divergência entre os analistas ou a contagem excedeu o limite de variação. Registre a conduta corretiva realizada.
               </p>
               <div className="flex flex-wrap gap-2">
                 {QUICK_SEDIMENT_ACTIONS.map((action) => (

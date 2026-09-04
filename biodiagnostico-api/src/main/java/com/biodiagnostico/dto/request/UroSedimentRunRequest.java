@@ -61,6 +61,39 @@ public record UroSedimentRunRequest(
     String othersA2,
 
     String correctiveAction,
-    String notes
+    String notes,
+    Double maxCv,
+    Double leukocytesCv,
+    Double erythrocytesCv
 ) {
+    public UroSedimentRunRequest(
+        LocalDate dataMedicao,
+        String patientCode,
+        UUID analyst1Id,
+        String analyst1Name,
+        UUID analyst2Id,
+        String analyst2Name,
+        Double leukocytesA1,
+        Double leukocytesA2,
+        Double erythrocytesA1,
+        Double erythrocytesA2,
+        String bacteriaA1,
+        String bacteriaA2,
+        String epithelialCellsA1,
+        String epithelialCellsA2,
+        String mucusThreadsA1,
+        String mucusThreadsA2,
+        String crystalsA1,
+        String crystalsA2,
+        String othersA1,
+        String othersA2,
+        String correctiveAction,
+        String notes
+    ) {
+        this(dataMedicao, patientCode, analyst1Id, analyst1Name, analyst2Id, analyst2Name,
+             leukocytesA1, leukocytesA2, erythrocytesA1, erythrocytesA2,
+             bacteriaA1, bacteriaA2, epithelialCellsA1, epithelialCellsA2,
+             mucusThreadsA1, mucusThreadsA2, crystalsA1, crystalsA2,
+             othersA1, othersA2, correctiveAction, notes, null, null, null);
+    }
 }

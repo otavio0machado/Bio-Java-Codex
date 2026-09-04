@@ -17,7 +17,7 @@ import { cn } from '../../../utils/cn'
 import type { UroStripRunRequest } from '../../../types'
 
 const QUALITATIVE_OPTIONS = ['NEGATIVO', 'TRAÇOS', '+', '++', '+++', '++++']
-const UROBILINOGEN_OPTIONS = ['NORMAL', 'AUMENTADO', '0.2 mg/dL', '1.0 mg/dL', '2.0 mg/dL']
+const UROBILINOGEN_OPTIONS = ['NEGATIVO', 'AUMENTADO']
 const NITRITE_OPTIONS = ['NEGATIVO', 'POSITIVO']
 
 const QUICK_ACTIONS = [
@@ -36,14 +36,14 @@ export function UroStripQcTab() {
   const [selectedControlId, setSelectedControlId] = useState<string>('')
   const [selectedReagentLotId, setSelectedReagentLotId] = useState<string>('')
 
-  // Medições
-  const [measuredPh, setMeasuredPh] = useState<number>(5.5)
-  const [measuredDensity, setMeasuredDensity] = useState<number>(1.015)
+  // Medições (sem valores padrão induzidos)
+  const [measuredPh, setMeasuredPh] = useState<string>('')
+  const [measuredDensity, setMeasuredDensity] = useState<string>('')
   const [measuredProteins, setMeasuredProteins] = useState('NEGATIVO')
   const [measuredGlucose, setMeasuredGlucose] = useState('NEGATIVO')
   const [measuredKetones, setMeasuredKetones] = useState('NEGATIVO')
   const [measuredBlood, setMeasuredBlood] = useState('NEGATIVO')
-  const [measuredUrobilinogen, setMeasuredUrobilinogen] = useState('NORMAL')
+  const [measuredUrobilinogen, setMeasuredUrobilinogen] = useState('NEGATIVO')
   const [measuredNitrite, setMeasuredNitrite] = useState('NEGATIVO')
 
   const [correctiveAction, setCorrectiveAction] = useState('')
@@ -97,26 +97,29 @@ export function UroStripQcTab() {
   const normalize = (val: string | null | undefined): string => {
     if (!val) return ''
     const s = val.trim().toUpperCase()
-    if (s === '0' || s === 'NEG' || s === 'NEGATIVO' || s === 'AUSENTE') return 'NEGATIVO'
-    if (s === 'N' || s === 'NORMAL') return 'NORMAL'
+    if (s === '0' || s === 'NEG' || s === 'NEGATIVO' || s === 'AUSENTE' || s === 'NORMAL' || s === 'N') return 'NEGATIVO'
     return s
   }
 
   // Status em tempo real por parâmetro
   const statusPh = useMemo(() => {
+    if (!measuredPh || isNaN(parseFloat(measuredPh))) return 'PENDENTE'
+    const val = parseFloat(measuredPh)
     if (!selectedControl || selectedControl.expectedPhMin == null || selectedControl.expectedPhMax == null) {
       return 'APROVADO'
     }
-    return measuredPh >= selectedControl.expectedPhMin && measuredPh <= selectedControl.expectedPhMax
+    return val >= selectedControl.expectedPhMin && val <= selectedControl.expectedPhMax
       ? 'APROVADO'
       : 'REPROVADO'
   }, [selectedControl, measuredPh])
 
   const statusDensity = useMemo(() => {
+    if (!measuredDensity || isNaN(parseFloat(measuredDensity))) return 'PENDENTE'
+    const val = parseFloat(measuredDensity)
     if (!selectedControl || selectedControl.expectedDensityMin == null || selectedControl.expectedDensityMax == null) {
       return 'APROVADO'
     }
-    return measuredDensity >= selectedControl.expectedDensityMin && measuredDensity <= selectedControl.expectedDensityMax
+    return val >= selectedControl.expectedDensityMin && val <= selectedControl.expectedDensityMax
       ? 'APROVADO'
       : 'REPROVADO'
   }, [selectedControl, measuredDensity])
@@ -182,6 +185,11 @@ export function UroStripQcTab() {
       return
     }
 
+    if (!measuredPh.trim() || !measuredDensity.trim()) {
+      toast.warning('Informe os valores lidos de pH e Densidade antes de salvar.')
+      return
+    }
+
     if (!isGlobalApproved && !correctiveAction.trim()) {
       toast.error('Ação corretiva é obrigatória para controles de tira com parâmetros reprovados!')
       return
@@ -191,8 +199,8 @@ export function UroStripQcTab() {
       controlSetId: selectedControlId,
       reagentLotId: selectedReagentLotId || undefined,
       dataMedicao,
-      measuredPh,
-      measuredDensity,
+      measuredPh: parseFloat(measuredPh),
+      measuredDensity: parseFloat(measuredDensity),
       measuredProteins,
       measuredGlucose,
       measuredKetones,
@@ -348,11 +356,13 @@ export function UroStripQcTab() {
                     </td>
                     <td className="py-3 px-4 text-center">
                       <input
+                        aria-label="Resultado de pH"
                         type="number"
                         step="0.5"
-                        className="w-28 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
+                        placeholder="Ex: 5.5"
+                        className="w-32 text-center rounded-xl border border-neutral-200 bg-white px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition text-sm"
                         value={measuredPh}
-                        onChange={(e) => setMeasuredPh(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setMeasuredPh(e.target.value)}
                       />
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -370,11 +380,13 @@ export function UroStripQcTab() {
                     </td>
                     <td className="py-3 px-4 text-center">
                       <input
+                        aria-label="Resultado de Densidade"
                         type="number"
                         step="0.005"
-                        className="w-28 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:outline-none"
+                        placeholder="Ex: 1.015"
+                        className="w-32 text-center rounded-xl border border-neutral-200 bg-white px-3 py-1.5 font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition text-sm"
                         value={measuredDensity}
-                        onChange={(e) => setMeasuredDensity(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => setMeasuredDensity(e.target.value)}
                       />
                     </td>
                     <td className="py-3 px-4 text-center">
@@ -391,23 +403,18 @@ export function UroStripQcTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Proteínas"
+                        value={measuredProteins}
+                        onChange={(e) => setMeasuredProteins(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {QUALITATIVE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredProteins(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredProteins === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusProteins} />
@@ -423,23 +430,18 @@ export function UroStripQcTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Glicose"
+                        value={measuredGlucose}
+                        onChange={(e) => setMeasuredGlucose(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {QUALITATIVE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredGlucose(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredGlucose === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusGlucose} />
@@ -455,23 +457,18 @@ export function UroStripQcTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Corpos Cetônicos"
+                        value={measuredKetones}
+                        onChange={(e) => setMeasuredKetones(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {QUALITATIVE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredKetones(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredKetones === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusKetones} />
@@ -487,23 +484,18 @@ export function UroStripQcTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Sangue / Hemoglobina"
+                        value={measuredBlood}
+                        onChange={(e) => setMeasuredBlood(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {QUALITATIVE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredBlood(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredBlood === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusBlood} />
@@ -515,27 +507,22 @@ export function UroStripQcTab() {
                     <td className="py-3 px-4 font-semibold text-neutral-900">Urobilinogênio</td>
                     <td className="py-3 px-4 text-center">
                       <span className="inline-flex rounded-lg bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-700">
-                        {selectedControl?.expectedUrobilinogen || 'NORMAL'}
+                        {selectedControl?.expectedUrobilinogen || 'NEGATIVO'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Urobilinogênio"
+                        value={measuredUrobilinogen}
+                        onChange={(e) => setMeasuredUrobilinogen(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {UROBILINOGEN_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredUrobilinogen(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredUrobilinogen === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusUrobilinogen} />
@@ -551,23 +538,18 @@ export function UroStripQcTab() {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-center">
-                      <div className="inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-0.5">
+                      <select
+                        aria-label="Resultado de Nitrito"
+                        value={measuredNitrite}
+                        onChange={(e) => setMeasuredNitrite(e.target.value)}
+                        className="w-36 text-center rounded-xl border border-neutral-200 bg-neutral-50/80 px-3 py-1.5 text-sm font-semibold text-neutral-900 focus:border-green-800 focus:ring-2 focus:ring-green-800/10 focus:outline-none transition cursor-pointer shadow-xs"
+                      >
                         {NITRITE_OPTIONS.map((opt) => (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setMeasuredNitrite(opt)}
-                            className={cn(
-                              'px-3 py-1 text-xs font-medium rounded-lg transition',
-                              measuredNitrite === opt
-                                ? 'bg-green-800 text-white font-semibold shadow-xs'
-                                : 'text-neutral-600 hover:text-neutral-900'
-                            )}
-                          >
+                          <option key={opt} value={opt}>
                             {opt}
-                          </button>
+                          </option>
                         ))}
-                      </div>
+                      </select>
                     </td>
                     <td className="py-3 px-4 text-center">
                       <StatusBadge status={statusNitrite} />
@@ -579,36 +561,51 @@ export function UroStripQcTab() {
           </div>
 
           {/* Banner de Avaliação Geral Instantânea do Controle */}
-          <div
-            className={cn(
-              'rounded-2xl border p-4 flex items-center justify-between transition-all',
-              isGlobalApproved
-                ? 'border-green-200 bg-green-50/80 text-green-900'
-                : 'border-red-200 bg-red-50/80 text-red-900'
-            )}
-          >
-            <div className="flex items-center gap-3">
-              {isGlobalApproved ? (
-                <CheckCircle2 className="h-6 w-6 text-green-700 flex-shrink-0" />
-              ) : (
-                <ShieldAlert className="h-6 w-6 text-red-600 flex-shrink-0" />
-              )}
-              <div>
-                <h4 className="font-bold text-base">
-                  {isGlobalApproved ? 'CONTROLE APROVADO' : 'CONTROLE REPROVADO'}
-                </h4>
-                <p className="text-sm opacity-90">
-                  {isGlobalApproved
-                    ? 'Todos os parâmetros da fita reativa conferem com os valores esperados da bula comercial.'
-                    : 'Um ou mais parâmetros da fita reativa divergiram dos valores esperados. Ação corretiva obrigatória.'}
-                </p>
+          {(() => {
+            const isPending = statusPh === 'PENDENTE' || statusDensity === 'PENDENTE'
+            return (
+              <div
+                className={cn(
+                  'rounded-2xl border p-4 flex items-center justify-between transition-all',
+                  isPending
+                    ? 'border-neutral-200 bg-neutral-50 text-neutral-800'
+                    : isGlobalApproved
+                    ? 'border-green-200 bg-green-50/80 text-green-900'
+                    : 'border-red-200 bg-red-50/80 text-red-900'
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  {isPending ? (
+                    <Calendar className="h-6 w-6 text-neutral-500 flex-shrink-0" />
+                  ) : isGlobalApproved ? (
+                    <CheckCircle2 className="h-6 w-6 text-green-700 flex-shrink-0" />
+                  ) : (
+                    <ShieldAlert className="h-6 w-6 text-red-600 flex-shrink-0" />
+                  )}
+                  <div>
+                    <h4 className="font-bold text-base">
+                      {isPending
+                        ? 'AGUARDANDO MEDIÇÃO'
+                        : isGlobalApproved
+                        ? 'CONTROLE APROVADO'
+                        : 'CONTROLE REPROVADO'}
+                    </h4>
+                    <p className="text-sm opacity-90">
+                      {isPending
+                        ? 'Informe os valores medidos de pH e densidade na fita reativa para conferência imediata.'
+                        : isGlobalApproved
+                        ? 'Todos os parâmetros da fita reativa conferem com os valores esperados da bula comercial.'
+                        : 'Um ou mais parâmetros da fita reativa divergiram dos valores esperados. Ação corretiva obrigatória.'}
+                    </p>
+                  </div>
+                </div>
+                <StatusBadge status={isPending ? 'PENDENTE' : isGlobalApproved ? 'APROVADO' : 'REPROVADO'} />
               </div>
-            </div>
-            <StatusBadge status={isGlobalApproved ? 'APROVADO' : 'REPROVADO'} />
-          </div>
+            )
+          })()}
 
           {/* Campo de Ação Corretiva se Reprovado */}
-          {!isGlobalApproved && (
+          {statusPh !== 'PENDENTE' && statusDensity !== 'PENDENTE' && !isGlobalApproved && (
             <div className="rounded-2xl border border-red-200 bg-red-50/50 p-4 space-y-3">
               <div className="flex items-center gap-2 text-red-800">
                 <AlertTriangle className="h-5 w-5" />

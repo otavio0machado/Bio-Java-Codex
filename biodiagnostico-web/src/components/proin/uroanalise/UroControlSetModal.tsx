@@ -4,12 +4,24 @@ import { useCreateUroStripControlSet, useUpdateUroStripControlSet } from '../../
 import type { UroStripControlSet, UroStripControlSetRequest } from '../../../types'
 
 const QUALITATIVE_OPTIONS = ['NEGATIVO', 'TRAÇOS', '+', '++', '+++', '++++']
-const UROBILINOGEN_OPTIONS = ['NORMAL', 'AUMENTADO', '0.2 mg/dL', '1.0 mg/dL', '2.0 mg/dL']
+const UROBILINOGEN_OPTIONS = ['NEGATIVO', 'AUMENTADO']
 
 interface UroControlSetModalProps {
   isOpen: boolean
   onClose: () => void
   editingControlSet?: UroStripControlSet | null
+}
+
+const normalizeLegacyUro = (val?: string | null): string => {
+  if (!val) return 'NEGATIVO'
+  const s = val.trim().toUpperCase()
+  if (s === 'NORMAL' || s === '0.2 MG/DL' || s === '0' || s === 'NEG' || s === 'NEGATIVO' || s === 'AUSENTE') {
+    return 'NEGATIVO'
+  }
+  if (s.includes('AUMENTADO') || s.includes('1.0') || s.includes('2.0')) {
+    return 'AUMENTADO'
+  }
+  return val
 }
 
 export function UroControlSetModal({ isOpen, onClose, editingControlSet }: UroControlSetModalProps) {
@@ -30,7 +42,7 @@ export function UroControlSetModal({ isOpen, onClose, editingControlSet }: UroCo
   const [expectedGlucose, setExpectedGlucose] = useState('NEGATIVO')
   const [expectedKetones, setExpectedKetones] = useState('NEGATIVO')
   const [expectedBlood, setExpectedBlood] = useState('NEGATIVO')
-  const [expectedUrobilinogen, setExpectedUrobilinogen] = useState('NORMAL')
+  const [expectedUrobilinogen, setExpectedUrobilinogen] = useState('NEGATIVO')
   const [expectedNitrite, setExpectedNitrite] = useState('NEGATIVO')
   const [expectedBilirubin, setExpectedBilirubin] = useState('NEGATIVO')
   const [expectedLeukocytes, setExpectedLeukocytes] = useState('NEGATIVO')
@@ -48,7 +60,7 @@ export function UroControlSetModal({ isOpen, onClose, editingControlSet }: UroCo
       setExpectedGlucose(editingControlSet.expectedGlucose)
       setExpectedKetones(editingControlSet.expectedKetones)
       setExpectedBlood(editingControlSet.expectedBlood)
-      setExpectedUrobilinogen(editingControlSet.expectedUrobilinogen)
+      setExpectedUrobilinogen(normalizeLegacyUro(editingControlSet.expectedUrobilinogen))
       setExpectedNitrite(editingControlSet.expectedNitrite)
       setExpectedBilirubin(editingControlSet.expectedBilirubin)
       setExpectedLeukocytes(editingControlSet.expectedLeukocytes)
@@ -64,7 +76,7 @@ export function UroControlSetModal({ isOpen, onClose, editingControlSet }: UroCo
       setExpectedGlucose('NEGATIVO')
       setExpectedKetones('NEGATIVO')
       setExpectedBlood('NEGATIVO')
-      setExpectedUrobilinogen('NORMAL')
+      setExpectedUrobilinogen('NEGATIVO')
       setExpectedNitrite('NEGATIVO')
       setExpectedBilirubin('NEGATIVO')
       setExpectedLeukocytes('NEGATIVO')

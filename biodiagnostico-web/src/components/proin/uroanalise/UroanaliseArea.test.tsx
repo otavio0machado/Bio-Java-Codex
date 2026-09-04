@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ToastProvider } from '../../ui'
@@ -122,17 +122,29 @@ describe('UroanaliseArea', () => {
     expect(screen.getByRole('button', { name: /Histórico & Corridas/i })).toBeInTheDocument()
   })
 
-  it('deve exibir tabela da fita reativa e banner de status na aba inicial', () => {
+  it('deve exibir tabela da fita reativa com inputs limpos (sem valores prévios) e aguardando medição inicialmente', async () => {
+    const user = userEvent.setup()
     renderArea()
 
     expect(screen.getByText('Constituinte da Fita')).toBeInTheDocument()
     expect(screen.getByText('Densidade')).toBeInTheDocument()
     expect(screen.getByText('Proteínas')).toBeInTheDocument()
     expect(screen.getByText('Glicose')).toBeInTheDocument()
+
+    // Sem preenchimento prévio (campos vazios), o controle fica PENDENTE / AGUARDANDO MEDIÇÃO
+    expect(screen.getByText('AGUARDANDO MEDIÇÃO')).toBeInTheDocument()
+    const phInput = screen.getByLabelText('Resultado de pH') as HTMLInputElement
+    const densityInput = screen.getByLabelText('Resultado de Densidade') as HTMLInputElement
+    expect(phInput.value).toBe('')
+    expect(densityInput.value).toBe('')
+
+    // Ao preencher com valores válidos, passa para CONTROLE APROVADO
+    await user.type(phInput, '5.5')
+    await user.type(densityInput, '1.015')
     expect(screen.getByText('CONTROLE APROVADO')).toBeInTheDocument()
   })
 
-  it('deve alternar para a aba de Sedimento Urinário e exibir campos de dupla leitura e CV', async () => {
+  it('deve alternar para a aba de Sedimento Urinário e exibir campos limpos, dupla leitura e edição de CV e tolerância', async () => {
     const user = userEvent.setup()
     renderArea()
 
@@ -140,10 +152,17 @@ describe('UroanaliseArea', () => {
     await user.click(sedimentTabBtn)
 
     expect(screen.getByText('Sedimento Urinário (Controle Inter-Observador)')).toBeInTheDocument()
-    expect(screen.getByLabelText(/Código do Paciente/i)).toBeInTheDocument()
+    const patientInput = screen.getByLabelText(/Código do Paciente/i) as HTMLInputElement
+    expect(patientInput.value).toBe('')
+
     expect(screen.getByText('Leucócitos')).toBeInTheDocument()
     expect(screen.getByText('Hemácias')).toBeInTheDocument()
-    expect(screen.getAllByText(/Tolerância: CV ≤ 20%/i)).toHaveLength(2)
+
+    // Tolerância padrão de 20% exibida e editável na célula
+    const tolLeuko = screen.getByLabelText('Tolerância Leucócitos') as HTMLInputElement
+    expect(tolLeuko.value).toBe('20')
+    fireEvent.change(tolLeuko, { target: { value: '15' } })
+    expect(tolLeuko.value).toBe('15')
   })
 
   it('deve alternar para a aba Lotes de Controle e permitir gerenciar os controles', async () => {
@@ -182,7 +201,21 @@ describe('UroanaliseArea', () => {
     const sedimentTabBtn = screen.getAllByRole('button', { name: /Sedimento Urinário/i })[0]
     await user.click(sedimentTabBtn)
 
-    // O sedimento padrão possui divergência em bactérias (DISCRETA vs MODERADA)
+    // Preenche contagens
+    const l1 = screen.getByLabelText('Leucócitos Analista 1')
+    const l2 = screen.getByLabelText('Leucócitos Analista 2')
+    const e1 = screen.getByLabelText('Hemácias Analista 1')
+    const e2 = screen.getByLabelText('Hemácias Analista 2')
+
+    await user.type(l1, '4')
+    await user.type(l2, '3')
+    await user.type(e1, '2')
+    await user.type(e2, '2')
+
+    // Altera bactérias do analista 2 para criar divergência (ESCASSA vs MODERADA)
+    const bact2 = screen.getByLabelText('Bactérias Analista 2')
+    await user.selectOptions(bact2, 'MODERADA')
+
     expect(screen.getByText('SEDIMENTO COM DIVERGÊNCIA (REPROVADO)')).toBeInTheDocument()
     expect(screen.getByText('Ação Corretiva Obrigatória (Sedimento com Divergência)')).toBeInTheDocument()
 
@@ -193,6 +226,203 @@ describe('UroanaliseArea', () => {
     // Verifica se o campo de texto foi preenchido com a ação selecionada
     const textarea = screen.getByPlaceholderText(/Descreva a ação tomada pelos analistas para harmonização dos resultados.../i)
     expect(textarea).toHaveValue('Revisão conjunta das lâminas no microscópio para alinhamento de campos')
+  })
+
+  it('deve exibir caixas de seleção (select) para parâmetros qualitativos da fita e Urobilinogênio com apenas NEGATIVO e AUMENTADO', async () => {
+    const user = userEvent.setup()
+    renderArea()
+
+    // Preenche pH e densidade para sair de PENDENTE
+    const phInput = screen.getByLabelText('Resultado de pH')
+    const densityInput = screen.getByLabelText('Resultado de Densidade')
+    await user.type(phInput, '5.5')
+    await user.type(densityInput, '1.015')
+
+    // Verifica que os campos qualitativos usam caixas de seleção (select)
+    const proteinsSelect = screen.getByLabelText('Resultado de Proteínas') as HTMLSelectElement
+    const glucoseSelect = screen.getByLabelText('Resultado de Glicose') as HTMLSelectElement
+    const ketonesSelect = screen.getByLabelText('Resultado de Corpos Cetônicos') as HTMLSelectElement
+    const bloodSelect = screen.getByLabelText('Resultado de Sangue / Hemoglobina') as HTMLSelectElement
+    const uroSelect = screen.getByLabelText('Resultado de Urobilinogênio') as HTMLSelectElement
+    const nitriteSelect = screen.getByLabelText('Resultado de Nitrito') as HTMLSelectElement
+
+    expect(proteinsSelect.tagName).toBe('SELECT')
+    expect(glucoseSelect.tagName).toBe('SELECT')
+    expect(ketonesSelect.tagName).toBe('SELECT')
+    expect(bloodSelect.tagName).toBe('SELECT')
+    expect(uroSelect.tagName).toBe('SELECT')
+    expect(nitriteSelect.tagName).toBe('SELECT')
+
+    // Urobilinogênio deve ter exatamente 2 opções: NEGATIVO e AUMENTADO (sem frações mg/dL)
+    const uroOptions = Array.from(uroSelect.options).map((opt) => opt.value)
+    expect(uroOptions).toEqual(['NEGATIVO', 'AUMENTADO'])
+    expect(uroOptions).not.toContain('0.2 mg/dL')
+    expect(uroOptions).not.toContain('1.0 mg/dL')
+    expect(uroOptions).not.toContain('2.0 mg/dL')
+
+    // Inicialmente com NEGATIVO (esperado NORMAL na bula), o controle está aprovado
+    expect(uroSelect.value).toBe('NEGATIVO')
+    expect(screen.getByText('CONTROLE APROVADO')).toBeInTheDocument()
+
+    // Ao mudar Urobilinogênio para AUMENTADO, deve acusar divergência imediata e REPROVADO
+    await user.selectOptions(uroSelect, 'AUMENTADO')
+    expect(uroSelect.value).toBe('AUMENTADO')
+    expect(screen.getByText('CONTROLE REPROVADO')).toBeInTheDocument()
+
+    // Ao retornar para NEGATIVO, volta a ser APROVADO
+    await user.selectOptions(uroSelect, 'NEGATIVO')
+    expect(uroSelect.value).toBe('NEGATIVO')
+    expect(screen.getByText('CONTROLE APROVADO')).toBeInTheDocument()
+  })
+
+  it('deve usar caixas de seleção (select) para todos os elementos qualitativos de sedimento urinário', async () => {
+    const user = userEvent.setup()
+    renderArea()
+
+    const sedimentTabBtn = screen.getAllByRole('button', { name: /Sedimento Urinário/i })[0]
+    await user.click(sedimentTabBtn)
+
+    const bactA1 = screen.getByLabelText('Bactérias Analista 1') as HTMLSelectElement
+    const bactA2 = screen.getByLabelText('Bactérias Analista 2') as HTMLSelectElement
+    const epithA1 = screen.getByLabelText('Células Epiteliais Analista 1') as HTMLSelectElement
+    const epithA2 = screen.getByLabelText('Células Epiteliais Analista 2') as HTMLSelectElement
+    const mucusA1 = screen.getByLabelText('Filamento de Muco Analista 1') as HTMLSelectElement
+    const mucusA2 = screen.getByLabelText('Filamento de Muco Analista 2') as HTMLSelectElement
+    const crystA1 = screen.getByLabelText('Cristais Analista 1') as HTMLSelectElement
+    const crystA2 = screen.getByLabelText('Cristais Analista 2') as HTMLSelectElement
+    const othersA1 = screen.getByLabelText('Outros Analista 1') as HTMLSelectElement
+    const othersA2 = screen.getByLabelText('Outros Analista 2') as HTMLSelectElement
+
+    expect(bactA1.tagName).toBe('SELECT')
+    expect(bactA2.tagName).toBe('SELECT')
+    expect(epithA1.tagName).toBe('SELECT')
+    expect(epithA2.tagName).toBe('SELECT')
+    expect(mucusA1.tagName).toBe('SELECT')
+    expect(mucusA2.tagName).toBe('SELECT')
+    expect(crystA1.tagName).toBe('SELECT')
+    expect(crystA2.tagName).toBe('SELECT')
+    expect(othersA1.tagName).toBe('SELECT')
+    expect(othersA2.tagName).toBe('SELECT')
+
+    const binaryOptions = ['AUSENTE', 'PRESENTE']
+    expect(Array.from(epithA1.options).map((o) => o.value)).toEqual(binaryOptions)
+    expect(Array.from(mucusA1.options).map((o) => o.value)).toEqual(binaryOptions)
+    expect(Array.from(crystA1.options).map((o) => o.value)).toEqual(binaryOptions)
+    expect(Array.from(othersA1.options).map((o) => o.value)).toEqual(binaryOptions)
+  })
+
+  it('deve exibir todos os dados no histórico de tiras e sedimento e abrir modais de inspeção completa', async () => {
+    const user = userEvent.setup()
+    mockUseUroStripRuns.mockReturnValue({
+      data: [
+        {
+          id: 'strip-run-1',
+          controlSetId: 'control-1',
+          dataMedicao: '2026-09-04',
+          controlLotSnapshot: 'URiE 02382024',
+          controlValidUntilSnapshot: '2026-04-23',
+          measuredPh: 5.5,
+          statusPh: 'APROVADO',
+          measuredDensity: 1.015,
+          statusDensity: 'APROVADO',
+          measuredProteins: 'NEGATIVO',
+          statusProteins: 'APROVADO',
+          measuredGlucose: 'NEGATIVO',
+          statusGlucose: 'APROVADO',
+          measuredKetones: 'NEGATIVO',
+          statusKetones: 'APROVADO',
+          measuredBlood: 'NEGATIVO',
+          statusBlood: 'APROVADO',
+          measuredUrobilinogen: 'NEGATIVO',
+          statusUrobilinogen: 'APROVADO',
+          measuredNitrite: 'NEGATIVO',
+          statusNitrite: 'APROVADO',
+          statusGeral: 'APROVADO',
+          analyst: 'Ana Biomédica',
+          notes: 'Fita lote 67551 conferida',
+          createdAt: '2026-09-04T10:00:00Z',
+        },
+      ],
+      isLoading: false,
+    })
+
+    mockUseUroSedimentRuns.mockReturnValue({
+      data: [
+        {
+          id: 'sed-run-1',
+          dataMedicao: '2026-09-04',
+          patientCode: 'PAC9988',
+          analyst1Name: 'Ana Biomédica',
+          analyst2Name: 'Carlos Analista',
+          leukocytesA1: 4,
+          leukocytesA2: 3,
+          leukocytesCv: 19.8,
+          statusLeukocytes: 'APROVADO',
+          erythrocytesA1: 2,
+          erythrocytesA2: 2,
+          erythrocytesCv: 0,
+          statusErythrocytes: 'APROVADO',
+          bacteriaA1: 'ESCASSA',
+          bacteriaA2: 'ESCASSA',
+          statusBacteria: 'APROVADO',
+          epithelialCellsA1: 'AUSENTE',
+          epithelialCellsA2: 'AUSENTE',
+          statusEpithelialCells: 'APROVADO',
+          mucusThreadsA1: 'AUSENTE',
+          mucusThreadsA2: 'AUSENTE',
+          statusMucusThreads: 'APROVADO',
+          crystalsA1: 'AUSENTE',
+          crystalsA2: 'AUSENTE',
+          statusCrystals: 'APROVADO',
+          othersA1: 'AUSENTE',
+          othersA2: 'AUSENTE',
+          statusOthers: 'APROVADO',
+          statusGeral: 'APROVADO',
+          notes: 'Concordância perfeita',
+          createdAt: '2026-09-04T10:30:00Z',
+        },
+      ],
+      isLoading: false,
+    })
+
+    renderArea()
+
+    const historyTabBtn = screen.getByRole('button', { name: /Histórico & Corridas/i })
+    await user.click(historyTabBtn)
+
+    // Colunas da fita reativa presentes na tabela
+    expect(screen.getByText('Corpos Cetônicos')).toBeInTheDocument()
+    expect(screen.getByText('Sangue / Hb')).toBeInTheDocument()
+    expect(screen.getByText('Urobilinogênio')).toBeInTheDocument()
+    expect(screen.getByText('Nitrito')).toBeInTheDocument()
+    expect(screen.getByText('Fita lote 67551 conferida')).toBeInTheDocument()
+
+    // Abre modal de detalhes da fita
+    const viewStripBtn = screen.getByLabelText('Ver detalhes da fita')
+    await user.click(viewStripBtn)
+    expect(screen.getByText('Todos os Dados do Controle de Qualidade — Tiras de Urina')).toBeInTheDocument()
+    expect(screen.getByText('Constituintes da Fita Reativa (Físico-Químico)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fechar' })).toBeInTheDocument()
+
+    // Fecha modal
+    await user.click(screen.getByRole('button', { name: 'Fechar' }))
+
+    // Alterna para visão de sedimento
+    const sedimentSubBtn = screen.getAllByRole('button', { name: /Sedimento Urinário/i })[1]
+    await user.click(sedimentSubBtn)
+
+    // Colunas do sedimento presentes na tabela
+    expect(screen.getByText('Células Epiteliais')).toBeInTheDocument()
+    expect(screen.getByText('Filamento de Muco')).toBeInTheDocument()
+    expect(screen.getByText('Cristais')).toBeInTheDocument()
+    expect(screen.getByText('PAC9988')).toBeInTheDocument()
+    expect(screen.getByText('Concordância perfeita')).toBeInTheDocument()
+
+    // Abre modal de detalhes do sedimento
+    const viewSedBtn = screen.getByLabelText('Ver detalhes do sedimento')
+    await user.click(viewSedBtn)
+    expect(screen.getByText('Todos os Dados do Controle de Qualidade — Sedimento Urinário')).toBeInTheDocument()
+    expect(screen.getByText('Avaliação Comparativa de Sedimento Urinário (Microscopia)')).toBeInTheDocument()
   })
 })
 
