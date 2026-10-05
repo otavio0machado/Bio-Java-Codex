@@ -2,9 +2,11 @@ package com.biodiagnostico.service.reports.v2.generator.impl;
 
 import com.biodiagnostico.entity.LabSettings;
 import com.biodiagnostico.entity.PostCalibrationRecord;
+import com.biodiagnostico.entity.QcRecord;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinitionRegistry;
@@ -173,6 +175,10 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
 
             List<PostCalibrationRecord> records = repository.findByQcRecordAreaAndDateRange(
                 rf.area == null ? "bioquimica" : rf.area, rf.start, rf.end);
+            boolean bioquimica = "bioquimica".equals(rf.area);
+            if (bioquimica && !records.isEmpty()) {
+                doc.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+            }
             // Tolerancia configuravel (default 0.5pp) para classificar efeito.
             // 4 baldes mutuamente exclusivos — fonte unica compartilhada com o
             // detalhamento por exame (sem divergencia resumo vs. soma do detalhe).
@@ -194,33 +200,43 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
 
             if (!records.isEmpty()) {
                 doc.add(ReportV2PdfTheme.section("Detalhe antes/depois"));
-                PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.4F, 1.4F, 1.4F, 1.2F, 1.5F});
-                ReportV2PdfTheme.headerRow(t, "Exame", "CV antes", "CV depois", "Delta%", "Status", "Data");
-                boolean alt = false;
                 Map<String, Number> deltaChart = new LinkedHashMap<>();
+                // O grafico conserva o recorte e a ordem de sobrescrita anteriores por exame.
                 for (PostCalibrationRecord r : records) {
-                    boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
-                    String deltaTxt;
-                    String st;
-                    if (medido) {
-                        double delta = r.getPostCalibrationCv() - r.getOriginalCv();
-                        deltaTxt = String.format(PT_BR, "%+.2f", delta);
-                        st = classifyCalibrationDelta(delta);
-                        deltaChart.put(ReportV2PdfTheme.safe(r.getExamName()), delta);
-                    } else {
-                        deltaTxt = "N/D";
-                        st = "SEM MEDICAO";
+                    if (r.getOriginalCv() != null && r.getPostCalibrationCv() != null) {
+                        deltaChart.put(ReportV2PdfTheme.safe(r.getExamName()),
+                            r.getPostCalibrationCv() - r.getOriginalCv());
                     }
-                    ReportV2PdfTheme.bodyRow(t, alt,
-                        ReportV2PdfTheme.safe(r.getExamName()),
-                        ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
-                        ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
-                        deltaTxt,
-                        st,
-                        ReportV2PdfTheme.formatDate(r.getDate()));
-                    alt = !alt;
                 }
-                doc.add(t);
+                for (var group : calibrationGroups(records, bioquimica)) {
+                    PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.4F, 1.4F, 1.4F, 1.2F, 1.5F});
+                    if (bioquimica) addReferenceHeader(t, group.record());
+                    ReportV2PdfTheme.headerRow(t, "Exame", "CV antes", "CV depois", "Delta%", "Status", "Data");
+                    if (bioquimica) t.setHeaderRows(2);
+                    boolean alt = false;
+                    for (PostCalibrationRecord r : group.items()) {
+                        boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+                        String deltaTxt;
+                        String st;
+                        if (medido) {
+                            double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                            deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                            st = classifyCalibrationDelta(delta);
+                        } else {
+                            deltaTxt = "N/D";
+                            st = "SEM MEDICAO";
+                        }
+                        ReportV2PdfTheme.bodyRow(t, alt,
+                            ReportV2PdfTheme.safe(r.getExamName()),
+                            ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                            ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
+                            deltaTxt,
+                            st,
+                            ReportV2PdfTheme.formatDate(r.getDate()));
+                        alt = !alt;
+                    }
+                    doc.add(t);
+                }
                 if (!deltaChart.isEmpty()) {
                     try {
                         byte[] png = chartRenderer.renderBarChart(deltaChart,
@@ -262,7 +278,7 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                 for (java.util.Map.Entry<String, java.util.List<com.biodiagnostico.entity.PostCalibrationRecord>> e : sorted) {
                     if (!first) doc.newPage();
                     first = false;
-                    renderExamCalibrationDetail(doc, e.getKey(), e.getValue());
+                    renderExamCalibrationDetail(doc, e.getKey(), e.getValue(), bioquimica);
                 }
             }
 
@@ -368,7 +384,8 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
      * Renderiza UMA secao por exame com TODAS suas calibracoes do periodo.
      */
     private void renderExamCalibrationDetail(Document doc, String examName,
-            java.util.List<com.biodiagnostico.entity.PostCalibrationRecord> events) throws DocumentException {
+            java.util.List<com.biodiagnostico.entity.PostCalibrationRecord> events,
+            boolean bioquimica) throws DocumentException {
         Paragraph h = new Paragraph(examName,
             com.lowagie.text.FontFactory.getFont(
                 com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
@@ -394,40 +411,60 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
 
         // Tabela cronologica
         doc.add(ReportV2PdfTheme.subsection("Eventos de calibracao"));
-        PdfPTable t = ReportV2PdfTheme.table(new float[] {1.1F, 1.2F, 1.2F, 1.2F, 1.2F, 1F, 1.3F, 1.6F, 2.5F});
-        ReportV2PdfTheme.headerRow(t, "Data", "CV antes", "CV depois", "Valor antes", "Valor depois",
-            "Delta CV", "Status", "Analista", "Notas");
-        boolean alt = false;
         java.util.List<com.biodiagnostico.entity.PostCalibrationRecord> sorted = events.stream()
             .sorted(java.util.Comparator.comparing(
                 com.biodiagnostico.entity.PostCalibrationRecord::getDate,
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
             .collect(java.util.stream.Collectors.toList());
-        for (com.biodiagnostico.entity.PostCalibrationRecord r : sorted) {
-            boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
-            String deltaTxt;
-            String st;
-            if (medido) {
-                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
-                deltaTxt = String.format(PT_BR, "%+.2f", delta);
-                st = classifyCalibrationDelta(delta);
-            } else {
-                deltaTxt = "N/D";
-                st = "SEM MEDICAO";
+        for (var group : calibrationGroups(sorted, bioquimica)) {
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {1.6F, 1.2F, 1.2F, 1.2F, 1.2F, 1F, 1.3F, 1.6F, 2.0F});
+            if (bioquimica) addReferenceHeader(t, group.record());
+            ReportV2PdfTheme.headerRow(t, "Data", "CV antes", "CV depois", "Valor antes", "Valor depois",
+                "Delta CV", "Status", "Analista", "Notas");
+            if (bioquimica) t.setHeaderRows(2);
+            boolean alt = false;
+            for (PostCalibrationRecord r : group.items()) {
+                boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+                String deltaTxt;
+                String st;
+                if (medido) {
+                    double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                    deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                    st = classifyCalibrationDelta(delta);
+                } else {
+                    deltaTxt = "N/D";
+                    st = "SEM MEDICAO";
+                }
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    ReportV2PdfTheme.formatDate(r.getDate()),
+                    ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                    ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
+                    ReportV2PdfTheme.formatDecimal(r.getOriginalValue()),
+                    ReportV2PdfTheme.formatDecimal(r.getPostCalibrationValue()),
+                    deltaTxt,
+                    st,
+                    ReportV2PdfTheme.safe(r.getAnalyst()),
+                    truncate(ReportV2PdfTheme.safe(r.getNotes()), 60));
+                alt = !alt;
             }
-            ReportV2PdfTheme.bodyRow(t, alt,
-                ReportV2PdfTheme.formatDate(r.getDate()),
-                ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
-                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
-                ReportV2PdfTheme.formatDecimal(r.getOriginalValue()),
-                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationValue()),
-                deltaTxt,
-                st,
-                ReportV2PdfTheme.safe(r.getAnalyst()),
-                truncate(ReportV2PdfTheme.safe(r.getNotes()), 60));
-            alt = !alt;
+            doc.add(t);
         }
-        doc.add(t);
+    }
+
+    private List<QcReferenceReportGrouping.Group<PostCalibrationRecord>> calibrationGroups(
+            List<PostCalibrationRecord> records, boolean bioquimica) {
+        if (!bioquimica) return List.of(new QcReferenceReportGrouping.Group<>(null, records));
+        return QcReferenceReportGrouping.groups(records, PostCalibrationRecord::getQcRecord,
+            PostCalibrationRecord::getDate, PostCalibrationRecord::getCreatedAt, PostCalibrationRecord::getId);
+    }
+
+    private void addReferenceHeader(PdfPTable table, QcRecord record) {
+        PdfPCell cell = new PdfPCell(new Phrase("Referência: " + QcReferenceReportGrouping.referenceLabel(record) + "\n"
+            + QcReferenceReportGrouping.referenceContext(record), ReportV2PdfTheme.META_FONT));
+        cell.setColspan(table.getNumberOfColumns());
+        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
+        cell.setPadding(6F);
+        table.addCell(cell);
     }
 
     private static String truncate(String s, int max) {

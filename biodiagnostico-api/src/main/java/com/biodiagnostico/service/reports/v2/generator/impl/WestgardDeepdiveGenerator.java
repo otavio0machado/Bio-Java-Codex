@@ -5,6 +5,8 @@ import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.repository.WestgardViolationRepository;
 import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
+import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinitionRegistry;
@@ -139,6 +141,10 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
             headerRenderer.render(doc, writer, settings, definition(), headerArtifact);
 
             List<WestgardViolation> violations = loadViolations(rf);
+            boolean bioquimica = "bioquimica".equals(rf.area);
+            if (bioquimica && !violations.isEmpty()) {
+                doc.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+            }
 
             // Resumo
             doc.add(ReportV2PdfTheme.section("Resumo"));
@@ -282,23 +288,8 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
 
             // Lista detalhada top 30
             doc.add(ReportV2PdfTheme.section("Ultimas violacoes"));
-            PdfPTable detail = ReportV2PdfTheme.table(new float[] {1.2F, 1.3F, 2.2F, 1.3F, 1.5F, 3.5F});
-            ReportV2PdfTheme.headerRow(detail, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
-            alt = false;
-            int limit = Math.min(30, violations.size());
-            for (int i = 0; i < limit; i++) {
-                WestgardViolation v = violations.get(i);
-                ReportV2PdfTheme.bodyRow(detail, alt,
-                    ReportV2PdfTheme.safe(v.getRule()),
-                    ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
-                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getExamName()),
-                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
-                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
-                    ReportV2PdfTheme.safe(v.getDescription())
-                );
-                alt = !alt;
-            }
-            doc.add(detail);
+            // Preserve o subconjunto das 30 mais recentes antes de organizar referencias.
+            renderLatestViolations(doc, violations.subList(0, Math.min(30, violations.size())), bioquimica);
 
             // Detalhamento por exame — uma secao completa por exame com violacoes
             if (rf.detailEachExam && !violations.isEmpty()) {
@@ -326,7 +317,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 for (Map.Entry<String, java.util.List<WestgardViolation>> e : sortedExams) {
                     if (!first) doc.newPage();
                     first = false;
-                    renderExamWestgardDetail(doc, e.getKey(), e.getValue());
+                    renderExamWestgardDetail(doc, e.getKey(), e.getValue(), bioquimica);
                 }
             }
 
@@ -444,7 +435,7 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
      * - Tabela cronologica completa de violacoes
      */
     private void renderExamWestgardDetail(Document doc, String examName,
-            java.util.List<WestgardViolation> viols) throws DocumentException {
+            java.util.List<WestgardViolation> viols, boolean bioquimica) throws DocumentException {
         Paragraph h = new Paragraph(examName,
             com.lowagie.text.FontFactory.getFont(
                 com.lowagie.text.FontFactory.HELVETICA_BOLD, 14, ReportV2PdfTheme.BRAND_DARK));
@@ -490,20 +481,63 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
             .collect(Collectors.toList());
-        PdfPTable t = ReportV2PdfTheme.table(new float[] {1F, 1F, 1.3F, 1.4F, 1F, 3F});
-        ReportV2PdfTheme.headerRow(t, "Data", "Regra", "Severidade", "Lote", "Nivel", "Descricao");
-        boolean alt = false;
-        for (WestgardViolation v : sorted) {
-            ReportV2PdfTheme.bodyRow(t, alt,
-                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
-                ReportV2PdfTheme.safe(v.getRule()),
-                ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
-                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
-                v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLevel()),
-                truncate(ReportV2PdfTheme.safe(v.getDescription()), 80));
-            alt = !alt;
+        for (var group : violationGroups(sorted, bioquimica)) {
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {1F, 1F, 1.3F, 1.4F, 1F, 3F});
+            if (bioquimica) addReferenceHeader(t, group.record());
+            ReportV2PdfTheme.headerRow(t, "Data", "Regra", "Severidade", "Lote", "Nivel", "Descricao");
+            if (bioquimica) t.setHeaderRows(2);
+            boolean alt = false;
+            for (WestgardViolation v : group.items()) {
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    v.getQcRecord() == null ? "—" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
+                    ReportV2PdfTheme.safe(v.getRule()),
+                    ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
+                    v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
+                    v.getQcRecord() == null ? "—" : ReportV2PdfTheme.safe(v.getQcRecord().getLevel()),
+                    truncate(ReportV2PdfTheme.safe(v.getDescription()), 80));
+                alt = !alt;
+            }
+            doc.add(t);
         }
-        doc.add(t);
+    }
+
+    private List<QcReferenceReportGrouping.Group<WestgardViolation>> violationGroups(
+            List<WestgardViolation> violations, boolean bioquimica) {
+        if (!bioquimica) return List.of(new QcReferenceReportGrouping.Group<>(null, violations));
+        return QcReferenceReportGrouping.groups(violations, WestgardViolation::getQcRecord,
+            v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
+            WestgardViolation::getCreatedAt, WestgardViolation::getId);
+    }
+
+    private void renderLatestViolations(Document doc, List<WestgardViolation> violations,
+            boolean bioquimica) throws DocumentException {
+        for (var group : violationGroups(violations, bioquimica)) {
+            PdfPTable table = ReportV2PdfTheme.table(new float[] {1.2F, 1.3F, 2.2F, 1.3F, 1.5F, 3.5F});
+            if (bioquimica) addReferenceHeader(table, group.record());
+            ReportV2PdfTheme.headerRow(table, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
+            if (bioquimica) table.setHeaderRows(2);
+            boolean alt = false;
+            for (WestgardViolation v : group.items()) {
+                ReportV2PdfTheme.bodyRow(table, alt,
+                    ReportV2PdfTheme.safe(v.getRule()),
+                    ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
+                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getExamName()),
+                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.safe(v.getQcRecord().getLotNumber()),
+                    v.getQcRecord() == null ? "-" : ReportV2PdfTheme.formatDate(v.getQcRecord().getDate()),
+                    ReportV2PdfTheme.safe(v.getDescription()));
+                alt = !alt;
+            }
+            doc.add(table);
+        }
+    }
+
+    private void addReferenceHeader(PdfPTable table, QcRecord record) {
+        PdfPCell cell = new PdfPCell(new Phrase("Referência: " + QcReferenceReportGrouping.referenceLabel(record) + "\n"
+            + QcReferenceReportGrouping.referenceContext(record), ReportV2PdfTheme.META_FONT));
+        cell.setColspan(table.getNumberOfColumns());
+        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
+        cell.setPadding(6F);
+        table.addCell(cell);
     }
 
     private static String truncate(String s, int max) {

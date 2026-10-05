@@ -15,6 +15,9 @@ import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.WestgardViolationRepository;
 import com.biodiagnostico.service.LabSettingsService;
 import com.biodiagnostico.service.ReportNumberingService;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping.Group;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping.ReferenceKey;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinition;
 import com.biodiagnostico.service.reports.v2.catalog.ReportDefinitionRegistry;
@@ -71,8 +74,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Levey-Jennings embutidos, secao Westgard, pos-calibracao, comparativo
  * vs periodo anterior e comentario IA.
  *
- * <p>V1 ({@code PdfReportService}) permanece intocado. Reutiliza os mesmos
- * repositorios para garantir equivalencia numerica de dados.
+ * <p>Reutiliza os mesmos repositorios do V1 para garantir equivalencia
+ * numerica de dados; referencia e valores historicos vem do registro persistido.
  */
 @Component
 public class CqOperationalV2Generator implements ReportGenerator {
@@ -265,7 +268,8 @@ public class CqOperationalV2Generator implements ReportGenerator {
             renderExecutiveSummary(document, summary, rf);
 
             // 3. Tabela por exame
-            document.add(ReportV2PdfTheme.section("Estatistica por exame"));
+            document.add(ReportV2PdfTheme.section("bioquimica".equals(rf.area)
+                ? "Estatistica por referencia" : "Estatistica por exame"));
             switch (rf.area) {
                 case "hematologia" -> renderHematologyTables(document, rf);
                 case "imunologia", "parasitologia", "microbiologia", "uroanalise" ->
@@ -371,16 +375,32 @@ public class CqOperationalV2Generator implements ReportGenerator {
             document.add(new Paragraph("Nenhum registro encontrado no periodo selecionado.", ReportV2PdfTheme.BODY_FONT));
             return;
         }
-        Map<String, List<QcRecord>> byReference = records.stream().collect(Collectors.groupingBy(
-            this::referenceGroupingKey,
-            LinkedHashMap::new,
-            Collectors.toList()));
-        PdfPTable table = ReportV2PdfTheme.table(new float[] {2.4F, 1.2F, 1.6F, 1.5F, 1.5F, 1.3F, 1.2F, 1.6F, 1.0F});
-        ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
-        boolean alt = false;
-        for (Map.Entry<String, List<QcRecord>> entry : byReference.entrySet()) {
-            List<QcRecord> group = entry.getValue();
-            QcRecord first = group.getFirst();
+        boolean identifyReferences = "bioquimica".equals(rf.area);
+        List<Group<QcRecord>> references;
+        if (identifyReferences) {
+            document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+            references = QcReferenceReportGrouping.groups(records);
+        } else {
+            // Preserve the pre-existing summary fallback for other areas.
+            Map<String, List<QcRecord>> legacyGroups = records.stream().collect(Collectors.groupingBy(
+                this::legacyReferenceGroupingKey, LinkedHashMap::new, Collectors.toList()));
+            references = legacyGroups.values().stream().map(group -> new Group<>(group.getFirst(), group)).toList();
+        }
+        float[] widths = {2.4F, 1.2F, 1.6F, 1.5F, 1.5F, 1.3F, 1.2F, 1.6F, 1.0F};
+        PdfPTable table = ReportV2PdfTheme.table(widths);
+        if (!identifyReferences) {
+            ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
+        }
+        boolean alternate = false;
+        for (Group<QcRecord> reference : references) {
+            List<QcRecord> group = reference.items();
+            QcRecord first = reference.record();
+            if (identifyReferences) {
+                table = ReportV2PdfTheme.table(widths);
+                addReferenceHeader(table, first, null);
+                ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
+                table.setHeaderRows(2);
+            }
             String exam = safe(first.getExamName());
             String level = safe(first.getLevel());
             String lot = safe(first.getLotNumber());
@@ -395,11 +415,11 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 .stdDev(values).doubleValue();
             double cv = com.biodiagnostico.service.reports.v2.util.Statistics
                 .cv(values).doubleValue();
-            double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
+            double target = first.getTargetValue() == null ? 0 : first.getTargetValue();
             long reprovados = group.stream().filter(r -> "REPROVADO".equalsIgnoreCase(r.getStatus())).count();
             long alertas = group.stream().filter(r -> "ALERTA".equalsIgnoreCase(r.getStatus())).count();
             String status = reprovados > 0 ? "REPROVADO" : (alertas > 0 ? "ALERTA" : "APROVADO");
-            ReportV2PdfTheme.statusRow(table, alt, status,
+            ReportV2PdfTheme.statusRow(table, alternate, status,
                 exam, level, lot,
                 ReportV2PdfTheme.formatDecimal(target),
                 ReportV2PdfTheme.formatDecimal(mean),
@@ -408,9 +428,10 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 status,
                 String.valueOf(group.size())
             );
-            alt = !alt;
+            alternate = !alternate;
+            if (identifyReferences) document.add(table);
         }
-        document.add(table);
+        if (!identifyReferences) document.add(table);
     }
 
     private void renderGenericAreaTable(Document document, ResolvedFilters rf) throws DocumentException {
@@ -492,43 +513,57 @@ public class CqOperationalV2Generator implements ReportGenerator {
     private void renderLeveyJenningsCharts(Document document, ResolvedFilters rf) throws DocumentException {
         List<QcRecord> records = loadBioquimicaRecords(rf);
         if (records.isEmpty()) return;
-        Map<String, List<QcRecord>> byReference = records.stream().collect(Collectors.groupingBy(
-            this::referenceGroupingKey,
+        Map<ReferenceKey, List<QcRecord>> byReference = records.stream().collect(Collectors.groupingBy(
+            QcReferenceReportGrouping::key,
             LinkedHashMap::new,
             Collectors.toList()));
 
-        List<Map.Entry<String, List<QcRecord>>> top = byReference.entrySet().stream()
+        List<QcRecord> selected = byReference.entrySet().stream()
             .filter(e -> e.getValue().size() >= 5)
-            .sorted(Comparator.<Map.Entry<String, List<QcRecord>>>comparingInt(e -> e.getValue().size()).reversed())
+            .sorted(Comparator.<Map.Entry<ReferenceKey, List<QcRecord>>>comparingInt(e -> e.getValue().size()).reversed())
             .limit(MAX_LJ_CHARTS)
-            .collect(Collectors.toList());
-        if (top.isEmpty()) return;
+            .flatMap(e -> e.getValue().stream())
+            .toList();
+        if (selected.isEmpty()) return;
 
-        document.add(ReportV2PdfTheme.section("Graficos Levey-Jennings"));
-        for (Map.Entry<String, List<QcRecord>> entry : top) {
-            List<QcRecord> group = entry.getValue();
-            double target = group.get(0).getTargetValue() == null ? 0 : group.get(0).getTargetValue();
+        boolean firstChart = true;
+        for (Group<QcRecord> reference : QcReferenceReportGrouping.groups(selected)) {
+            List<QcRecord> group = reference.items();
+            QcRecord first = reference.record();
+            double target = first.getTargetValue() == null ? 0 : first.getTargetValue();
             // T6: quando targetSd nao e informado, usa stdDev do grupo via
             // Statistics (BigDecimal). Minimo de 0.0001 para nao quebrar
             // traces L-J (divisao por zero em limites +/-nSD).
             double groupSd = com.biodiagnostico.service.reports.v2.util.Statistics
                 .stdDev(group.stream().map(QcRecord::getValue).collect(Collectors.toList()))
                 .doubleValue();
-            double sd = group.get(0).getTargetSd() == null || group.get(0).getTargetSd() == 0
+            double sd = first.getTargetSd() == null || first.getTargetSd() == 0
                 ? Math.max(groupSd, 0.0001)
-                : group.get(0).getTargetSd();
+                : first.getTargetSd();
             List<ChartRenderer.LjPoint> points = group.stream()
                 .sorted(Comparator.comparing(QcRecord::getDate))
                 .map(r -> new ChartRenderer.LjPoint(r.getDate(), r.getValue() == null ? 0 : r.getValue(),
                     safe(r.getStatus())))
                 .collect(Collectors.toList());
-            String title = chartTitle(group.getFirst());
+            String title = chartTitle(first);
             try {
                 byte[] png = chartRenderer.renderLeveyJennings(points, target, sd, title);
                 Image img = Image.getInstance(png);
                 img.scaleToFit(500F, 260F);
                 img.setAlignment(Element.ALIGN_CENTER);
-                document.add(img);
+                PdfPTable chartBlock = new PdfPTable(1);
+                chartBlock.setWidthPercentage(100F);
+                chartBlock.setKeepTogether(true);
+                PdfPCell chartCell = new PdfPCell();
+                chartCell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
+                chartCell.setPadding(0F);
+                if (firstChart) chartCell.addElement(ReportV2PdfTheme.section("Graficos Levey-Jennings"));
+                chartCell.addElement(ReportV2PdfTheme.subsection(QcReferenceReportGrouping.referenceLabel(first)));
+                chartCell.addElement(new Paragraph(QcReferenceReportGrouping.referenceContext(first), ReportV2PdfTheme.META_FONT));
+                chartCell.addElement(img);
+                chartBlock.addCell(chartCell);
+                document.add(chartBlock);
+                firstChart = false;
             } catch (Exception ex) {
                 LOG.warn("Falha ao renderizar L-J para {}", title, ex);
             }
@@ -544,6 +579,37 @@ public class CqOperationalV2Generator implements ReportGenerator {
             return;
         }
         document.add(ReportV2PdfTheme.section("Violacoes Westgard"));
+        if ("bioquimica".equals(rf.area)) {
+            document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+            List<WestgardViolation> selected = all.stream().limit(MAX_VIOLATIONS_ROWS).toList();
+            for (Group<WestgardViolation> reference : QcReferenceReportGrouping.groups(selected,
+                WestgardViolation::getQcRecord,
+                v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
+                WestgardViolation::getCreatedAt, WestgardViolation::getId)) {
+                PdfPTable table = ReportV2PdfTheme.table(new float[] {1.4F, 1.2F, 2.4F, 1.2F, 1.6F, 3.8F});
+                addReferenceHeader(table, reference.record(), null);
+                ReportV2PdfTheme.headerRow(table, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
+                table.setHeaderRows(2);
+                boolean alternate = false;
+                for (WestgardViolation v : reference.items()) {
+                    QcRecord record = v.getQcRecord();
+                    ReportV2PdfTheme.bodyRow(table, alternate,
+                        ReportV2PdfTheme.safe(v.getRule()),
+                        ReportV2PdfTheme.safe(WestgardSeverity.display(v.getSeverity())),
+                        ReportV2PdfTheme.safe(record == null ? null : record.getExamName()),
+                        ReportV2PdfTheme.safe(record == null ? null : record.getLotNumber()),
+                        ReportV2PdfTheme.formatDate(record == null ? null : record.getDate()),
+                        ReportV2PdfTheme.safe(v.getDescription()));
+                    alternate = !alternate;
+                }
+                document.add(table);
+            }
+            if (all.size() > MAX_VIOLATIONS_ROWS) {
+                document.add(new Paragraph((all.size() - MAX_VIOLATIONS_ROWS)
+                    + " violacoes adicionais omitidas.", ReportV2PdfTheme.META_FONT));
+            }
+            return;
+        }
         PdfPTable t = ReportV2PdfTheme.table(new float[] {1.4F, 1.2F, 2.4F, 1.2F, 1.6F, 3.8F});
         ReportV2PdfTheme.headerRow(t, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
         boolean alt = false;
@@ -575,37 +641,44 @@ public class CqOperationalV2Generator implements ReportGenerator {
             .findByQcRecordAreaAndDateRange("bioquimica", rf.start, rf.end);
         if (post.isEmpty()) return;
         document.add(ReportV2PdfTheme.section("Pos-calibracao"));
-        PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.6F, 1.6F, 1.2F, 1.2F, 1.2F, 1.4F});
-        ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
-        boolean alt = false;
-        for (PostCalibrationRecord r : post) {
-            // Espelha CalibracaoPrePostGenerator: CV original/pos null = "SEM MEDICAO".
-            // Nao houve medicao, logo nao e decisao de eficacia. NAO coage a 0 nem
-            // classifica via classifyCalibrationDelta (evita "EFICAZ"/"SEM EFEITO"
-            // espurio contra base 0). CV nulos renderizados como "-" (formatDecimal).
-            boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
-            String deltaTxt;
-            String status;
-            if (medido) {
-                double delta = r.getPostCalibrationCv() - r.getOriginalCv();
-                deltaTxt = String.format(PT_BR, "%+.2f", delta);
-                status = classifyCalibrationDelta(delta);
-            } else {
-                deltaTxt = "N/D";
-                status = "SEM MEDICAO";
+        document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+        for (Group<PostCalibrationRecord> reference : QcReferenceReportGrouping.groups(post,
+            PostCalibrationRecord::getQcRecord, PostCalibrationRecord::getDate,
+            PostCalibrationRecord::getCreatedAt, PostCalibrationRecord::getId)) {
+            PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.6F, 1.6F, 1.2F, 1.2F, 1.2F, 1.4F});
+            addReferenceHeader(t, reference.record(), null);
+            ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
+            t.setHeaderRows(2);
+            boolean alt = false;
+            for (PostCalibrationRecord r : reference.items()) {
+                // Espelha CalibracaoPrePostGenerator: CV original/pos null = "SEM MEDICAO".
+                // Nao houve medicao, logo nao e decisao de eficacia. NAO coage a 0 nem
+                // classifica via classifyCalibrationDelta (evita "EFICAZ"/"SEM EFEITO"
+                // espurio contra base 0). CV nulos renderizados como "-" (formatDecimal).
+                boolean medido = r.getOriginalCv() != null && r.getPostCalibrationCv() != null;
+                String deltaTxt;
+                String status;
+                if (medido) {
+                    double delta = r.getPostCalibrationCv() - r.getOriginalCv();
+                    deltaTxt = String.format(PT_BR, "%+.2f", delta);
+                    status = classifyCalibrationDelta(delta);
+                } else {
+                    deltaTxt = "N/D";
+                    status = "SEM MEDICAO";
+                }
+                ReportV2PdfTheme.bodyRow(t, alt,
+                    ReportV2PdfTheme.safe(r.getExamName()),
+                    ReportV2PdfTheme.safe(r.getQcRecord() == null ? null : r.getQcRecord().getLotNumber()),
+                    ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
+                    ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
+                    deltaTxt,
+                    status,
+                    ReportV2PdfTheme.formatDate(r.getDate())
+                );
+                alt = !alt;
             }
-            ReportV2PdfTheme.bodyRow(t, alt,
-                ReportV2PdfTheme.safe(r.getExamName()),
-                ReportV2PdfTheme.safe(r.getQcRecord() == null ? null : r.getQcRecord().getLotNumber()),
-                ReportV2PdfTheme.formatDecimal(r.getOriginalCv()),
-                ReportV2PdfTheme.formatDecimal(r.getPostCalibrationCv()),
-                deltaTxt,
-                status,
-                ReportV2PdfTheme.formatDate(r.getDate())
-            );
-            alt = !alt;
+            document.add(t);
         }
-        document.add(t);
     }
 
     private void renderComparison(Document document, ResolvedFilters rf, PeriodSummary current)
@@ -654,7 +727,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
     }
 
     /**
-     * Renderiza o historico cronologico do periodo, agrupado por dia.
+     * Renderiza bioquimica por referencia e data; demais areas mantem historico por dia.
      * Para cada dia que teve registros: cabecalho com a data + tabela com TODOS
      * os registros daquele dia + sub-resumo (total, aprovados, alertas, reprovados).
      *
@@ -668,7 +741,9 @@ public class CqOperationalV2Generator implements ReportGenerator {
         document.newPage();
         document.add(ReportV2PdfTheme.section("Historico diario"));
         Paragraph intro = new Paragraph(
-            "Cada dia abaixo tem um cabecalho com a data e uma tabela cronologica "
+            "bioquimica".equals(rf.area)
+            ? "Registros organizados por referencia vinculada e, em cada referencia, por data (mais recente primeiro)."
+            : "Cada dia abaixo tem um cabecalho com a data e uma tabela cronologica "
             + "com todos os registros lancados naquele dia, seguida de um sub-resumo (total, "
             + "aprovados, alertas, reprovados).",
             ReportV2PdfTheme.META_FONT);
@@ -679,61 +754,106 @@ public class CqOperationalV2Generator implements ReportGenerator {
             case "hematologia" -> renderDailyHistoryHematologia(document, rf);
             case "imunologia", "parasitologia", "microbiologia", "uroanalise" ->
                 renderDailyHistoryGenerica(document, rf);
-            default -> renderDailyHistoryBioquimica(document, rf);
+            case "bioquimica" -> renderDailyHistoryBioquimica(document, rf);
+            default -> renderDailyHistoryOtherQcRecords(document, rf);
         }
     }
 
-    private void renderDailyHistoryBioquimica(Document document, ResolvedFilters rf)
+    /** Preserve the existing day-based presentation for other QcRecord areas. */
+    private void renderDailyHistoryOtherQcRecords(Document document, ResolvedFilters rf)
             throws DocumentException {
-        java.util.List<QcRecord> records = qcRecordRepository
-            .findByAreaAndDateRange(rf.area, rf.start, rf.end);
-        if (rf.examIds != null && !rf.examIds.isEmpty()) {
-            records = records.stream()
-                .filter(r -> r.getReference() != null
-                    && r.getReference().getExam() != null
-                    && rf.examIds.contains(r.getReference().getExam().getId()))
-                .collect(java.util.stream.Collectors.toList());
+        List<QcRecord> records = qcRecordRepository.findByAreaAndDateRange(rf.area, rf.start, rf.end);
+        if (!rf.examIds.isEmpty()) {
+            records = records.stream().filter(r -> r.getReference() != null
+                && r.getReference().getExam() != null
+                && rf.examIds.contains(r.getReference().getExam().getId())).toList();
         }
         if (records.isEmpty()) {
             renderEmptyDailyHistory(document);
             return;
         }
-        java.util.Map<LocalDate, java.util.List<QcRecord>> byDay = records.stream()
-            .filter(r -> r.getDate() != null)
-            .collect(java.util.stream.Collectors.groupingBy(QcRecord::getDate,
-                java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()));
-
-        java.util.List<LocalDate> days = byDay.keySet().stream()
-            .sorted(java.util.Comparator.reverseOrder())
-            .collect(java.util.stream.Collectors.toList());
-
-        for (LocalDate day : days) {
-            java.util.List<QcRecord> dayRecs = byDay.get(day);
-            renderDayHeader(document, day, dayRecs.size(),
-                dayRecs.stream().map(QcRecord::getStatus).collect(java.util.stream.Collectors.toList()));
-            PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.2F});
-            ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
+        Map<LocalDate, List<QcRecord>> byDay = records.stream().filter(r -> r.getDate() != null)
+            .collect(Collectors.groupingBy(QcRecord::getDate, LinkedHashMap::new, Collectors.toList()));
+        for (LocalDate day : byDay.keySet().stream().sorted(Comparator.reverseOrder()).toList()) {
+            List<QcRecord> dayRecs = byDay.get(day);
+            renderDayHeader(document, day, dayRecs.size(), dayRecs.stream().map(QcRecord::getStatus).toList());
+            PdfPTable table = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.2F});
+            ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
                 "Z-score", "Equipamento", "Status");
-            boolean alt = false;
-            java.util.List<QcRecord> sorted = dayRecs.stream()
-                .sorted(java.util.Comparator.comparing(QcRecord::getCreatedAt,
-                    java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
-                .collect(java.util.stream.Collectors.toList());
-            for (QcRecord r : sorted) {
-                ReportV2PdfTheme.bodyRow(t, alt,
-                    ReportV2PdfTheme.safe(r.getExamName()),
-                    ReportV2PdfTheme.safe(r.getLevel()),
-                    ReportV2PdfTheme.safe(r.getLotNumber()),
-                    ReportV2PdfTheme.formatDecimal(r.getValue()),
-                    ReportV2PdfTheme.formatDecimal(r.getTargetValue()),
-                    ReportV2PdfTheme.formatDecimal(r.getCv()),
-                    ReportV2PdfTheme.formatDecimal(r.getZScore()),
-                    ReportV2PdfTheme.safe(r.getEquipment()),
-                    ReportV2PdfTheme.safe(r.getStatus()));
-                alt = !alt;
+            boolean alternate = false;
+            List<QcRecord> sorted = dayRecs.stream().sorted(Comparator.comparing(QcRecord::getCreatedAt,
+                Comparator.nullsLast(Comparator.naturalOrder()))).toList();
+            for (QcRecord record : sorted) {
+                ReportV2PdfTheme.bodyRow(table, alternate,
+                    ReportV2PdfTheme.safe(record.getExamName()),
+                    ReportV2PdfTheme.safe(record.getLevel()),
+                    ReportV2PdfTheme.safe(record.getLotNumber()),
+                    ReportV2PdfTheme.formatDecimal(record.getValue()),
+                    ReportV2PdfTheme.formatDecimal(record.getTargetValue()),
+                    ReportV2PdfTheme.formatDecimal(record.getCv()),
+                    ReportV2PdfTheme.formatDecimal(record.getZScore()),
+                    ReportV2PdfTheme.safe(record.getEquipment()),
+                    ReportV2PdfTheme.safe(record.getStatus()));
+                alternate = !alternate;
             }
-            document.add(t);
+            document.add(table);
         }
+    }
+
+    private void renderDailyHistoryBioquimica(Document document, ResolvedFilters rf)
+            throws DocumentException {
+        List<QcRecord> records = loadBioquimicaRecords(rf);
+        if (records.isEmpty()) {
+            renderEmptyDailyHistory(document);
+            return;
+        }
+        document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+        for (Group<QcRecord> reference : QcReferenceReportGrouping.groups(records)) {
+            document.add(ReportV2PdfTheme.subsection(QcReferenceReportGrouping.referenceLabel(reference.record())));
+            Map<LocalDate, List<QcRecord>> byDay = new LinkedHashMap<>();
+            for (QcRecord record : reference.items()) {
+                byDay.computeIfAbsent(record.getDate(), ignored -> new ArrayList<>()).add(record);
+            }
+            for (Map.Entry<LocalDate, List<QcRecord>> dayEntry : byDay.entrySet()) {
+                LocalDate day = dayEntry.getKey();
+                List<QcRecord> dayRecs = dayEntry.getValue();
+                renderDayHeader(document, day, dayRecs.size(),
+                    dayRecs.stream().map(QcRecord::getStatus).collect(java.util.stream.Collectors.toList()));
+                PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.6F});
+                addReferenceHeader(t, reference.record(), day);
+                ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
+                    "Z-score", "Equip.", "Status");
+                t.setHeaderRows(2);
+                boolean alt = false;
+                for (QcRecord r : dayRecs) {
+                    ReportV2PdfTheme.bodyRow(t, alt,
+                        ReportV2PdfTheme.safe(r.getExamName()),
+                        ReportV2PdfTheme.safe(r.getLevel()),
+                        ReportV2PdfTheme.safe(r.getLotNumber()),
+                        ReportV2PdfTheme.formatDecimal(r.getValue()),
+                        ReportV2PdfTheme.formatDecimal(r.getTargetValue()),
+                        ReportV2PdfTheme.formatDecimal(r.getCv()),
+                        ReportV2PdfTheme.formatDecimal(r.getZScore()),
+                        ReportV2PdfTheme.safe(r.getEquipment()),
+                        ReportV2PdfTheme.safe(r.getStatus()));
+                    alt = !alt;
+                }
+                document.add(t);
+            }
+        }
+    }
+
+    /** Repeated together with column titles when a reference table spans pages. */
+    private void addReferenceHeader(PdfPTable table, QcRecord record, LocalDate day) {
+        String text = "Referencia: " + QcReferenceReportGrouping.referenceLabel(record)
+            + "\n" + QcReferenceReportGrouping.referenceContext(record)
+            + (day == null ? "" : " | Data: " + ReportV2PdfTheme.formatDate(day));
+        PdfPCell cell = new PdfPCell(new Phrase(text, ReportV2PdfTheme.BODY_BOLD_FONT));
+        cell.setColspan(table.getNumberOfColumns());
+        cell.setPadding(6F);
+        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
+        cell.setBorderColor(ReportV2PdfTheme.BORDER);
+        table.addCell(cell);
     }
 
     private void renderDailyHistoryGenerica(Document document, ResolvedFilters rf)
@@ -848,7 +968,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
         long alerta = statuses.stream().filter(s -> "ALERTA".equalsIgnoreCase(s)).count();
         long reprov = statuses.stream().filter(s -> "REPROVADO".equalsIgnoreCase(s)).count();
 
-        String dayName = day.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
+        String dayName = day == null ? "Data não informada" : day.getDayOfWeek().getDisplayName(TextStyle.FULL, PT_BR);
         Paragraph header = new Paragraph();
         header.add(new com.lowagie.text.Chunk(capitalize(dayName) + ", ",
             com.lowagie.text.FontFactory.getFont(
@@ -915,22 +1035,16 @@ public class CqOperationalV2Generator implements ReportGenerator {
         return records;
     }
 
-    private String referenceGroupingKey(QcRecord record) {
+    private String chartTitle(QcRecord record) {
+        return safe(record.getExamName()) + " " + safe(record.getLevel())
+            + "\n" + QcReferenceReportGrouping.referenceLabel(record);
+    }
+
+    private String legacyReferenceGroupingKey(QcRecord record) {
         if (record.getReference() != null && record.getReference().getId() != null) {
             return "REF:" + record.getReference().getId();
         }
-        return "LEGACY:"
-            + safe(record.getExamName()) + "|"
-            + safe(record.getLevel()) + "|"
-            + safe(record.getLotNumber());
-    }
-
-    private String chartTitle(QcRecord record) {
-        String title = safe(record.getExamName()) + " " + safe(record.getLevel());
-        if (record.getReference() != null && record.getReference().getName() != null) {
-            return title + " Ref. " + record.getReference().getName();
-        }
-        return title;
+        return "LEGACY:" + safe(record.getExamName()) + "|" + safe(record.getLevel()) + "|" + safe(record.getLotNumber());
     }
 
     private PeriodSummary gatherSummary(ResolvedFilters rf) {

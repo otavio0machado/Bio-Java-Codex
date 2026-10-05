@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.entity.QcReferenceValue;
 import com.biodiagnostico.entity.WestgardViolation;
 import com.biodiagnostico.repository.WestgardViolationRepository;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
@@ -58,6 +59,49 @@ class WestgardDeepdiveGeneratorTest {
             .description("Descricao " + rule)
             .severity(severity)
             .build();
+    }
+
+    @Test
+    void referenceGroupsPreserveRecentThirtySelectionAndFullDetail() {
+        UUID a = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID b = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        QcReferenceValue refA = QcReferenceValue.builder().id(a).name("Controle").isActive(false).build();
+        QcReferenceValue refB = QcReferenceValue.builder().id(b).name("Controle").build();
+        LocalDate start = LocalDate.of(2026, 1, 1);
+        List<WestgardViolation> records = new java.util.ArrayList<>();
+        for (int i = 0; i < 31; i++) {
+            WestgardViolation v = fixture("1-3s", "REJEICAO", "Glicose", start.plusDays(i));
+            v.getQcRecord().setReference(i % 2 == 0 ? refA : refB);
+            v.setDescription(i == 0 ? "EXCLUIDO-MAIS-ANTIGO" : "VIOLACAO-" + i + "-FIM");
+            records.add(v);
+        }
+        java.util.Collections.reverse(records);
+        when(violationRepository.findByAreaAndPeriod(eq("bioquimica"), any(), any())).thenReturn(records);
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "bioquimica", "periodType", "year", "year", 2026,
+            "detailEachExam", false)), GeneratorTestSupport.ctx()).bytes()).replaceAll("\\s+", " ");
+        String detail = text.substring(text.indexOf("Ultimas violacoes"));
+        assertThat(text).contains("cadastro atual");
+        assertThat(detail).contains(a.toString(), b.toString(), "VIOLACAO-30-FIM")
+            .doesNotContain("EXCLUIDO-MAIS-ANTIGO");
+        assertThat(detail.indexOf("VIOLACAO-30-FIM")).isLessThan(detail.indexOf("VIOLACAO-28-FIM"));
+        assertThat(detail.indexOf(a.toString())).isLessThan(detail.indexOf(b.toString()));
+        String full = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "bioquimica", "periodType", "year", "year", 2026,
+            "detailEachExam", true)), GeneratorTestSupport.ctx()).bytes()).replaceAll("\\s+", " ");
+        assertThat(full.substring(full.indexOf("Detalhamento por exame")))
+            .contains(a.toString(), b.toString(), "EXCLUIDO-MAIS-ANTIGO");
+    }
+
+    @Test
+    void nonBiochemistryRetainsExistingPresentation() {
+        WestgardViolation v = fixture("1-3s", "REJEICAO", "Analito", LocalDate.now());
+        v.getQcRecord().setArea("hematologia");
+        v.getQcRecord().setReference(QcReferenceValue.builder().id(UUID.randomUUID()).name("Nao exibir").build());
+        when(violationRepository.findByAreaAndPeriod(eq("hematologia"), any(), any())).thenReturn(List.of(v));
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "hematologia", "periodType", "current-month")), GeneratorTestSupport.ctx()).bytes());
+        assertThat(text).contains("Analito").doesNotContain("Nao exibir", "cadastro atual");
     }
 
     @Test

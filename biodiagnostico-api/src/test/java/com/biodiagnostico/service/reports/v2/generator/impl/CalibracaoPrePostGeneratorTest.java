@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.entity.QcReferenceValue;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.service.reports.v2.catalog.ReportCode;
 import com.biodiagnostico.service.reports.v2.generator.ReportArtifact;
@@ -56,6 +57,46 @@ class CalibracaoPrePostGeneratorTest {
             .postCalibrationCv(postCv)
             .date(date)
             .build();
+    }
+
+    @Test
+    void referencesUseOriginalIdentityAndPostEventDate() {
+        UUID a = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID b = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        QcReferenceValue refA = QcReferenceValue.builder().id(a).name("Controle").isActive(false).build();
+        QcReferenceValue refB = QcReferenceValue.builder().id(b).name("Controle").build();
+        LocalDate day = LocalDate.of(2026, 1, 1);
+        PostCalibrationRecord older = rec("Glicose", 5D, 3D, day);
+        PostCalibrationRecord recent = rec("Glicose", 5D, null, day.plusDays(2));
+        PostCalibrationRecord other = rec("Glicose", 3D, 5D, day.plusDays(1));
+        PostCalibrationRecord legacy = rec("Glicose", 4D, 4D, day.plusDays(1));
+        older.getQcRecord().setReference(refA);
+        recent.getQcRecord().setReference(refA);
+        recent.getQcRecord().setDate(day.minusDays(20));
+        other.getQcRecord().setReference(refB);
+        when(repository.findByQcRecordAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(other, older, legacy, recent));
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "bioquimica", "periodType", "year", "year", 2026,
+            "detailEachExam", true)), GeneratorTestSupport.ctx()).bytes()).replaceAll("\\s+", " ");
+        String detail = text.substring(text.indexOf("Detalhe antes/depois"), text.indexOf("Detalhamento por exame"));
+        assertThat(detail).contains(a.toString(), b.toString(), "Sem referência vinculada", "SEM MEDICAO", "EFICAZ", "PIOROU");
+        String firstGroup = detail.substring(detail.indexOf(a.toString()), detail.indexOf(b.toString()));
+        assertThat(firstGroup.indexOf("03/01/2026")).isLessThan(firstGroup.indexOf("01/01/2026"));
+        assertThat(firstGroup).doesNotContain("12/12/2025");
+        assertThat(text.substring(text.indexOf("Detalhamento por exame")))
+            .contains(a.toString(), b.toString(), "Sem referência vinculada");
+        assertThat(recent.getPostCalibrationCv()).isNull();
+    }
+
+    @Test
+    void nonBiochemistryRetainsExistingPresentation() {
+        PostCalibrationRecord event = rec("Analito", 5D, 3D, LocalDate.now());
+        event.getQcRecord().setReference(QcReferenceValue.builder().id(UUID.randomUUID()).name("Nao exibir").build());
+        when(repository.findByQcRecordAreaAndDateRange(eq("hematologia"), any(), any())).thenReturn(List.of(event));
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "hematologia", "periodType", "current-month")), GeneratorTestSupport.ctx()).bytes());
+        assertThat(text).contains("Analito").doesNotContain("Nao exibir", "cadastro atual");
     }
 
     @Test

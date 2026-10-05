@@ -14,6 +14,9 @@ import com.biodiagnostico.entity.ImmunologyQcRun;
 import com.biodiagnostico.entity.ImmunologyQcRunResult;
 import com.biodiagnostico.entity.PostCalibrationRecord;
 import com.biodiagnostico.entity.QcRecord;
+import com.biodiagnostico.entity.QcReferenceValue;
+import com.lowagie.text.pdf.PdfReader;
+import com.lowagie.text.pdf.parser.PdfTextExtractor;
 import com.biodiagnostico.entity.ReagentLot;
 import com.biodiagnostico.repository.AreaQcMeasurementRepository;
 import com.biodiagnostico.repository.HematologyBioRecordRepository;
@@ -89,6 +92,50 @@ class PdfReportServiceTest {
             labSettingsRepository,
             reportNumberingService
         );
+    }
+
+    @Test
+    @DisplayName("bioquímica identifica referências homônimas e ordena datas sem reinterpretar snapshots")
+    void bioquimicaGroupsReferencesAndDates() throws Exception {
+        UUID refA = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID refB = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        QcReferenceValue a = QcReferenceValue.builder().id(refA).name("Controle atual")
+            .isActive(false).validUntil(LocalDate.of(2025, 1, 1)).targetValue(999D).build();
+        QcReferenceValue b = QcReferenceValue.builder().id(refB).name("Controle atual").build();
+        LocalDate day = LocalDate.now().withDayOfMonth(1);
+        QcRecord old = referenceRecord(a, day, 81D);
+        QcRecord recent = referenceRecord(a, day.plusDays(2), 83D);
+        QcRecord other = referenceRecord(b, day.plusDays(1), 82D);
+        QcRecord legacy = referenceRecord(null, day, 84D);
+        QcRecord legacyOther = referenceRecord(null, day, 85D);
+        legacyOther.setLotNumber("LEGADO-2");
+        when(qcRecordRepository.findByAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(other, old, legacy, recent, legacyOther));
+        when(postCalibrationRecordRepository.findByQcRecordAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of());
+
+        PdfReader reader = new PdfReader(pdfReportService.generateQcPdf("bioquimica", "year", null, day.getYear()));
+        PdfTextExtractor extractor = new PdfTextExtractor(reader);
+        StringBuilder content = new StringBuilder();
+        for (int i = 1; i <= reader.getNumberOfPages(); i++) content.append(extractor.getTextFromPage(i));
+        reader.close();
+        String text = content.toString().replaceAll("\\s+", " ");
+        assertThat(text).contains("Controle atual", refA.toString(), refB.toString(),
+            "Sem referência vinculada", "LEGADO-2", "cadastro atual", "REPROVADO", "81,00", "83,00");
+        String aSection = text.substring(text.indexOf(refA.toString()), text.indexOf(refB.toString()));
+        assertThat(aSection.indexOf("03/" + String.format("%02d", day.getMonthValue())))
+            .isLessThan(aSection.indexOf("01/" + String.format("%02d", day.getMonthValue())));
+        assertThat(text.indexOf(refB.toString())).isLessThan(text.indexOf("Sem referência vinculada"));
+        assertThat(text).doesNotContain("999,00");
+        assertThat(recent.getTargetValue()).isEqualTo(100D);
+        assertThat(recent.getStatus()).isEqualTo("REPROVADO");
+    }
+
+    private QcRecord referenceRecord(QcReferenceValue reference, LocalDate date, Double value) {
+        return QcRecord.builder().id(UUID.randomUUID()).reference(reference)
+            .examName("Glicose").area("bioquimica").date(date).level("Normal").lotNumber("L-1")
+            .value(value).targetValue(100D).targetSd(5D).cv(7D).cvLimit(10D)
+            .status("REPROVADO").needsCalibration(false).build();
     }
 
     @Test

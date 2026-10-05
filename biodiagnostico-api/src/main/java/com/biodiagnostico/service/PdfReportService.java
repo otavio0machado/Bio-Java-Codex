@@ -19,6 +19,7 @@ import com.biodiagnostico.repository.LabSettingsRepository;
 import com.biodiagnostico.repository.PostCalibrationRecordRepository;
 import com.biodiagnostico.repository.QcRecordRepository;
 import com.biodiagnostico.repository.ReagentLotRepository;
+import com.biodiagnostico.service.reports.QcReferenceReportGrouping;
 import com.lowagie.text.Chunk;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
@@ -177,40 +178,51 @@ public class PdfReportService {
                     return;
                 }
 
-                PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
-                addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ", "Status Pós");
-                boolean alternate = false;
-                for (QcRecord record : records) {
-                    PostCalibrationRecord post = postCalibrations.get(record.getId());
-                    String postValueCell;
-                    String postStatusCell;
-                    if (post == null) {
-                        postValueCell = Boolean.TRUE.equals(record.getNeedsCalibration()) ? "Pendente" : "—";
-                        postStatusCell = "—";
-                    } else {
-                        postValueCell = formatDecimal(post.getPostCalibrationValue());
-                        double limit = record.getCvLimit() != null ? record.getCvLimit() : 10D;
-                        double postCv = post.getPostCalibrationCv() != null ? post.getPostCalibrationCv() : 0D;
-                        postStatusCell = postCv <= limit ? "APROVADO" : "REPROVADO";
+                document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, BODY_FONT));
+                for (var group : QcReferenceReportGrouping.groups(records)) {
+                    PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
+                    PdfPCell referenceHeader = new PdfPCell(new Phrase(
+                        "Referência: " + QcReferenceReportGrouping.referenceLabel(group.record()) + "\n"
+                            + QcReferenceReportGrouping.referenceContext(group.record()), HEADER_FONT));
+                    referenceHeader.setColspan(11);
+                    referenceHeader.setBackgroundColor(HEADER_COLOR);
+                    referenceHeader.setPadding(6F);
+                    table.addCell(referenceHeader);
+                    addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ", "Status Pós");
+                    table.setHeaderRows(2);
+                    boolean alternate = false;
+                    for (QcRecord record : group.items()) {
+                        PostCalibrationRecord post = postCalibrations.get(record.getId());
+                        String postValueCell;
+                        String postStatusCell;
+                        if (post == null) {
+                            postValueCell = Boolean.TRUE.equals(record.getNeedsCalibration()) ? "Pendente" : "—";
+                            postStatusCell = "—";
+                        } else {
+                            postValueCell = formatDecimal(post.getPostCalibrationValue());
+                            double limit = record.getCvLimit() != null ? record.getCvLimit() : 10D;
+                            double postCv = post.getPostCalibrationCv() != null ? post.getPostCalibrationCv() : 0D;
+                            postStatusCell = postCv <= limit ? "APROVADO" : "REPROVADO";
+                        }
+                        addBodyRow(
+                            table,
+                            alternate,
+                            formatDate(record.getDate()),
+                            safe(record.getExamName()),
+                            safe(record.getLevel()),
+                            safe(record.getLotNumber()),
+                            formatDecimal(record.getValue()),
+                            formatDecimal(record.getTargetValue()),
+                            formatDecimal(record.getCv()),
+                            formatDecimal(record.getCvLimit()),
+                            safe(record.getStatus()),
+                            postValueCell,
+                            postStatusCell
+                        );
+                        alternate = !alternate;
                     }
-                    addBodyRow(
-                        table,
-                        alternate,
-                        formatDate(record.getDate()),
-                        safe(record.getExamName()),
-                        safe(record.getLevel()),
-                        safe(record.getLotNumber()),
-                        formatDecimal(record.getValue()),
-                        formatDecimal(record.getTargetValue()),
-                        formatDecimal(record.getCv()),
-                        formatDecimal(record.getCvLimit()),
-                        safe(record.getStatus()),
-                        postValueCell,
-                        postStatusCell
-                    );
-                    alternate = !alternate;
+                    document.add(table);
                 }
-                document.add(table);
                 document.add(new Paragraph("Total de registros: " + records.size(), BODY_FONT));
             }
         );
