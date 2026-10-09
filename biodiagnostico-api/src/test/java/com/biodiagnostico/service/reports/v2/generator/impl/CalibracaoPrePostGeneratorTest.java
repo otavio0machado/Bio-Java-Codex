@@ -100,6 +100,33 @@ class CalibracaoPrePostGeneratorTest {
     }
 
     @Test
+    void distinctReferenceNamesUseSimpleCaptionsAndKeepCalibrationValues() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        PostCalibrationRecord first = rec("Glicose", 5D, 3D, LocalDate.now());
+        PostCalibrationRecord second = rec("Glicose", 5D, null, LocalDate.now());
+        first.getQcRecord().setReference(QcReferenceValue.builder().id(a).name("Controle normal").build());
+        second.getQcRecord().setReference(QcReferenceValue.builder().id(b).name("Controle patologico").build());
+        first.setNotes("EVENTO-SIMPLES-A");
+        second.setNotes("EVENTO-SIMPLES-B");
+        when(repository.findByQcRecordAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(first, second));
+
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "bioquimica", "periodType", "current-month", "detailEachExam", true)),
+            GeneratorTestSupport.ctx()).bytes()).replaceAll("\\s+", " ").replaceAll("(?<=-)\\s+(?=\\S)", "");
+        assertThat(text).contains("Referência: Controle normal (cadastro atual)",
+            "Referência: Controle patologico (cadastro atual)", "EVENTO-SIMPLES-A", "EVENTO-SIMPLES-B",
+            "EFICAZ", "SEM MEDICAO", "5,00", "3,00")
+            .doesNotContain(a.toString(), b.toString(), "ID:", "Contexto do registro",
+                "Nome da referência conforme cadastro atual");
+        String detail = text.substring(text.indexOf("Eventos de calibracao"));
+        assertThat(detail.indexOf("Referência: Controle normal")).isLessThan(detail.indexOf("EVENTO-SIMPLES-A"));
+        assertThat(detail.indexOf("Referência: Controle patologico")).isLessThan(detail.indexOf("EVENTO-SIMPLES-B"));
+        assertThat(second.getPostCalibrationCv()).isNull();
+    }
+
+    @Test
     @DisplayName("definition expoe CALIBRACAO_PREPOST")
     void definitionMetadata() {
         assertThat(generator().definition().code()).isEqualTo(ReportCode.CALIBRACAO_PREPOST);

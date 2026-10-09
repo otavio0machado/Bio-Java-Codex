@@ -105,6 +105,31 @@ class WestgardDeepdiveGeneratorTest {
     }
 
     @Test
+    void distinctReferenceNamesUseSimpleCaptionsBeforeViolationTables() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        WestgardViolation first = fixture("1-3s", "REJEICAO", "Glicose", LocalDate.now());
+        WestgardViolation second = fixture("2-2s", "ADVERTENCIA", "Glicose", LocalDate.now());
+        first.getQcRecord().setReference(QcReferenceValue.builder().id(a).name("Controle normal").build());
+        second.getQcRecord().setReference(QcReferenceValue.builder().id(b).name("Controle patologico").build());
+        first.setDescription("VIOLACAO-SIMPLES-A");
+        second.setDescription("VIOLACAO-SIMPLES-B");
+        when(violationRepository.findByAreaAndPeriod(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(first, second));
+
+        String text = GeneratorTestSupport.extractPdfText(generator().generate(new ReportFilters(Map.of(
+            "area", "bioquimica", "periodType", "current-month", "detailEachExam", true)),
+            GeneratorTestSupport.ctx()).bytes()).replaceAll("\\s+", " ");
+        assertThat(text).contains("Referência: Controle normal (cadastro atual)",
+            "Referência: Controle patologico (cadastro atual)", "VIOLACAO-SIMPLES-A", "VIOLACAO-SIMPLES-B")
+            .doesNotContain(a.toString(), b.toString(), "ID:", "Contexto do registro",
+                "Nome da referência conforme cadastro atual");
+        String detail = text.substring(text.indexOf("Historico de violacoes"));
+        assertThat(detail.indexOf("Referência: Controle normal")).isLessThan(detail.indexOf("VIOLACAO-SIMPLES-A"));
+        assertThat(detail.indexOf("Referência: Controle patologico")).isLessThan(detail.indexOf("VIOLACAO-SIMPLES-B"));
+    }
+
+    @Test
     @DisplayName("definition expoe WESTGARD_DEEPDIVE")
     void definitionMetadata() {
         assertThat(generator().definition().code()).isEqualTo(ReportCode.WESTGARD_DEEPDIVE);

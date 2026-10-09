@@ -176,9 +176,6 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
             List<PostCalibrationRecord> records = repository.findByQcRecordAreaAndDateRange(
                 rf.area == null ? "bioquimica" : rf.area, rf.start, rf.end);
             boolean bioquimica = "bioquimica".equals(rf.area);
-            if (bioquimica && !records.isEmpty()) {
-                doc.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
-            }
             // Tolerancia configuravel (default 0.5pp) para classificar efeito.
             // 4 baldes mutuamente exclusivos — fonte unica compartilhada com o
             // detalhamento por exame (sem divergencia resumo vs. soma do detalhe).
@@ -208,9 +205,10 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                             r.getPostCalibrationCv() - r.getOriginalCv());
                     }
                 }
+                List<QcRecord> referenceScope = records.stream().map(PostCalibrationRecord::getQcRecord).toList();
                 for (var group : calibrationGroups(records, bioquimica)) {
                     PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.4F, 1.4F, 1.4F, 1.2F, 1.5F});
-                    if (bioquimica) addReferenceHeader(t, group.record());
+                    if (bioquimica) addReferenceHeader(t, group.record(), referenceScope);
                     ReportV2PdfTheme.headerRow(t, "Exame", "CV antes", "CV depois", "Delta%", "Status", "Data");
                     if (bioquimica) t.setHeaderRows(2);
                     boolean alt = false;
@@ -416,9 +414,10 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
                 com.biodiagnostico.entity.PostCalibrationRecord::getDate,
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
             .collect(java.util.stream.Collectors.toList());
+        List<QcRecord> referenceScope = sorted.stream().map(PostCalibrationRecord::getQcRecord).toList();
         for (var group : calibrationGroups(sorted, bioquimica)) {
             PdfPTable t = ReportV2PdfTheme.table(new float[] {1.6F, 1.2F, 1.2F, 1.2F, 1.2F, 1F, 1.3F, 1.6F, 2.0F});
-            if (bioquimica) addReferenceHeader(t, group.record());
+            if (bioquimica) addReferenceHeader(t, group.record(), referenceScope);
             ReportV2PdfTheme.headerRow(t, "Data", "CV antes", "CV depois", "Valor antes", "Valor depois",
                 "Delta CV", "Status", "Analista", "Notas");
             if (bioquimica) t.setHeaderRows(2);
@@ -458,12 +457,13 @@ public class CalibracaoPrePostGenerator implements ReportGenerator {
             PostCalibrationRecord::getDate, PostCalibrationRecord::getCreatedAt, PostCalibrationRecord::getId);
     }
 
-    private void addReferenceHeader(PdfPTable table, QcRecord record) {
-        PdfPCell cell = new PdfPCell(new Phrase("Referência: " + QcReferenceReportGrouping.referenceLabel(record) + "\n"
-            + QcReferenceReportGrouping.referenceContext(record), ReportV2PdfTheme.META_FONT));
+    private void addReferenceHeader(PdfPTable table, QcRecord record, List<QcRecord> referenceScope) {
+        PdfPCell cell = new PdfPCell(new Phrase("Referência: "
+            + QcReferenceReportGrouping.referenceLabel(record, referenceScope), ReportV2PdfTheme.META_FONT));
         cell.setColspan(table.getNumberOfColumns());
-        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
-        cell.setPadding(6F);
+        cell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
+        cell.setPadding(0F);
+        cell.setPaddingBottom(4F);
         table.addCell(cell);
     }
 

@@ -41,9 +41,24 @@ public final class QcReferenceReportGrouping {
     }
 
     public static String referenceLabel(QcRecord record) {
+        return referenceLabel(record, record == null ? List.of() : List.of(record));
+    }
+
+    /** Adds persisted identity only when the section contains references with the same displayed name. */
+    public static String referenceLabel(QcRecord record, List<QcRecord> scope) {
+        Objects.requireNonNull(scope, "scope");
         UUID id = key(record).referenceId();
         if (id == null) return "Sem referência vinculada";
-        return display(record.getReference().getName()) + " | ID: " + id;
+        String name = display(record.getReference().getName());
+        long identities = scope.stream()
+            .filter(item -> key(item).referenceId() != null)
+            .filter(item -> name.equals(display(item.getReference().getName())))
+            .map(item -> key(item).referenceId())
+            .distinct()
+            .limit(2)
+            .count();
+        String label = name + " (cadastro atual)";
+        return identities > 1 ? label + " | ID: " + id : label;
     }
 
     public static String referenceContext(QcRecord record) {

@@ -268,8 +268,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             renderExecutiveSummary(document, summary, rf);
 
             // 3. Tabela por exame
-            document.add(ReportV2PdfTheme.section("bioquimica".equals(rf.area)
-                ? "Estatistica por referencia" : "Estatistica por exame"));
+            document.add(ReportV2PdfTheme.section("Estatistica por exame"));
             switch (rf.area) {
                 case "hematologia" -> renderHematologyTables(document, rf);
                 case "imunologia", "parasitologia", "microbiologia", "uroanalise" ->
@@ -378,7 +377,6 @@ public class CqOperationalV2Generator implements ReportGenerator {
         boolean identifyReferences = "bioquimica".equals(rf.area);
         List<Group<QcRecord>> references;
         if (identifyReferences) {
-            document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
             references = QcReferenceReportGrouping.groups(records);
         } else {
             // Preserve the pre-existing summary fallback for other areas.
@@ -397,7 +395,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
             QcRecord first = reference.record();
             if (identifyReferences) {
                 table = ReportV2PdfTheme.table(widths);
-                addReferenceHeader(table, first, null);
+                addReferenceHeader(table, first, records, null);
                 ReportV2PdfTheme.headerRow(table, "Exame", "Nivel", "Lote", "Target", "Media", "DP", "CV%", "Status", "N");
                 table.setHeaderRows(2);
             }
@@ -545,7 +543,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 .map(r -> new ChartRenderer.LjPoint(r.getDate(), r.getValue() == null ? 0 : r.getValue(),
                     safe(r.getStatus())))
                 .collect(Collectors.toList());
-            String title = chartTitle(first);
+            String title = safe(first.getExamName()) + " " + safe(first.getLevel());
             try {
                 byte[] png = chartRenderer.renderLeveyJennings(points, target, sd, title);
                 Image img = Image.getInstance(png);
@@ -558,8 +556,8 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 chartCell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
                 chartCell.setPadding(0F);
                 if (firstChart) chartCell.addElement(ReportV2PdfTheme.section("Graficos Levey-Jennings"));
-                chartCell.addElement(ReportV2PdfTheme.subsection(QcReferenceReportGrouping.referenceLabel(first)));
-                chartCell.addElement(new Paragraph(QcReferenceReportGrouping.referenceContext(first), ReportV2PdfTheme.META_FONT));
+                chartCell.addElement(new Paragraph("Referencia: "
+                    + QcReferenceReportGrouping.referenceLabel(first, selected), ReportV2PdfTheme.META_FONT));
                 chartCell.addElement(img);
                 chartBlock.addCell(chartCell);
                 document.add(chartBlock);
@@ -580,14 +578,14 @@ public class CqOperationalV2Generator implements ReportGenerator {
         }
         document.add(ReportV2PdfTheme.section("Violacoes Westgard"));
         if ("bioquimica".equals(rf.area)) {
-            document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
             List<WestgardViolation> selected = all.stream().limit(MAX_VIOLATIONS_ROWS).toList();
+            List<QcRecord> scope = selected.stream().map(WestgardViolation::getQcRecord).toList();
             for (Group<WestgardViolation> reference : QcReferenceReportGrouping.groups(selected,
                 WestgardViolation::getQcRecord,
                 v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
                 WestgardViolation::getCreatedAt, WestgardViolation::getId)) {
                 PdfPTable table = ReportV2PdfTheme.table(new float[] {1.4F, 1.2F, 2.4F, 1.2F, 1.6F, 3.8F});
-                addReferenceHeader(table, reference.record(), null);
+                addReferenceHeader(table, reference.record(), scope, null);
                 ReportV2PdfTheme.headerRow(table, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
                 table.setHeaderRows(2);
                 boolean alternate = false;
@@ -641,12 +639,12 @@ public class CqOperationalV2Generator implements ReportGenerator {
             .findByQcRecordAreaAndDateRange("bioquimica", rf.start, rf.end);
         if (post.isEmpty()) return;
         document.add(ReportV2PdfTheme.section("Pos-calibracao"));
-        document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
+        List<QcRecord> scope = post.stream().map(PostCalibrationRecord::getQcRecord).toList();
         for (Group<PostCalibrationRecord> reference : QcReferenceReportGrouping.groups(post,
             PostCalibrationRecord::getQcRecord, PostCalibrationRecord::getDate,
             PostCalibrationRecord::getCreatedAt, PostCalibrationRecord::getId)) {
             PdfPTable t = ReportV2PdfTheme.table(new float[] {2.6F, 1.6F, 1.6F, 1.2F, 1.2F, 1.2F, 1.4F});
-            addReferenceHeader(t, reference.record(), null);
+            addReferenceHeader(t, reference.record(), scope, null);
             ReportV2PdfTheme.headerRow(t, "Exame", "Lote", "CV antes", "CV depois", "Delta%", "Status", "Data");
             t.setHeaderRows(2);
             boolean alt = false;
@@ -741,9 +739,7 @@ public class CqOperationalV2Generator implements ReportGenerator {
         document.newPage();
         document.add(ReportV2PdfTheme.section("Historico diario"));
         Paragraph intro = new Paragraph(
-            "bioquimica".equals(rf.area)
-            ? "Registros organizados por referencia vinculada e, em cada referencia, por data (mais recente primeiro)."
-            : "Cada dia abaixo tem um cabecalho com a data e uma tabela cronologica "
+            "Cada dia abaixo tem um cabecalho com a data e uma tabela cronologica "
             + "com todos os registros lancados naquele dia, seguida de um sub-resumo (total, "
             + "aprovados, alertas, reprovados).",
             ReportV2PdfTheme.META_FONT);
@@ -807,25 +803,23 @@ public class CqOperationalV2Generator implements ReportGenerator {
             renderEmptyDailyHistory(document);
             return;
         }
-        document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
-        for (Group<QcRecord> reference : QcReferenceReportGrouping.groups(records)) {
-            document.add(ReportV2PdfTheme.subsection(QcReferenceReportGrouping.referenceLabel(reference.record())));
-            Map<LocalDate, List<QcRecord>> byDay = new LinkedHashMap<>();
-            for (QcRecord record : reference.items()) {
-                byDay.computeIfAbsent(record.getDate(), ignored -> new ArrayList<>()).add(record);
-            }
-            for (Map.Entry<LocalDate, List<QcRecord>> dayEntry : byDay.entrySet()) {
-                LocalDate day = dayEntry.getKey();
-                List<QcRecord> dayRecs = dayEntry.getValue();
-                renderDayHeader(document, day, dayRecs.size(),
-                    dayRecs.stream().map(QcRecord::getStatus).collect(java.util.stream.Collectors.toList()));
+        Map<LocalDate, List<QcRecord>> byDay = new LinkedHashMap<>();
+        for (QcRecord record : records) {
+            byDay.computeIfAbsent(record.getDate(), ignored -> new ArrayList<>()).add(record);
+        }
+        for (LocalDate day : byDay.keySet().stream()
+                .sorted(Comparator.nullsLast(Comparator.reverseOrder())).toList()) {
+            List<QcRecord> dayRecs = byDay.get(day);
+            renderDayHeader(document, day, dayRecs.size(),
+                dayRecs.stream().map(QcRecord::getStatus).toList());
+            for (Group<QcRecord> reference : QcReferenceReportGrouping.groups(dayRecs)) {
                 PdfPTable t = ReportV2PdfTheme.table(new float[] {1.8F, 1F, 1.3F, 1F, 1F, 1F, 1F, 1.4F, 1.6F});
-                addReferenceHeader(t, reference.record(), day);
+                addReferenceHeader(t, reference.record(), records, day);
                 ReportV2PdfTheme.headerRow(t, "Exame", "Nivel", "Lote", "Valor", "Target", "CV%",
                     "Z-score", "Equip.", "Status");
                 t.setHeaderRows(2);
                 boolean alt = false;
-                for (QcRecord r : dayRecs) {
+                for (QcRecord r : reference.items()) {
                     ReportV2PdfTheme.bodyRow(t, alt,
                         ReportV2PdfTheme.safe(r.getExamName()),
                         ReportV2PdfTheme.safe(r.getLevel()),
@@ -844,15 +838,15 @@ public class CqOperationalV2Generator implements ReportGenerator {
     }
 
     /** Repeated together with column titles when a reference table spans pages. */
-    private void addReferenceHeader(PdfPTable table, QcRecord record, LocalDate day) {
-        String text = "Referencia: " + QcReferenceReportGrouping.referenceLabel(record)
-            + "\n" + QcReferenceReportGrouping.referenceContext(record)
+    private void addReferenceHeader(PdfPTable table, QcRecord record, List<QcRecord> scope, LocalDate day) {
+        String text = "Referencia: " + QcReferenceReportGrouping.referenceLabel(record, scope)
             + (day == null ? "" : " | Data: " + ReportV2PdfTheme.formatDate(day));
-        PdfPCell cell = new PdfPCell(new Phrase(text, ReportV2PdfTheme.BODY_BOLD_FONT));
+        PdfPCell cell = new PdfPCell(new Phrase(text, ReportV2PdfTheme.META_FONT));
         cell.setColspan(table.getNumberOfColumns());
-        cell.setPadding(6F);
-        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
-        cell.setBorderColor(ReportV2PdfTheme.BORDER);
+        cell.setPadding(0F);
+        cell.setPaddingBottom(3F);
+        cell.setBackgroundColor(Color.WHITE);
+        cell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
         table.addCell(cell);
     }
 
@@ -1033,11 +1027,6 @@ public class CqOperationalV2Generator implements ReportGenerator {
                 .collect(Collectors.toList());
         }
         return records;
-    }
-
-    private String chartTitle(QcRecord record) {
-        return safe(record.getExamName()) + " " + safe(record.getLevel())
-            + "\n" + QcReferenceReportGrouping.referenceLabel(record);
     }
 
     private String legacyReferenceGroupingKey(QcRecord record) {

@@ -139,6 +139,38 @@ class PdfReportServiceTest {
     }
 
     @Test
+    void simpleReferenceCaptionRemainsWithRowsAcrossPagesWithoutTechnicalBlocks() throws Exception {
+        UUID referenceId = UUID.randomUUID();
+        QcReferenceValue reference = QcReferenceValue.builder().id(referenceId).name("Controle rotina").build();
+        LocalDate day = LocalDate.now().withDayOfMonth(1);
+        List<QcRecord> records = java.util.stream.IntStream.range(0, 100)
+            .mapToObj(i -> referenceRecord(reference, day, 81D)).toList();
+        when(qcRecordRepository.findByAreaAndDateRange(eq("bioquimica"), any(), any())).thenReturn(records);
+        when(postCalibrationRecordRepository.findByQcRecordAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of());
+
+        PdfReader reader = new PdfReader(pdfReportService.generateQcPdf("bioquimica", "year", null, day.getYear()));
+        try {
+            PdfTextExtractor extractor = new PdfTextExtractor(reader);
+            int pagesWithRows = 0;
+            for (int page = 1; page <= reader.getNumberOfPages(); page++) {
+                String text = extractor.getTextFromPage(page).replaceAll("\\s+", " ");
+                assertThat(text).doesNotContain(referenceId.toString(), "ID:",
+                    "Contexto do registro", "Nome da referência conforme cadastro atual");
+                if (text.contains("81,00")) {
+                    pagesWithRows++;
+                    assertThat(text).contains("Referência: Controle rotina (cadastro atual)");
+                    assertThat(text.indexOf("Referência:")).isLessThan(text.indexOf("Data"));
+                    assertThat(text.indexOf("Data")).isLessThan(text.indexOf("81,00"));
+                }
+            }
+            assertThat(pagesWithRows).isGreaterThan(1);
+        } finally {
+            reader.close();
+        }
+    }
+
+    @Test
     @DisplayName("deve gerar PDF de bioquímica no mês corrido com registros e retornar bytes válidos começando com %PDF")
     void generateQcPdf_bioquimica_mesCorrido_retornaPdfValido() {
         QcRecord record = QcRecord.builder()

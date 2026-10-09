@@ -178,15 +178,14 @@ public class PdfReportService {
                     return;
                 }
 
-                document.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, BODY_FONT));
                 for (var group : QcReferenceReportGrouping.groups(records)) {
                     PdfPTable table = createTable(new float[] {2.0F, 3.4F, 1.3F, 1.7F, 1.6F, 1.6F, 1.4F, 1.3F, 1.8F, 1.6F, 1.8F});
                     PdfPCell referenceHeader = new PdfPCell(new Phrase(
-                        "Referência: " + QcReferenceReportGrouping.referenceLabel(group.record()) + "\n"
-                            + QcReferenceReportGrouping.referenceContext(group.record()), HEADER_FONT));
+                        "Referência: " + QcReferenceReportGrouping.referenceLabel(group.record(), records), BODY_FONT));
                     referenceHeader.setColspan(11);
-                    referenceHeader.setBackgroundColor(HEADER_COLOR);
-                    referenceHeader.setPadding(6F);
+                    referenceHeader.setBorder(Rectangle.NO_BORDER);
+                    referenceHeader.setPadding(0F);
+                    referenceHeader.setPaddingBottom(4F);
                     table.addCell(referenceHeader);
                     addHeaderRow(table, "Data", "Exame", "Nível", "Lote", "Valor", "Alvo", "CV%", "Lim.", "Status", "Pós-CQ", "Status Pós");
                     table.setHeaderRows(2);

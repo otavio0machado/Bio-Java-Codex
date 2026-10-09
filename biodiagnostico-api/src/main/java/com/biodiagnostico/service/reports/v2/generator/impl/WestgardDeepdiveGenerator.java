@@ -142,9 +142,6 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
 
             List<WestgardViolation> violations = loadViolations(rf);
             boolean bioquimica = "bioquimica".equals(rf.area);
-            if (bioquimica && !violations.isEmpty()) {
-                doc.add(new Paragraph(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, ReportV2PdfTheme.META_FONT));
-            }
 
             // Resumo
             doc.add(ReportV2PdfTheme.section("Resumo"));
@@ -481,9 +478,10 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
                 v -> v.getQcRecord() == null ? null : v.getQcRecord().getDate(),
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
             .collect(Collectors.toList());
+        List<QcRecord> referenceScope = sorted.stream().map(WestgardViolation::getQcRecord).toList();
         for (var group : violationGroups(sorted, bioquimica)) {
             PdfPTable t = ReportV2PdfTheme.table(new float[] {1F, 1F, 1.3F, 1.4F, 1F, 3F});
-            if (bioquimica) addReferenceHeader(t, group.record());
+            if (bioquimica) addReferenceHeader(t, group.record(), referenceScope);
             ReportV2PdfTheme.headerRow(t, "Data", "Regra", "Severidade", "Lote", "Nivel", "Descricao");
             if (bioquimica) t.setHeaderRows(2);
             boolean alt = false;
@@ -511,9 +509,10 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
 
     private void renderLatestViolations(Document doc, List<WestgardViolation> violations,
             boolean bioquimica) throws DocumentException {
+        List<QcRecord> referenceScope = violations.stream().map(WestgardViolation::getQcRecord).toList();
         for (var group : violationGroups(violations, bioquimica)) {
             PdfPTable table = ReportV2PdfTheme.table(new float[] {1.2F, 1.3F, 2.2F, 1.3F, 1.5F, 3.5F});
-            if (bioquimica) addReferenceHeader(table, group.record());
+            if (bioquimica) addReferenceHeader(table, group.record(), referenceScope);
             ReportV2PdfTheme.headerRow(table, "Regra", "Severidade", "Exame", "Lote", "Data", "Descricao");
             if (bioquimica) table.setHeaderRows(2);
             boolean alt = false;
@@ -531,12 +530,13 @@ public class WestgardDeepdiveGenerator implements ReportGenerator {
         }
     }
 
-    private void addReferenceHeader(PdfPTable table, QcRecord record) {
-        PdfPCell cell = new PdfPCell(new Phrase("Referência: " + QcReferenceReportGrouping.referenceLabel(record) + "\n"
-            + QcReferenceReportGrouping.referenceContext(record), ReportV2PdfTheme.META_FONT));
+    private void addReferenceHeader(PdfPTable table, QcRecord record, List<QcRecord> referenceScope) {
+        PdfPCell cell = new PdfPCell(new Phrase("Referência: "
+            + QcReferenceReportGrouping.referenceLabel(record, referenceScope), ReportV2PdfTheme.META_FONT));
         cell.setColspan(table.getNumberOfColumns());
-        cell.setBackgroundColor(ReportV2PdfTheme.BRAND_LIGHT);
-        cell.setPadding(6F);
+        cell.setBorder(com.lowagie.text.Rectangle.NO_BORDER);
+        cell.setPadding(0F);
+        cell.setPaddingBottom(4F);
         table.addCell(cell);
     }
 

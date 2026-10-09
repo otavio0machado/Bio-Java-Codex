@@ -33,7 +33,9 @@ class QcReferenceReportGroupingTest {
         assertThat(groups.getFirst().record()).isSameAs(changedSnapshot);
         assertThat(groups.getLast().items()).containsExactly(b);
         assertThat(QcReferenceReportGrouping.key(a)).isEqualTo(QcReferenceReportGrouping.key(changedSnapshot));
-        assertThat(QcReferenceReportGrouping.referenceLabel(a)).isEqualTo("Controle | ID: " + REF_A);
+        assertThat(QcReferenceReportGrouping.referenceLabel(a)).isEqualTo("Controle (cadastro atual)");
+        assertThat(QcReferenceReportGrouping.referenceLabel(a, List.of(b, changedSnapshot, a)))
+            .isEqualTo("Controle (cadastro atual) | ID: " + REF_A);
         assertThat(QcReferenceReportGrouping.referenceContext(changedSnapshot))
             .startsWith("Contexto do registro usado no cabeçalho: ").contains("Nome antigo", "N2", "L-antigo");
         assertThat(QcReferenceReportGrouping.referenceContext(a))
@@ -104,9 +106,38 @@ class QcReferenceReportGroupingTest {
         assertThat(groups).hasSize(2);
         assertThat(groups.getFirst().items()).containsExactly(newer, older);
         assertThat(groups.getLast().items()).containsExactly(unlinked);
-        assertThat(QcReferenceReportGrouping.referenceLabel(measurement)).contains("Nome atual", REF_A.toString());
+        assertThat(QcReferenceReportGrouping.referenceLabel(measurement)).isEqualTo("Nome atual (cadastro atual)");
         assertThat(measurement.getTargetValue()).isEqualTo(100D);
         assertThat(reference.getTargetValue()).isEqualTo(999D);
+    }
+
+    @Test
+    void distinctNamesAndRepeatedMeasurementsOfOneIdentityNeedNoUuid() {
+        QcRecord a = record(1, reference(REF_A, "Controle A"), DAY, CREATED);
+        QcRecord same = record(2, a.getReference(), DAY.minusDays(1), CREATED);
+        QcRecord b = record(3, reference(REF_B, "Controle B"), DAY, CREATED);
+
+        assertThat(QcReferenceReportGrouping.referenceLabel(a, List.of(a, same, b)))
+            .isEqualTo("Controle A (cadastro atual)");
+        assertThat(QcReferenceReportGrouping.referenceLabel(b, List.of(a, same, b)))
+            .isEqualTo("Controle B (cadastro atual)");
+    }
+
+    @Test
+    void blankNamesAndLiteralPlaceholderAreDisambiguatedByDisplayedName() {
+        QcRecord blank = record(1, reference(REF_A, " "), DAY, CREATED);
+        QcRecord missing = record(2, reference(REF_B, null), DAY.minusDays(1), CREATED);
+        QcRecord dash = record(3, reference(new UUID(0, 3), "-"), DAY, CREATED);
+        QcRecord legacy = record(4, null, DAY, CREATED);
+        List<QcRecord> scope = List.of(blank, missing, dash, legacy);
+
+        assertThat(QcReferenceReportGrouping.referenceLabel(blank, scope)).isEqualTo("- (cadastro atual) | ID: " + REF_A);
+        assertThat(QcReferenceReportGrouping.referenceLabel(missing, scope)).isEqualTo("- (cadastro atual) | ID: " + REF_B);
+        assertThat(QcReferenceReportGrouping.referenceLabel(dash, scope))
+            .isEqualTo("- (cadastro atual) | ID: " + new UUID(0, 3));
+        assertThat(QcReferenceReportGrouping.referenceLabel(legacy, scope)).isEqualTo("Sem referência vinculada");
+        assertThat(QcReferenceReportGrouping.referenceLabel(null)).isEqualTo("Sem referência vinculada");
+        assertThat(QcReferenceReportGrouping.referenceLabel(blank, List.of(blank, legacy))).isEqualTo("- (cadastro atual)");
     }
 
     private QcRecord record(int id, QcReferenceValue reference, LocalDate date, Instant createdAt) {

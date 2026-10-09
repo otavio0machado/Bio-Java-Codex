@@ -74,7 +74,7 @@ class CqOperationalReferenceGroupingTest {
     }
 
     @Test
-    void historySeparatesHomonymsAndOrdersReferenceDateCreationIdWithSnapshots() {
+    void historySeparatesHomonymsAcrossDaysAndOrdersDateThenReferenceCreationIdWithSnapshots() {
         QcReferenceValue a = reference(REF_A, EXAM_A, "Controle comum atual");
         a.setIsActive(false);
         a.setValidUntil(DAY.minusYears(1));
@@ -94,12 +94,13 @@ class CqOperationalReferenceGroupingTest {
         String history = text.substring(text.indexOf("Historico diario"));
         String tables = history.substring(history.indexOf("Referencia:"));
 
-        assertThat(text).contains(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, "Estatistica por referencia");
+        assertThat(text).contains("Estatistica por exame");
+        assertThat(text).doesNotContain(QcReferenceReportGrouping.REFERENCE_METADATA_NOTE,
+            "Contexto do registro usado no cabeçalho:", "Estatistica por referencia");
         assertThat(history).contains("Controle comum atual", REF_A.toString(), REF_B.toString(), "Sem referência vinculada");
-        assertOrder(tables, REF_A.toString(), "HIST-A-CRIACAO", "HIST-A-ID3", "HIST-A-ID4", "HIST-A-ANTIGO",
-            REF_B.toString(), "HIST-B", "Sem referência vinculada", "HIST-LEGADO");
-        String aHistory = tables.substring(0, tables.indexOf(REF_B.toString()));
-        assertOrder(aHistory, "04/10/2026", "03/10/2026");
+        assertOrder(tables, "Sem referência vinculada", "HIST-LEGADO", REF_B.toString(), "HIST-B",
+            REF_A.toString(), "HIST-A-CRIACAO", "HIST-A-ID3", "HIST-A-ID4", "HIST-A-ANTIGO");
+        assertOrder(history, "06/10/2026", "05/10/2026", "04/10/2026", "03/10/2026");
         assertThat(history).contains("LOTE-SNAPSHOT", "90,89", "2,31", "1,11");
         assertThat(history.replace(" ", "")).contains("REPROVADO");
         assertThat(text).doesNotContain("9999,00", "LOTE-CADASTRO-EDITADO");
@@ -118,9 +119,51 @@ class CqOperationalReferenceGroupingTest {
 
         String text = text(Map.of("examIds", List.of(EXAM_A), "includeDailyHistory", false));
 
-        assertThat(text).contains("INCLUIDA", REF_A.toString());
+        assertThat(text).contains("Referencia: INCLUIDA");
+        assertThat(text).doesNotContain(REF_A.toString(), QcReferenceReportGrouping.REFERENCE_METADATA_NOTE,
+            "Contexto do registro usado no cabeçalho:");
         assertThat(text).doesNotContain("EXCLUIDA", REF_B.toString(), "Sem referência vinculada", "Historico diario");
         verify(records, org.mockito.Mockito.atLeastOnce()).findByAreaAndDateRange("bioquimica", DAY.minusDays(10), DAY.plusDays(10));
+    }
+
+    @Test
+    void dailyHeaderCountsAllReferencesOnceAndCaptionPrecedesEachTable() {
+        QcRecord approved = record(1, reference(REF_A, EXAM_A, "Controle A"), DAY, CREATED, "MEDICAO-A1");
+        approved.setStatus("APROVADO");
+        QcRecord rejected = record(2, approved.getReference(), DAY, CREATED, "MEDICAO-A2");
+        QcRecord alerted = record(3, reference(REF_B, EXAM_A, "Controle B"), DAY, CREATED, "MEDICAO-B1");
+        alerted.setStatus("ALERTA");
+        when(records.findByAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(alerted, rejected, approved));
+
+        String text = text(Map.of());
+        String history = text.substring(text.indexOf("Historico diario"));
+
+        assertThat(history).contains("04/10/2026 3 registros 1 aprovados 1 alertas 1 reprovados");
+        assertThat(history.split("3 registros", -1)).hasSize(2);
+        assertOrder(history, "Referencia: Controle A", "Exame Nivel Lote", "MEDICAO-A1", "MEDICAO-A2",
+            "Referencia: Controle B", "Exame Nivel Lote", "MEDICAO-B1");
+        assertThat(text).doesNotContain(REF_A.toString(), REF_B.toString(),
+            QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, "Contexto do registro usado no cabeçalho:");
+    }
+
+    @Test
+    void missingDateAppearsAfterKnownDaysAndKeepsMissingStatusRecord() {
+        QcReferenceValue reference = reference(REF_A, EXAM_A, "Controle A");
+        QcRecord older = record(1, reference, DAY.minusDays(1), CREATED, "DIA-ANTIGO");
+        QcRecord latest = record(2, reference, DAY, CREATED, "DIA-RECENTE");
+        QcRecord unknown = record(3, reference, null, null, "SEM-DATA");
+        unknown.setStatus(null);
+        when(records.findByAreaAndDateRange(eq("bioquimica"), any(), any()))
+            .thenReturn(List.of(unknown, older, latest));
+
+        String text = text(Map.of());
+        String history = text.substring(text.indexOf("Historico diario"));
+
+        // The PDF extractor emits standalone day headings before table content.
+        assertOrder(history, "04/10/2026", "03/10/2026", "Data não informada");
+        assertOrder(history, "DIA-RECENTE", "DIA-ANTIGO", "SEM-DATA");
+        assertThat(history.split("1 registros", -1)).hasSize(4);
     }
 
     @Test
@@ -145,7 +188,7 @@ class CqOperationalReferenceGroupingTest {
     }
 
     @Test
-    void chartIdentifiesReferenceUuidAndKeepsOriginalSnapshotTargetAndSd() {
+    void chartKeepsExamTitleWithOneSimpleReferenceCaptionAndOriginalSnapshotTargetAndSd() {
         QcReferenceValue reference = reference(REF_A, EXAM_A, "Controle grafico");
         reference.setTargetValue(9999D);
         reference.setTargetSd(888D);
@@ -160,9 +203,12 @@ class CqOperationalReferenceGroupingTest {
         String text = text(Map.of("includeDailyHistory", false));
 
         verify(charts).renderLeveyJennings(anyList(), eq(123.45D), eq(6.78D),
-            eq("Glicose N1\nControle grafico | ID: " + REF_A));
-        assertThat(text).contains("Graficos Levey-Jennings", "Controle grafico", REF_A.toString(), "123,45");
-        assertThat(text).doesNotContain("9999,00", "888,00");
+            eq("Glicose N1"));
+        assertThat(text).contains("Graficos Levey-Jennings", "Controle grafico", "123,45");
+        assertThat(text).doesNotContain("9999,00", "888,00", REF_A.toString(),
+            QcReferenceReportGrouping.REFERENCE_METADATA_NOTE, "Contexto do registro usado no cabeçalho:");
+        String chartSection = text.substring(text.indexOf("Graficos Levey-Jennings"));
+        assertThat(chartSection.split("Controle grafico", -1)).hasSize(2);
     }
 
     @Test
@@ -180,7 +226,28 @@ class CqOperationalReferenceGroupingTest {
 
         assertThat(text).contains("SELECIONADA-Z", "SELECIONADA-B-50", "1 violacoes adicionais omitidas.");
         assertThat(text).doesNotContain("OMITIDA-51", "A excluida");
-        assertOrder(text, REF_A.toString(), "03/10/2026", REF_B.toString(), "04/10/2026");
+        assertOrder(text, "Referencia: B selecionada", "03/10/2026", "Referencia: Z selecionada", "04/10/2026");
+        assertThat(text).doesNotContain(REF_A.toString(), REF_B.toString());
+    }
+
+    @Test
+    void violationCaptionDisambiguationUsesSelectedRowsAndItsOwnSection() {
+        QcRecord a = record(1, reference(REF_A, EXAM_A, "Controle comum"), DAY, CREATED, "A");
+        QcRecord b = record(2, reference(REF_B, EXAM_A, "Controle comum"), DAY, CREATED, "B");
+        when(records.findByAreaAndDateRange(eq("bioquimica"), any(), any())).thenReturn(List.of(a, b));
+        List<WestgardViolation> rows = new ArrayList<>();
+        for (int n = 1; n <= 50; n++) rows.add(violation(n, a, "SELECIONADA-" + n));
+        rows.add(violation(51, b, "OMITIDA-51"));
+        when(violations.findByAreaAndPeriod("bioquimica", DAY.minusDays(10), DAY.plusDays(10)))
+            .thenReturn(rows);
+
+        String text = text(Map.of("includeDailyHistory", false));
+        // Section headings precede all table content in PDF extraction; anchor to the rule columns.
+        String westgard = text.substring(text.lastIndexOf("Referencia:", text.indexOf("Regra")));
+
+        assertThat(text).contains(REF_A.toString(), REF_B.toString());
+        assertThat(westgard).contains("Referencia: Controle comum", "SELECIONADA-50", "1 violacoes adicionais omitidas.");
+        assertThat(westgard).doesNotContain(REF_A.toString(), REF_B.toString(), "OMITIDA-51");
     }
 
     @Test
@@ -195,16 +262,18 @@ class CqOperationalReferenceGroupingTest {
 
         String text = text(Map.of("includeDailyHistory", false));
 
-        assertOrder(text, REF_A.toString(), "EVENTO-A-NOVO", "05/10/2026", "EVENTO-A-ANTIGO", "04/10/2026",
-            REF_B.toString(), "EVENTO-B", "06/10/2026");
+        assertOrder(text, "Referencia: A pós", "EVENTO-A-NOVO", "05/10/2026", "EVENTO-A-ANTIGO", "04/10/2026",
+            "Referencia: B pós", "EVENTO-B", "06/10/2026");
         assertThat(text).contains("5,00", "3,00", "-2,00", "EFICAZ");
-        assertThat(text).doesNotContain("29/09/2026", "08/10/2026");
+        String calibrationRows = text.substring(text.indexOf("Referencia: A pós"));
+        calibrationRows = calibrationRows.substring(0, calibrationRows.indexOf(" · Pagina "));
+        assertThat(calibrationRows).doesNotContain("29/09/2026", "08/10/2026", REF_A.toString(), REF_B.toString());
         assertThat(a.getStatus()).isEqualTo("REPROVADO");
         assertThat(a.getCv()).isEqualTo(2.31D);
     }
 
     @Test
-    void multipageHistoryRepeatsReferenceIdAndDateAlongsideMeasurementRows() throws Exception {
+    void multipageHistoryRepeatsSimpleReferenceCaptionAndDateAlongsideMeasurementRows() throws Exception {
         QcReferenceValue reference = reference(REF_A, EXAM_A, "Controle multipagina");
         List<QcRecord> values = new ArrayList<>();
         for (int n = 1; n <= 110; n++) values.add(record(n, reference, DAY, CREATED, "PAGINA" + n));
@@ -219,7 +288,9 @@ class CqOperationalReferenceGroupingTest {
                 String page = normalize(extractor.getTextFromPage(n));
                 if (page.contains("PAGINA")) {
                     historyPages++;
-                    assertThat(page).contains(REF_A.toString(), "Controle multipagina", "04/10/2026");
+                    assertThat(page).contains("Referencia: Controle multipagina", "04/10/2026");
+                    assertThat(page).doesNotContain(REF_A.toString(),
+                        "Contexto do registro usado no cabeçalho:", QcReferenceReportGrouping.REFERENCE_METADATA_NOTE);
                 }
             }
             assertThat(historyPages).isGreaterThan(1);
